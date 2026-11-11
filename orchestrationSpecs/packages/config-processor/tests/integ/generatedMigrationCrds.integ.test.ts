@@ -133,6 +133,18 @@ async function copyTextToContainer(container: StartedK3sContainer, contents: str
     }
 }
 
+async function installGeneratedMigrationPolicies(container: StartedK3sContainer, namespace: string) {
+    await copyTextToContainer(container, generateMigrationCrdsYaml(), "/tmp/migrationCrds.yaml");
+    await copyTextToContainer(container, generateValidatingAdmissionPoliciesYaml(), "/tmp/migrationVaps.yaml");
+    await execOrThrow(container, ["kubectl", "apply", "-f", "/tmp/migrationCrds.yaml"],
+        "apply generated migration CRDs");
+    await execOrThrow(container, ["kubectl", "wait", "--for=condition=Established", "--timeout=90s", "crd",
+        "-l", "migrations.opensearch.org/generated=true"], "wait for generated migration CRDs");
+    await execOrThrow(container, ["kubectl", "apply", "-f", "/tmp/migrationVaps.yaml"],
+        "apply generated migration VAPs");
+    await execOrThrow(container, ["kubectl", "create", "namespace", namespace], "create namespace");
+}
+
 function manifestForCreate(item: any) {
     const {status, ...withoutStatus} = item;
     void status;
@@ -376,13 +388,7 @@ describe("generated migration CRDs live compatibility", () => {
 
     test("gates only increases of RFS maxConnections and leaves initialLeaseDuration safe", async () => {
         const namespace = "rfs-throughput-knobs";
-        await copyTextToContainer(container, generateMigrationCrdsYaml(), "/tmp/migrationCrds.yaml");
-        await copyTextToContainer(container, generateValidatingAdmissionPoliciesYaml(), "/tmp/migrationVaps.yaml");
-        await execOrThrow(container, ["kubectl", "apply", "-f", "/tmp/migrationCrds.yaml"], "apply generated migration CRDs");
-        await execOrThrow(container, ["kubectl", "wait", "--for=condition=Established", "--timeout=90s", "crd",
-            "-l", "migrations.opensearch.org/generated=true"], "wait for generated migration CRDs");
-        await execOrThrow(container, ["kubectl", "apply", "-f", "/tmp/migrationVaps.yaml"], "apply generated migration VAPs");
-        await execOrThrow(container, ["kubectl", "create", "namespace", namespace], "create namespace");
+        await installGeneratedMigrationPolicies(container, namespace);
 
         const resource = "snapshotmigrations.migrations.opensearch.org/knobs";
         await copyTextToContainer(container, stringify({
@@ -418,13 +424,7 @@ describe("generated migration CRDs live compatibility", () => {
 
     test("override annotations for the current run override field rules but not lifecycle guards", async () => {
         const namespace = "change-restriction-override";
-        await copyTextToContainer(container, generateMigrationCrdsYaml(), "/tmp/migrationCrds.yaml");
-        await copyTextToContainer(container, generateValidatingAdmissionPoliciesYaml(), "/tmp/migrationVaps.yaml");
-        await execOrThrow(container, ["kubectl", "apply", "-f", "/tmp/migrationCrds.yaml"], "apply generated migration CRDs");
-        await execOrThrow(container, ["kubectl", "wait", "--for=condition=Established", "--timeout=90s", "crd",
-            "-l", "migrations.opensearch.org/generated=true"], "wait for generated migration CRDs");
-        await execOrThrow(container, ["kubectl", "apply", "-f", "/tmp/migrationVaps.yaml"], "apply generated migration VAPs");
-        await execOrThrow(container, ["kubectl", "create", "namespace", namespace], "create namespace");
+        await installGeneratedMigrationPolicies(container, namespace);
 
         const fieldKey = (specPath: string) => `change-restriction-override.migrations.opensearch.org/${specPath}`;
         const allFieldsKey = "migrations.opensearch.org/change-restriction-override-all-fields";
@@ -499,13 +499,7 @@ describe("generated migration CRDs live compatibility", () => {
 
     test("refuses metadata transform changes on a running SnapshotMigration", async () => {
         const namespace = "metadata-transforms";
-        await copyTextToContainer(container, generateMigrationCrdsYaml(), "/tmp/migrationCrds.yaml");
-        await copyTextToContainer(container, generateValidatingAdmissionPoliciesYaml(), "/tmp/migrationVaps.yaml");
-        await execOrThrow(container, ["kubectl", "apply", "-f", "/tmp/migrationCrds.yaml"], "apply generated migration CRDs");
-        await execOrThrow(container, ["kubectl", "wait", "--for=condition=Established", "--timeout=90s", "crd",
-            "-l", "migrations.opensearch.org/generated=true"], "wait for generated migration CRDs");
-        await execOrThrow(container, ["kubectl", "apply", "-f", "/tmp/migrationVaps.yaml"], "apply generated migration VAPs");
-        await execOrThrow(container, ["kubectl", "create", "namespace", namespace], "create namespace");
+        await installGeneratedMigrationPolicies(container, namespace);
         await copyTextToContainer(container, stringify({
             apiVersion: "migrations.opensearch.org/v1alpha1",
             kind: "SnapshotMigration",

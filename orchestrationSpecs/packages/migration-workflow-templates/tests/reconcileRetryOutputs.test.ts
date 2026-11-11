@@ -11,8 +11,15 @@ describe("reconcile templates with a VAP retry loop", () => {
     const withRetryLoop = templates.filter(template =>
         (template.steps ?? []).flat().some((step: any) => step.name === "retryLoop"));
 
-    test("exist", () => {
-        expect(withRetryLoop.length).toBeGreaterThanOrEqual(6);
+    test("include every reconcile template that supports VAP recovery", () => {
+        expect(withRetryLoop.map(template => template.name)).toEqual(expect.arrayContaining([
+            "reconcilekafkaclusterresource",
+            "reconcilecapturedtrafficresource",
+            "reconcilecaptureproxyresource",
+            "reconciledatasnapshotresource",
+            "reconcilesnapshotmigrationresource",
+            "reconciletrafficreplayresource",
+        ]));
     });
 
     test.each(withRetryLoop.map(template => [template.name, template]))(

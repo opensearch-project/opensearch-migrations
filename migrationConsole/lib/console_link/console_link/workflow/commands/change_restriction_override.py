@@ -9,13 +9,12 @@ The annotation keys and the run-number comparison must match the generated Valid
 (orchestrationSpecs/packages/schemas/src/generateMigrationResources.ts).
 """
 
-import getpass
 import logging
 import re
 from datetime import datetime, timezone
 
 import click
-from kubernetes import client, config
+from kubernetes import client
 from kubernetes.client.rest import ApiException
 
 from .argo_utils import get_workflow
@@ -42,7 +41,7 @@ to a resource that is still running.
 
 
 class ChangeRestrictionOverrideError(Exception):
-    """A override request that can't proceed; the message says why."""
+    """An override request that can't proceed; the message says why."""
 
 
 def fields_from_denial(reason):
@@ -97,20 +96,6 @@ def check_resource_can_be_overridden(resource, kind, name):
         raise ChangeRestrictionOverrideError(f"{kind}/{name} is being deleted. Use 'workflow reset {name}' instead.")
 
 
-def _current_user():
-    try:
-        _, context = config.list_kube_config_contexts()
-        user = (context or {}).get('context', {}).get('user')
-        if user:
-            return user
-    except Exception:
-        pass
-    try:
-        return getpass.getuser()
-    except Exception:
-        return 'unknown'
-
-
 def plan(gate, requested_fields, all_fields):
     """Return (annotation keys, description of what is overridden) for a gate."""
     if all_fields:
@@ -145,9 +130,8 @@ def override_change_restrictions(namespace, workflow_name, gate, plural, request
         group=CRD_GROUP, version=CRD_VERSION, namespace=namespace, plural=plural, name=name,
         body={'metadata': {'annotations': {key: run_number for key in annotations}}})
 
-    user = _current_user()
     stamp = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
-    message = f"change-restriction override: {description} by {user} at {stamp}"
+    message = f"change-restriction override: {description} at {stamp}"
     logger.warning("%s on %s/%s for run %s (%s)", message, kind, name, run_number, ', '.join(annotations))
     client.CustomObjectsApi().patch_namespaced_custom_object_status(
         group=CRD_GROUP, version=CRD_VERSION, namespace=namespace, plural='approvalgates', name=gate.name,

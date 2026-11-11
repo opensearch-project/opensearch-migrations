@@ -78,7 +78,7 @@ class TestChangeRestrictionOverride:
         assert status['name'] == 'snapshotmigration.mig.vapretry'
         assert status['body']['status']['phase'] == 'Approved'
         assert status['body']['status']['message'].startswith(
-            'change-restriction override: documentBackfillDocTransformerConfig by ')
+            'change-restriction override: documentBackfillDocTransformerConfig at ')
         k8s.blockers.assert_not_called()
         assert 'OVERRIDING CHANGE RESTRICTIONS' in result.output
 
