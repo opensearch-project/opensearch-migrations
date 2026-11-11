@@ -1,5 +1,7 @@
 package org.opensearch.migrations.data;
 
+import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
@@ -10,7 +12,7 @@ public class IndexOptions {
     public static final String PROP_QUERIES_CACHE_ENABLED = "index.queries.cache.enabled";
     public static final String PROP_REQUESTS_CACHE_ENABLED = "index.requests.cache.enable";
 
-    private static final ObjectMapper mapper = new ObjectMapper();
+    private static final ObjectMapper mapper = ObjectMapperFactory.createDefaultMapper();
 
     /** Improvement to add more flexibility with these values */
     public final ObjectNode indexSettings = mapper.createObjectNode()

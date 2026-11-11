@@ -6,12 +6,12 @@ import java.util.function.BiPredicate;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
+import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
 import org.opensearch.migrations.bulkload.transformers.Transformer;
 import org.opensearch.migrations.bulkload.transformers.TransformerToIJsonTransformerAdapter;
 import org.opensearch.migrations.cli.Transformers;
 import org.opensearch.migrations.transform.TransformationLoader;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import lombok.Builder;
 import lombok.Getter;
@@ -278,7 +278,7 @@ public class MetadataTransformationRegistry {
             .addArgument(title)
             .addArgument(transformerConfig).log();
         try {
-            var mapper = new ObjectMapper()
+            var mapper = ObjectMapperFactory.createDefaultMapper()
                 .enable(SerializationFeature.INDENT_OUTPUT);
             var jsonNode = mapper.readTree(transformerConfig);
             var formattedTransformConfig = mapper.writeValueAsString(jsonNode);

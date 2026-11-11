@@ -11,6 +11,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -25,7 +26,7 @@ import reactor.core.publisher.Mono;
 @Slf4j
 public class SolrHttpClient {
 
-    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final ObjectMapper MAPPER = ObjectMapperFactory.createDefaultMapper();
 
     private final HttpClient httpClient;
     private final ConnectionContext connectionContext;

@@ -25,7 +25,7 @@ import reactor.util.retry.Retry;
 @Getter
 @Slf4j
 public class OpenSearchClientFactory {
-    private static final ObjectMapper objectMapper = new ObjectMapper();
+    private static final ObjectMapper objectMapper = ObjectMapperFactory.createDefaultMapper();
     private static final Retry RETRY_WHEN_NOT_4XX_STRATEGY = Retry.max(1)
         .filter(throwable -> !(throwable instanceof OpenSearchClient.UnexpectedStatusCode &&
             ((OpenSearchClient.UnexpectedStatusCode) throwable).response.statusCode >= 400 &&

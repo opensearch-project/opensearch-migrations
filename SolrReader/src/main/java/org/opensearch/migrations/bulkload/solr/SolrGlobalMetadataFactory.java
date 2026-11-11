@@ -1,5 +1,6 @@
 package org.opensearch.migrations.bulkload.solr;
 
+import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
 import org.opensearch.migrations.bulkload.common.SnapshotRepo.Provider;
 import org.opensearch.migrations.bulkload.models.GlobalMetadata;
 
@@ -13,7 +14,7 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class SolrGlobalMetadataFactory implements GlobalMetadata.Factory {
 
-    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final ObjectMapper MAPPER = ObjectMapperFactory.createDefaultMapper();
 
     @Override
     public GlobalMetadata fromRepo(String snapshotName) {

@@ -19,6 +19,7 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
+import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
 import org.opensearch.migrations.bulkload.tracing.IWorkCoordinationContexts;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -186,7 +187,7 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
         this.httpClient = httpClient;
         this.workerId = workerId;
         this.clock = clock;
-        this.objectMapper = new ObjectMapper();
+        this.objectMapper = ObjectMapperFactory.createDefaultMapper();
         this.workItemConsumer = workItemConsumer;
     }
 

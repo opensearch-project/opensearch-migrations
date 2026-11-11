@@ -6,13 +6,13 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
+import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.common.bulk.IndexOp;
 import org.opensearch.migrations.bulkload.common.bulk.operations.IndexOperationMeta;
 import org.opensearch.migrations.data.workloads.Workload;
 
 import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
@@ -67,7 +67,7 @@ public class WorkloadGenerator {
                         .type(type)
                         .routing(routing)
                         .build())
-                    .document(new ObjectMapper().convertValue(doc, new TypeReference<>() {}))
+                    .document(ObjectMapperFactory.createDefaultMapper().convertValue(doc, new TypeReference<>() {}))
                     .build();
             })
             .collect(Collectors.toList());

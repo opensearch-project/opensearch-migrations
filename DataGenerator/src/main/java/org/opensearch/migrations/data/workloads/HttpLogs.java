@@ -5,6 +5,7 @@ import java.util.Random;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
+import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
 import org.opensearch.migrations.data.IFieldCreator;
 import org.opensearch.migrations.data.IRandomDataBuilders;
 
@@ -17,7 +18,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
  */
 public class HttpLogs implements Workload, IFieldCreator, IRandomDataBuilders {
 
-    private static final ObjectMapper mapper = new ObjectMapper();
+    private static final ObjectMapper mapper = ObjectMapperFactory.createDefaultMapper();
     private static final String[] HTTP_METHODS = { "GET", "POST", "PUT", "DELETE" };
     private static final int[] RESPONSE_CODES = { 200, 201, 400, 401, 403, 404, 500 };
     private static final String[] URLS = {

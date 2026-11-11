@@ -1,6 +1,7 @@
 package org.opensearch.migrations.cli;
 
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
+import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
 import org.opensearch.migrations.bulkload.common.S3Repo;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.cluster.ClusterReader;
@@ -10,7 +11,6 @@ import org.opensearch.migrations.cluster.RemoteCluster;
 import org.opensearch.migrations.commands.JsonOutput;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import lombok.Builder;
 import lombok.Getter;
@@ -77,7 +77,7 @@ public class Clusters implements JsonOutput {
     public JsonNode asJsonOutput() {
         var root = JsonNodeFactory.instance.objectNode();
 
-        var mapper = new ObjectMapper();
+        var mapper = ObjectMapperFactory.createDefaultMapper();
         if (source != null) {
             var src = root.putObject("source");
             src.put("type", source.getFriendlyTypeName());

@@ -1,5 +1,6 @@
 package org.opensearch.migrations.bulkload.version_es_1_7;
 
+import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
 import org.opensearch.migrations.bulkload.common.RfsException;
 import org.opensearch.migrations.bulkload.common.SnapshotRepo;
 import org.opensearch.migrations.bulkload.models.IndexMetadata;
@@ -13,7 +14,7 @@ import static org.opensearch.migrations.bulkload.version_es_1_7.ElasticsearchCon
 
 public class IndexMetadataFactory_ES_1_7 implements IndexMetadata.Factory {
     private final SnapshotRepo.Provider repoDataProvider;
-    private static final ObjectMapper objectMapper = new ObjectMapper();
+    private static final ObjectMapper objectMapper = ObjectMapperFactory.createDefaultMapper();
 
     public IndexMetadataFactory_ES_1_7(SnapshotRepo.Provider repoDataProvider) {
         this.repoDataProvider = repoDataProvider;

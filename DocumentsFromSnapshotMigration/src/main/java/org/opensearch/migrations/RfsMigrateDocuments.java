@@ -33,6 +33,7 @@ import org.opensearch.migrations.bulkload.common.FileSystemRepo;
 import org.opensearch.migrations.bulkload.common.FilterScheme;
 import org.opensearch.migrations.bulkload.common.GcsRepo;
 import org.opensearch.migrations.bulkload.common.GcsUri;
+import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.RepoUri;
@@ -86,7 +87,6 @@ import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
 import com.beust.jcommander.ParametersDelegate;
 import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.Getter;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
@@ -1034,7 +1034,7 @@ public class RfsMigrateDocuments {
     static BiFunction<WorkItem, WorkItemCursor, Map<String, Object>> committedMetricsReporter(
         String snapshotName, String previousSnapshotName, DeltaMode deltaMode, LongSupplier workItemDurationMillis
     ) {
-        var mapper = new ObjectMapper();
+        var mapper = ObjectMapperFactory.createDefaultMapper();
         return (workItem, cursor) -> {
             var record = WorkItemMetricsRecord.builder()
                 .indexName(workItem.getIndexName())

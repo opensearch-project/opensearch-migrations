@@ -1,5 +1,7 @@
 package org.opensearch.migrations.data;
 
+import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
@@ -7,7 +9,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
  * Helpers to build fields for index mappings.
  */
 public interface IFieldCreator {
-    ObjectMapper mapper = new ObjectMapper();
+    ObjectMapper mapper = ObjectMapperFactory.createDefaultMapper();
 
     default ObjectNode createField(ElasticsearchType type) {
         String typeString = type.getValue();

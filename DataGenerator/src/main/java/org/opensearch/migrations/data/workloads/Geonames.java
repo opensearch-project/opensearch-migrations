@@ -5,6 +5,7 @@ import java.util.Random;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
+import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
 import org.opensearch.migrations.data.IFieldCreator;
 import org.opensearch.migrations.data.IRandomDataBuilders;
 
@@ -18,7 +19,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
  */
 public class Geonames implements Workload, IFieldCreator, IRandomDataBuilders {
 
-    private static final ObjectMapper mapper = new ObjectMapper();
+    private static final ObjectMapper mapper = ObjectMapperFactory.createDefaultMapper();
     private static final String[] COUNTRY_CODES = { "US", "DE", "FR", "GB", "CN", "IN", "BR" };
 
     @Override

@@ -8,6 +8,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
 import org.opensearch.migrations.bulkload.models.ComponentTemplate;
 import org.opensearch.migrations.bulkload.models.GlobalMetadata;
 import org.opensearch.migrations.bulkload.models.IndexMetadata;
@@ -16,6 +17,7 @@ import org.opensearch.migrations.bulkload.models.LegacyTemplate;
 import org.opensearch.migrations.bulkload.models.MigrationItem;
 import org.opensearch.migrations.transform.IJsonTransformer;
 
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.Lombok;
@@ -30,7 +32,9 @@ import org.slf4j.LoggerFactory;
 @Slf4j
 public class TransformerToIJsonTransformerAdapter implements Transformer {
     public static final String OUTPUT_TRANSFORMATION_JSON_LOGGER = "OutputTransformationJsonLogger";
-    private static final ObjectMapper MAPPER = new ObjectMapper();
+    // A transformation that returns a property these models do not have is an error, not something to drop.
+    private static final ObjectMapper MAPPER = ObjectMapperFactory.createDefaultMapper()
+        .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
     private final IJsonTransformer transformer;
     private final Logger transformerLogger;
 

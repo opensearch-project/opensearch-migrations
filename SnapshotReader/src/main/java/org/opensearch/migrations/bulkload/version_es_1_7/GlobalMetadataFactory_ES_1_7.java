@@ -4,6 +4,7 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
+import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
 import org.opensearch.migrations.bulkload.common.SnapshotRepo;
 import org.opensearch.migrations.bulkload.models.GlobalMetadata;
 
@@ -14,7 +15,7 @@ import com.fasterxml.jackson.dataformat.smile.SmileFactory;
 
 public class GlobalMetadataFactory_ES_1_7 implements GlobalMetadata.Factory {
     private final SnapshotRepo.Provider repoDataProvider;
-    private static final ObjectMapper objectMapper = new ObjectMapper();
+    private static final ObjectMapper objectMapper = ObjectMapperFactory.createDefaultMapper();
     
     public GlobalMetadataFactory_ES_1_7(SnapshotRepo.Provider repoDataProvider) {
         this.repoDataProvider = repoDataProvider;

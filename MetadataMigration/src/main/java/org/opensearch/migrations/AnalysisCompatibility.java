@@ -7,7 +7,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.function.Predicate;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
+
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.experimental.UtilityClass;
 
@@ -227,7 +228,7 @@ public class AnalysisCompatibility {
             return null;
         }
 
-        var mapper = new ObjectMapper();
+        var mapper = ObjectMapperFactory.createDefaultMapper();
         ObjectNode root = mapper.createObjectNode();
         ObjectNode removed = root.putObject("removed");
         for (var entry : perKindRemoved.entrySet()) {

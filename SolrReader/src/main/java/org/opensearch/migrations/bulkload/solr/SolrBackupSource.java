@@ -12,6 +12,7 @@ import java.util.stream.Stream;
 
 import org.opensearch.migrations.bulkload.common.DocumentChangeType;
 import org.opensearch.migrations.bulkload.common.LuceneDocumentChange;
+import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
 import org.opensearch.migrations.bulkload.lucene.FieldMappingContext;
 import org.opensearch.migrations.bulkload.lucene.LuceneIndexReader;
 import org.opensearch.migrations.bulkload.lucene.LuceneReader;
@@ -52,7 +53,7 @@ public class SolrBackupSource implements DocumentSource {
     private static final String INDEX_DIR_NAME = "index";
     private static final String SEGMENTS_FILE_PREFIX = "segments_";
     private static final String SEGMENT_DATA_FILE_PREFIX = "_";
-    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final ObjectMapper MAPPER = ObjectMapperFactory.createDefaultMapper();
 
     private final Path backupDir;
     private final String collectionName;

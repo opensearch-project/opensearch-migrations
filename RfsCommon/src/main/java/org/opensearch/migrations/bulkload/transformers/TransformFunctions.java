@@ -1,11 +1,13 @@
 package org.opensearch.migrations.bulkload.transformers;
 
+import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 public class TransformFunctions {
-    private static final ObjectMapper mapper = new ObjectMapper();
+    private static final ObjectMapper mapper = ObjectMapperFactory.createDefaultMapper();
     public static final String MAPPINGS_KEY_STR = "mappings";
     public static final String PROPERTIES_KEY_STR = "properties";
     public static final String SETTINGS_KEY_STR = "settings";

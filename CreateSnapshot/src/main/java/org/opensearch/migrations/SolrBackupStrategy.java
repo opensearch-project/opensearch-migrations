@@ -14,6 +14,7 @@ import java.util.function.BooleanSupplier;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
 import org.opensearch.migrations.bulkload.common.RepoUri;
 import org.opensearch.migrations.bulkload.common.S3Uri;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
@@ -50,7 +51,7 @@ import software.amazon.awssdk.services.s3.model.S3Exception;
 @Slf4j
 public class SolrBackupStrategy implements SourceBackupStrategy {
 
-    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final ObjectMapper MAPPER = ObjectMapperFactory.createDefaultMapper();
 
     private final CreateSnapshot.Args args;
     private final ConnectionContext connectionContext;

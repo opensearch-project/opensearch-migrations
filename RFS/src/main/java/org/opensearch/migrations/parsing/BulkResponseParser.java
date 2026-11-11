@@ -7,6 +7,7 @@ import java.util.List;
 
 import org.opensearch.migrations.BulkDocErrorTypes;
 import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
+import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
 
 import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonParser;
@@ -20,7 +21,7 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 @UtilityClass
 public class BulkResponseParser {
-    private static final JsonFactory jsonFactory = new JsonFactory();
+    private static final JsonFactory jsonFactory = ObjectMapperFactory.createDefaultMapper().getFactory();
     private static final String ITEMS_FIELD = "items";
     private static final String MALFORMED_RESPONSE_ITEM = "malformed_response_item";
 

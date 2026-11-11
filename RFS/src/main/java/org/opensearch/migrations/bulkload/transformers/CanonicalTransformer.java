@@ -2,6 +2,7 @@ package org.opensearch.migrations.bulkload.transformers;
 
 import java.util.List;
 
+import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
 import org.opensearch.migrations.bulkload.models.GlobalMetadata;
 import org.opensearch.migrations.bulkload.models.IndexMetadata;
 import org.opensearch.migrations.bulkload.version_os_2_11.GlobalMetadataData_OS_2_11;
@@ -21,7 +22,7 @@ import lombok.extern.slf4j.Slf4j;
  */
 @Slf4j
 public class CanonicalTransformer implements Transformer {
-    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final ObjectMapper MAPPER = ObjectMapperFactory.createDefaultMapper();
     private static final String SETTINGS_KEY = "settings";
 
     private final int awarenessAttributes;

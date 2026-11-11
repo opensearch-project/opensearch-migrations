@@ -6,6 +6,7 @@ import java.util.Random;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
+import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
 import org.opensearch.migrations.data.IFieldCreator;
 import org.opensearch.migrations.data.IRandomDataBuilders;
 
@@ -21,7 +22,7 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class Nested implements Workload, IFieldCreator, IRandomDataBuilders {
 
-    private static final ObjectMapper mapper = new ObjectMapper();
+    private static final ObjectMapper mapper = ObjectMapperFactory.createDefaultMapper();
     private static final String[] USER_NAMES = {
         "alice", "bob", "charlie", "david", "eve",
         "frank", "grace", "heidi", "ivan", "judy"

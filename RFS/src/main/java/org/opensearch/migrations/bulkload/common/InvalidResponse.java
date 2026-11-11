@@ -25,7 +25,7 @@ public class InvalidResponse extends RfsException {
     private static final Pattern MAPPING_PARAM_NAME = Pattern.compile("\\[([a-zA-Z0-9_.]+)\\s*:");
     private static final Pattern AWARENESS_ATTRIBUTE_EXCEPTION = Pattern.compile("expected total copies needs to be a multiple of total awareness attributes");
     private static final Pattern REMOVED_TOKEN_FILTER = Pattern.compile("The \\[([a-zA-Z0-9_.-]+)\\] token filter has been removed\\.?");
-    private static final ObjectMapper objectMapper = new ObjectMapper();
+    private static final ObjectMapper objectMapper = ObjectMapperFactory.createDefaultMapper();
     private final transient HttpResponse response;
     private static final String ERROR_STRING = "error";
     private static final String ROOT_CAUSE = "root_cause";

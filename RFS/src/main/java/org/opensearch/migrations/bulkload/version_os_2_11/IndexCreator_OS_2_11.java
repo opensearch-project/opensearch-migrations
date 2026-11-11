@@ -7,6 +7,7 @@ import org.opensearch.migrations.Flavor;
 import org.opensearch.migrations.MigrationMode;
 import org.opensearch.migrations.bulkload.common.IncompatibleReplicaCountException;
 import org.opensearch.migrations.bulkload.common.InvalidResponse;
+import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.common.RfsException;
 import org.opensearch.migrations.bulkload.common.SourceInternalIndexSettings;
@@ -26,7 +27,7 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 @AllArgsConstructor
 public class IndexCreator_OS_2_11 implements IndexCreator {
-    private static final ObjectMapper mapper = new ObjectMapper();
+    private static final ObjectMapper mapper = ObjectMapperFactory.createDefaultMapper();
 
     /**
      * Maps top-level index metadata fields from the snapshot to their corresponding

@@ -1,5 +1,7 @@
 package org.opensearch.migrations.bulkload.version_es_7_10;
 
+import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
+
 import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.core.JsonParser;
@@ -22,6 +24,7 @@ public class ElasticsearchConstants_ES_7_10 {
         // Taken from:
         // https://github.com/elastic/elasticsearch/blob/7.10/libs/x-content/src/main/java/org/elasticsearch/common/xcontent/smile/SmileXContent.java#L54
         SMILE_FACTORY = SmileFactory.builder()
+                .streamReadConstraints(ObjectMapperFactory.STREAM_READ_CONSTRAINTS)
                 .configure(SmileGenerator.Feature.ENCODE_BINARY_AS_7BIT, false)
                 .configure(JsonFactory.Feature.FAIL_ON_SYMBOL_HASH_OVERFLOW, false)
                 .build();

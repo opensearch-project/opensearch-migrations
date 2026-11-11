@@ -3,6 +3,8 @@ package org.opensearch.migrations.bulkload.solr;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
+import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -17,7 +19,7 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public final class SolrSchemaConverter {
 
-    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final ObjectMapper MAPPER = ObjectMapperFactory.createDefaultMapper();
 
     private static final String OS_INTEGER = "integer";
     private static final String OS_LONG = "long";

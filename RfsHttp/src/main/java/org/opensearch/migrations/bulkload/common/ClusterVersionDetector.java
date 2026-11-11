@@ -19,7 +19,7 @@ import reactor.util.retry.Retry;
  */
 @Slf4j
 public class ClusterVersionDetector {
-    private static final ObjectMapper objectMapper = new ObjectMapper();
+    private static final ObjectMapper objectMapper = ObjectMapperFactory.createDefaultMapper();
     private static final int MAX_VERSION_DETECTION_RETRIES = 2;
     private static final Duration VERSION_DETECTION_REQUEST_TIMEOUT = Duration.ofSeconds(30);
     private static final Retry RETRY_STRATEGY = Retry.backoff(MAX_VERSION_DETECTION_RETRIES, Duration.ofSeconds(1))
