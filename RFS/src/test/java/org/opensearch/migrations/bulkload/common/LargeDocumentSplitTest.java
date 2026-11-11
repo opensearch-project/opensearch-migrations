@@ -50,7 +50,7 @@ import static org.mockito.Mockito.when;
  * {@code LargeDocumentSplitEndToEndTest}.
  */
 class LargeDocumentSplitTest {
-    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final ObjectMapper MAPPER = ObjectMapperFactory.createDefaultMapper();
     private static final int MAX_REQUEST_BYTES = 512;
     private static final String INDEX = "idx";
     private static final String PLAIN_INDEX = "{\"idx\":{\"mappings\":{},\"settings\":{\"index.number_of_shards\":\"1\"}}}";

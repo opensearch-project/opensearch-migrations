@@ -40,7 +40,9 @@ import reactor.core.publisher.Mono;
  */
 @Slf4j
 final class LargeDocumentSplit {
-    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final ObjectMapper MAPPER = ObjectMapperFactory.createDefaultMapper();
+    private static final String INDEX = "index";
+    private static final String NO_PIPELINE = "_none";
     private static final Set<String> PLAIN_METADATA = Set.of("_index", "_id", "routing");
     private static final Set<String> CONFLICT = Set.of("version_conflict_engine_exception");
     private static final byte[] NO_CHANGE = "{\"doc\":{}}".getBytes(StandardCharsets.UTF_8);
@@ -89,11 +91,11 @@ final class LargeDocumentSplit {
         try {
             var action = MAPPER.readTree(whole.action());
             var names = new HashSet<String>();
-            action.path("index").fieldNames().forEachRemaining(names::add);
+            action.path(INDEX).fieldNames().forEachRemaining(names::add);
             if (!names.contains("_id") || !PLAIN_METADATA.containsAll(names)) {
                 return declined(whole, "it is not an index operation with an explicit ID and no other options");
             }
-            metadata = (ObjectNode) action.get("index");
+            metadata = (ObjectNode) action.get(INDEX);
             long room = maxRequestBytes - whole.action().length - REQUEST_OVERHEAD;
             fragments = JsonObjectSplitter.split(whole.body(), (int) Math.max(0, Math.min(room, Integer.MAX_VALUE)));
         } catch (IOException e) {
@@ -148,8 +150,8 @@ final class LargeDocumentSplit {
                 || settings.path("index.derived_source.enabled").asBoolean(false)) {
                 return "its index does not store the complete _source";
             }
-            if (!"_none".equals(settings.path("index.default_pipeline").asText("_none"))
-                || !"_none".equals(settings.path("index.final_pipeline").asText("_none"))) {
+            if (!NO_PIPELINE.equals(settings.path("index.default_pipeline").asText(NO_PIPELINE))
+                || !NO_PIPELINE.equals(settings.path("index.final_pipeline").asText(NO_PIPELINE))) {
                 return "its index applies an ingest pipeline";
             }
         }
@@ -171,7 +173,7 @@ final class LargeDocumentSplit {
     /** The ID already exists, from an earlier attempt or an earlier migration: replace that document once. */
     private Mono<BulkResponse> replace(BulkResponse previous, int attemptsLeft) {
         if (!fenced) {
-            return send("index", metadata, fragments.get(0), allowlist).map(written -> plus(previous, written));
+            return send(INDEX, metadata, fragments.get(0), allowlist).map(written -> plus(previous, written));
         }
         // An empty partial update writes nothing and reports where the document currently is.
         return send("update", metadata, NO_CHANGE, allowlist).map(read -> plus(previous, read)).flatMap(read -> {
@@ -184,7 +186,7 @@ final class LargeDocumentSplit {
                 .put("if_primary_term", position.required("_primary_term").asLong());
             // A conflict means the document moved after the read; only the last attempt reports it as a failure.
             boolean lastAttempt = attemptsLeft <= 1;
-            return send("index", conditional, fragments.get(0), lastAttempt ? allowlist : conflictsAllowed)
+            return send(INDEX, conditional, fragments.get(0), lastAttempt ? allowlist : conflictsAllowed)
                 .map(written -> plus(read, written))
                 .flatMap(written -> status(written) == 409 && !lastAttempt
                     ? replace(written, attemptsLeft - 1) : Mono.just(written));

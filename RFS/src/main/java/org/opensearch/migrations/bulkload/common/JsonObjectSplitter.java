@@ -9,7 +9,7 @@ import java.util.List;
 import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonToken;
-import com.fasterxml.jackson.core.StreamReadFeature;
+import lombok.AllArgsConstructor;
 import lombok.experimental.UtilityClass;
 
 /**
@@ -21,12 +21,18 @@ import lombok.experimental.UtilityClass;
  */
 @UtilityClass
 class JsonObjectSplitter {
-    private static final JsonFactory FACTORY = JsonFactory.builder()
-        .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
-        .build();
+    // The shared mapper's factory, for its raised limits on string and name length.
+    private static final JsonFactory FACTORY = ObjectMapperFactory.createDefaultMapper().getFactory()
+        .enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
 
     /** A member's byte range, from the quote opening its name to the end of its value. */
-    private record Member(int start, int valueStart, int end, List<Member> children) {}
+    @AllArgsConstructor
+    private static final class Member {
+        final int start;
+        final int valueStart;
+        final int end;
+        final List<Member> children;
+    }
 
     /**
      * @return fragments of at most {@code maxFragmentBytes} each, in the order they must be merged
@@ -109,16 +115,16 @@ class JsonObjectSplitter {
         int wrapping = open.length + close.length;
         var pending = new ByteArrayOutputStream();
         for (var member : members) {
-            int length = member.end() - member.start();
+            int length = member.end - member.start;
             if (wrapping + length > maxFragmentBytes) {
-                if (member.children() == null || member.children().isEmpty()) {
+                if (member.children == null || member.children.isEmpty()) {
                     throw new IOException("a single value needs " + (wrapping + length) + " bytes, above the limit of "
                         + maxFragmentBytes);
                 }
                 flush(pending, open, close, fragments);
                 // Re-open this object in each of its fragments: `"name":{` ... `}`.
-                pack(json, member.children(),
-                    concat(open, json, member.start(), member.valueStart() + 1 - member.start()),
+                pack(json, member.children,
+                    concat(open, json, member.start, member.valueStart + 1 - member.start),
                     concat(new byte[] {'}'}, close, 0, close.length), maxFragmentBytes, fragments);
                 continue;
             }
@@ -128,7 +134,7 @@ class JsonObjectSplitter {
             if (pending.size() > 0) {
                 pending.write(',');
             }
-            pending.write(json, member.start(), length);
+            pending.write(json, member.start, length);
         }
         flush(pending, open, close, fragments);
     }

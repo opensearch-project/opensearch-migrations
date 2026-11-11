@@ -15,7 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class JsonObjectSplitterTest {
-    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final ObjectMapper MAPPER = ObjectMapperFactory.createDefaultMapper();
 
     // Nested objects, separators inside strings, escapes, multibyte text, every scalar kind, and loose whitespace.
     private static final String DOCUMENT = """
@@ -97,6 +97,12 @@ class JsonObjectSplitterTest {
     })
     void refusesWhatCannotBeDividedFaithfully(String json) {
         assertThrows(IOException.class, () -> split(json, 40));
+    }
+
+    @Test
+    void readsNamesAndStringsBeyondTheDefaultParserLimits() throws IOException {
+        var json = "{\"" + "n".repeat(60_000) + "\":1,\"text\":\"" + "s".repeat(21_000_000) + "\",\"b\":2}";
+        assertEquals(1, split(json, 30_000_000).size());
     }
 
     @ParameterizedTest

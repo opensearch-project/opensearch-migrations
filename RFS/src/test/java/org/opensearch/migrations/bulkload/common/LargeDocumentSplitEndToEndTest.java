@@ -37,7 +37,7 @@ import static org.mockito.Mockito.when;
 /** Checks against real clusters what {@link LargeDocumentSplitTest} checks against an in-memory target. */
 @Tag("isolatedTest")
 class LargeDocumentSplitEndToEndTest {
-    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final ObjectMapper MAPPER = ObjectMapperFactory.createDefaultMapper();
     private static final int MAX_REQUEST_BYTES = 2048;
     private static final String ROUTING = "r1";
     // ~7 KB, with a nested object that itself exceeds one request, and numbers a careless rewrite would alter.
