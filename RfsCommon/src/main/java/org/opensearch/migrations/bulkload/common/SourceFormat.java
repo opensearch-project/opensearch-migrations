@@ -26,12 +26,13 @@ import org.yaml.snakeyaml.LoaderOptions;
  */
 public enum SourceFormat {
     JSON(null),
-    SMILE(new SmileFactory()),
-    CBOR(new CBORFactory()),
-    YAML(YAMLFactory.builder().loaderOptions(unboundedYamlLoaderOptions()).build()),
+    SMILE(SmileFactory.builder().streamReadConstraints(ObjectMapperFactory.STREAM_READ_CONSTRAINTS).build()),
+    CBOR(CBORFactory.builder().streamReadConstraints(ObjectMapperFactory.STREAM_READ_CONSTRAINTS).build()),
+    YAML(YAMLFactory.builder().streamReadConstraints(ObjectMapperFactory.STREAM_READ_CONSTRAINTS)
+        .loaderOptions(unboundedYamlLoaderOptions()).build()),
     UNKNOWN(null);
 
-    private static final JsonFactory JSON_FACTORY = new JsonFactory();
+    private static final JsonFactory JSON_FACTORY = ObjectMapperFactory.createDefaultMapper().getFactory();
 
     private final JsonFactory factory;
 

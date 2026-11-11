@@ -28,7 +28,7 @@ import lombok.experimental.UtilityClass;
 @UtilityClass
 public final class BulkNdjson {
     private static final ObjectMapper OBJECT_MAPPER = ObjectMapperFactory.createDefaultMapper();
-    private static final JsonFactory JSON_FACTORY = new JsonFactory();
+    private static final JsonFactory JSON_FACTORY = OBJECT_MAPPER.getFactory();
 
     /**
      * The exact bytes of an operation, retained for batching, sending, and retries.

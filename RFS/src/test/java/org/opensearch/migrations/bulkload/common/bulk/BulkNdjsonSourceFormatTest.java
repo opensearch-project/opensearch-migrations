@@ -51,6 +51,13 @@ class BulkNdjsonSourceFormatTest {
     }
 
     @Test
+    void jsonSourceBeyondTheDefaultParserLimitsIsAccepted() {
+        byte[] json = ("{\"" + "n".repeat(60_000) + "\":1,\"text\":\"" + "s".repeat(21_000_000) + "\"}")
+            .getBytes(StandardCharsets.UTF_8);
+        assertSame(json, BulkNdjson.encodeRaw(doc("1", json), "idx", false, MAPPER).body());
+    }
+
+    @Test
     void unknownSourceFailsWithPerDocumentException() {
         byte[] notJson = "not json".getBytes(StandardCharsets.UTF_8);
         assertThrows(InvalidDocumentSourceException.class,

@@ -41,6 +41,19 @@ class SourceFormatTest {
         return new ObjectMapper(factory).writeValueAsBytes(value);
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"smile", "cbor", "yaml"})
+    void sourcesBeyondTheDefaultParserLimitsAreConverted(String format) throws Exception {
+        JsonFactory factory = format.equals("smile") ? new SmileFactory()
+            : format.equals("cbor") ? new CBORFactory() : new YAMLFactory();
+        var document = Map.of("n".repeat(60_000), 1, "text", "s".repeat(21_000_000));
+
+        var json = SourceFormat.toJson(write(factory, document));
+
+        assertEquals(ObjectMapperFactory.createDefaultMapper().valueToTree(document),
+            ObjectMapperFactory.createDefaultMapper().readTree(json));
+    }
+
     @Test
     void jsonFastPathReturnsSameArray() {
         byte[] json = "{\"a\":1}".getBytes(StandardCharsets.UTF_8);

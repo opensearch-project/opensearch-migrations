@@ -10,16 +10,18 @@ public class ObjectMapperFactory {
     private static final int MAX_STRING_LENGTH = 100 * 1024 * 1024; // ~100 MB
     private static final int MAX_NAME_LENGTH = 100 * 1024 * 1024; // ~100 MB
 
+    /** The read limits for anything that parses document content, in whatever format it is stored. */
+    public static final StreamReadConstraints STREAM_READ_CONSTRAINTS = StreamReadConstraints.builder()
+        .maxStringLength(MAX_STRING_LENGTH)
+        .maxNameLength(MAX_NAME_LENGTH)
+        .build();
+
     /**
      * Returns a default ObjectMapper with fail-on-unknown-properties disabled.
      */
     public static ObjectMapper createDefaultMapper() {
         ObjectMapper mapper = JsonMapper.builder().build();
-        mapper.getFactory()
-            .setStreamReadConstraints(StreamReadConstraints.builder()
-                .maxStringLength(MAX_STRING_LENGTH)
-                .maxNameLength(MAX_NAME_LENGTH)
-                .build());
+        mapper.getFactory().setStreamReadConstraints(STREAM_READ_CONSTRAINTS);
         mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
         return mapper;
     }
