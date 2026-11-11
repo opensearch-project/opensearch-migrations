@@ -31,6 +31,7 @@ public class InvalidResponse extends RfsException {
     private static final String ERROR_STRING = "error";
     private static final String ROOT_CAUSE = "root_cause";
     private static final String REASON = "reason";
+    private static final String CAUSED_BY = "caused_by";
 
     public InvalidResponse(String message, HttpResponse response) {
         super(message);
@@ -103,7 +104,7 @@ public class InvalidResponse extends RfsException {
             errorBody.map(node -> node.get("suppressed")).ifPresent(nodes ->
                 nodes.forEach(node -> Optional.ofNullable(getRemovedTokenFilter(node)).ifPresent(results::add))
             );
-            errorBody.map(node -> node.get("caused_by")).ifPresent(node ->
+            errorBody.map(node -> node.get(CAUSED_BY)).ifPresent(node ->
                 Optional.ofNullable(getRemovedTokenFilter(node)).ifPresent(results::add)
             );
 
@@ -140,7 +141,7 @@ public class InvalidResponse extends RfsException {
             errorBody.map(node -> node.get(ROOT_CAUSE)).ifPresent(nodes ->
                 nodes.forEach(node -> Optional.of(node).map(InvalidResponse::getUnsupportedParams).ifPresent(results::addAll))
             );
-            errorBody.map(node -> node.get("caused_by")).ifPresent(node ->
+            errorBody.map(node -> node.get(CAUSED_BY)).ifPresent(node ->
                 Optional.of(node).map(InvalidResponse::getUnsupportedParams).ifPresent(results::addAll)
             );
 
@@ -160,7 +161,7 @@ public class InvalidResponse extends RfsException {
             var nodes = new ArrayList<JsonNode>();
             nodes.add(errorBody.get());
             Optional.ofNullable(errorBody.get().get(ROOT_CAUSE)).ifPresent(rootCauses -> rootCauses.forEach(nodes::add));
-            Optional.ofNullable(errorBody.get().get("caused_by")).ifPresent(nodes::add);
+            Optional.ofNullable(errorBody.get().get(CAUSED_BY)).ifPresent(nodes::add);
             return nodes.stream()
                 .map(node -> node.path(REASON).asText())
                 .anyMatch(reason -> UNSUPPORTED_KNN_ENGINE.matcher(reason).find());
