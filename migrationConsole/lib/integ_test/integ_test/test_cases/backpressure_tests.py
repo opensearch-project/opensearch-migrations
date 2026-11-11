@@ -75,7 +75,10 @@ class Test0011RfsBackpressure(MATestBase):
                     # Smaller than the 10 MiB default so a contended round trip takes seconds, not tens of seconds,
                     # and the in-flight limit gets many rounds in a few minutes.
                     "documentsSizePerBulkRequest": BULK_BYTES,
-                    "failedDocumentStreamS3Bucket": self._deployment_default_s3_bucket(),
+                    "failedDocumentStream": {
+                        "type": "s3",
+                        "bucket": self._deployment_default_s3_bucket(),
+                    },
                     "resources": {
                         "requests": {"cpu": "500m", "memory": "1Gi", "ephemeral-storage": "5Gi"},
                         "limits": {"cpu": "1000m", "memory": "2Gi", "ephemeral-storage": "5Gi"},

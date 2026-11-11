@@ -87,6 +87,35 @@ describe('MigrationConfigTransformer validation', () => {
 
     const cloneBaseConfig = () => JSON.parse(JSON.stringify(baseConfig));
 
+    it('should lower the user-facing failed-document stream object to internal RFS options', async () => {
+        const config = cloneBaseConfig();
+        config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0] = {
+            documentBackfillConfig: {
+                failedDocumentStream: {
+                    type: "s3",
+                    bucket: "failed-documents",
+                    prefix: "migration-a/",
+                    region: "us-west-2",
+                    endpoint: "https://s3.us-west-2.amazonaws.com",
+                    maxBufferBytes: 123456,
+                },
+            },
+        };
+
+        const result = await transformer.processFromObject(config);
+        const documentBackfillConfig = result.snapshotMigrations![0].documentBackfillConfig!;
+
+        expect(documentBackfillConfig).toEqual(expect.objectContaining({
+            failedDocumentStreamS3Bucket: "failed-documents",
+            failedDocumentStreamS3Prefix: "migration-a/",
+            failedDocumentStreamS3Region: "us-west-2",
+            failedDocumentStreamS3Endpoint: "https://s3.us-west-2.amazonaws.com",
+            failedDocumentStreamMaxBufferBytes: 123456,
+            disableFailedDocumentStream: false,
+        }));
+        expect(documentBackfillConfig).not.toHaveProperty("failedDocumentStream");
+    });
+
     it('should reject rogue key at top level', () => {
         const configWithRogueKey = {
             ...baseConfig,
@@ -154,8 +183,10 @@ describe('MigrationConfigTransformer validation', () => {
                     skipEvaluateApproval: innerValue,
                     skipMigrateApproval: innerValue
                 },
-                documentBackfillConfig: innerValue === undefined ? {disableFailedDocumentStream: true} : {
-                    disableFailedDocumentStream: true,
+                documentBackfillConfig: innerValue === undefined ? {
+                    failedDocumentStream: {type: "disabled"}
+                } : {
+                    failedDocumentStream: {type: "disabled"},
                     skipApproval: innerValue
                 }
             };
@@ -177,7 +208,7 @@ describe('MigrationConfigTransformer validation', () => {
         config.snapshotMigrationConfigs[0].skipApprovals = false;
         config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0] = {
             metadataMigrationConfig: {},
-            documentBackfillConfig: {disableFailedDocumentStream: true}
+            documentBackfillConfig: {failedDocumentStream: {type: "disabled"}}
         };
 
         const result = await transformer.processFromObject(config);
@@ -192,7 +223,7 @@ describe('MigrationConfigTransformer validation', () => {
         const config = cloneBaseConfig();
         config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0] = {
             metadataMigrationConfig: {},
-            documentBackfillConfig: {disableFailedDocumentStream: true}
+            documentBackfillConfig: {failedDocumentStream: {type: "disabled"}}
         };
 
         const result = await transformer.processFromObject(config);
@@ -219,7 +250,7 @@ describe('MigrationConfigTransformer validation', () => {
                 logLevels: {root: "warn"},
             },
             documentBackfillConfig: {
-                disableFailedDocumentStream: true,
+                failedDocumentStream: {type: "disabled"},
                 logLevels: {root: "error"},
             },
         };
@@ -246,7 +277,7 @@ describe('MigrationConfigTransformer validation', () => {
                 skipEvaluateApproval: false
             },
             documentBackfillConfig: {
-                disableFailedDocumentStream: true,
+                failedDocumentStream: {type: "disabled"},
                 skipApproval: false
             }
         };
@@ -275,7 +306,7 @@ describe('MigrationConfigTransformer validation', () => {
         config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0] = {
             ...collectionRouting,
             metadataMigrationConfig: {},
-            documentBackfillConfig: {disableFailedDocumentStream: true}
+            documentBackfillConfig: {failedDocumentStream: {type: "disabled"}}
         };
 
         const result = await transformer.processFromObject(config);
@@ -296,7 +327,7 @@ describe('MigrationConfigTransformer validation', () => {
         config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0] = {
             staticCollectionRouting: [{sourceIndex: "shared-config", collection: "common"}],
             metadataMigrationConfig: {},
-            documentBackfillConfig: {disableFailedDocumentStream: true}
+            documentBackfillConfig: {failedDocumentStream: {type: "disabled"}}
         };
         config.traffic.replayers.replay1.replayerConfig = {
             requestTransforms: {entryPoint: {javascript: "(m) => m"}}
@@ -351,7 +382,7 @@ describe('MigrationConfigTransformer validation', () => {
         const config = cloneBaseConfig();
         config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0] = {
             metadataMigrationConfig: {},
-            documentBackfillConfig: {disableFailedDocumentStream: true}
+            documentBackfillConfig: {failedDocumentStream: {type: "disabled"}}
         };
         const result = await transformer.processFromObject(config);
         const migration = result.snapshotMigrations?.[0] as any;
@@ -587,7 +618,7 @@ describe('MigrationConfigTransformer validation', () => {
                     }
                 },
                 documentBackfillConfig: {
-                    disableFailedDocumentStream: true,
+                    failedDocumentStream: {type: "disabled"},
                     documentTransforms: [
                         {
                             transformName: "TypeMappingSanitizationTransformerProvider",
@@ -1004,7 +1035,7 @@ describe('MigrationConfigTransformer validation', () => {
     it('should keep workload identity stable across gated RFS changes only', async () => {
         const withBackfill = JSON.parse(JSON.stringify(baseConfig));
         withBackfill.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0].documentBackfillConfig = {
-            disableFailedDocumentStream: true,
+            failedDocumentStream: {type: "disabled"},
             maxConnections: 4,
         };
 
@@ -1060,11 +1091,15 @@ describe('MigrationConfigTransformer validation', () => {
         const withMetadataOnly = cloneBaseConfig(); // baseConfig already has only metadataMigrationConfig
 
         const withBoth = cloneBaseConfig();
-        withBoth.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0].documentBackfillConfig = {disableFailedDocumentStream: true};
+        withBoth.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0].documentBackfillConfig = {
+            failedDocumentStream: {type: "disabled"}
+        };
 
         const withBackfillOnly = cloneBaseConfig();
         delete withBackfillOnly.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0].metadataMigrationConfig;
-        withBackfillOnly.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0].documentBackfillConfig = {disableFailedDocumentStream: true};
+        withBackfillOnly.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0].documentBackfillConfig = {
+            failedDocumentStream: {type: "disabled"}
+        };
 
         const metadataOnly = (await transformer.processFromObject(withMetadataOnly)).snapshotMigrations[0];
         const both = (await transformer.processFromObject(withBoth)).snapshotMigrations[0];
@@ -1376,7 +1411,7 @@ describe('MigrationConfigTransformer validation', () => {
                                     skipMigrateApproval: true,
                                 },
                                 documentBackfillConfig: {
-                                    disableFailedDocumentStream: true,
+                                    failedDocumentStream: {type: "disabled"},
                                     podReplicas: 1,
                                 },
                             }

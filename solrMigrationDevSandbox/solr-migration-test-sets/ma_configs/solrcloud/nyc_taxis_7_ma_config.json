@@ -36,7 +36,7 @@
             {
               "metadataMigrationConfig": {},
               "documentBackfillConfig": {
-                "disableFailedDocumentStream": true,
+                "failedDocumentStream": { "type": "disabled" },
                 "podReplicas": 1,
                 "documentsPerBulkRequest": 500,
                 "allowedDocExceptionTypes": ["mapper_parsing_exception"]

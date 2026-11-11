@@ -50,7 +50,7 @@ class Test0004MultiTypeUnionMigration(MATestBase):
                     "transformerConfigBase64": transformation_b64
                 },
                 "documentBackfillConfig": {
-                    "disableFailedDocumentStream": True,
+                    "failedDocumentStream": {"type": "disabled"},
                     "docTransformerConfigBase64": transformation_b64,
                     "maxShardSizeBytes": 16000000,
                     "resources": {
@@ -133,7 +133,7 @@ class Test0005MultiTypeSplitMigration(MATestBase):
                     "transformerConfigBase64": transformation_b64
                 },
                 "documentBackfillConfig": {
-                    "disableFailedDocumentStream": True,
+                    "failedDocumentStream": {"type": "disabled"},
                     "docTransformerConfigBase64": transformation_b64,
                     "maxShardSizeBytes": 16000000,
                     "resources": {

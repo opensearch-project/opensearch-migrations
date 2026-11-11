@@ -1,6 +1,9 @@
 import {isoDurationSeconds, USER_RFS_OPTIONS} from "../src/userSchemas";
 
-const base = {maxShardSizeBytes: 1024, disableFailedDocumentStream: true};
+const base = {
+    maxShardSizeBytes: 1024,
+    failedDocumentStream: {type: "disabled" as const},
+};
 
 describe("RFS expert limits", () => {
     test("defaults to a one-day lease cap", () => {

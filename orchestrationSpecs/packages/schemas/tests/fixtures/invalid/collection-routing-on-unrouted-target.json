@@ -53,7 +53,7 @@
               }
             ],
             "metadataMigrationConfig": {},
-            "documentBackfillConfig": {}
+            "documentBackfillConfig": { "failedDocumentStream": { "type": "disabled" } }
           }
         ]
       }

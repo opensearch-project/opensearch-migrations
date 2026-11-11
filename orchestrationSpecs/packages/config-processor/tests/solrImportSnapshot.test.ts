@@ -97,7 +97,9 @@ function snapshotMigrationConfig(opts: {
             perSnapshotConfig: {
                 [itemName]: [{
                     metadataMigrationConfig: {},
-                    ...(opts.withDocumentBackfill ? {documentBackfillConfig: {disableFailedDocumentStream: true}} : {}),
+                    ...(opts.withDocumentBackfill ? {
+                        documentBackfillConfig: {failedDocumentStream: {type: "disabled"}}
+                    } : {}),
                 }],
             },
         }],
