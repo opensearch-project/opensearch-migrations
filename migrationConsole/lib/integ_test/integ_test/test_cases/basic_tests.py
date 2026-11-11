@@ -68,7 +68,7 @@ class Test0001SingleDocumentBackfill(MATestBase):
         # storage (2.5 x the 80Gi default), which small nodes can't schedule.
         super().prepare_workflow_snapshot_and_migration_config()
         for migration in self.workflow_snapshot_and_migration_config[0]["migrations"]:
-            migration["documentBackfillConfig"]["disableFailedDocumentStream"] = True
+            migration["documentBackfillConfig"]["failedDocumentStream"] = {"type": "disabled"}
             migration["documentBackfillConfig"]["useTargetClusterForWorkCoordination"] = True
 
     def prepare_clusters(self):
@@ -138,8 +138,10 @@ class Test0002SingleDocumentBackfillWithRfsCoordinatorCluster(MATestBase):
             # The base config opts out of the failed document stream; this test needs it on, and
             # there is no default bucket, so name the deployment's. Region and endpoint are inherited
             # from the snapshot repo config.
-            migration["documentBackfillConfig"].pop("disableFailedDocumentStream", None)
-            migration["documentBackfillConfig"]["failedDocumentStreamS3Bucket"] = bucket
+            migration["documentBackfillConfig"]["failedDocumentStream"] = {
+                "type": "s3",
+                "bucket": bucket,
+            }
 
     def _deployment_default_s3_bucket(self) -> str:
         load_k8s_config()
@@ -564,7 +566,7 @@ class Test0008OptionalSnapshotStages(MATestBase):
         allowlist = [self.backfill_only_index]
         params = self._extra_run_parameters({
             "documentBackfillConfig": {
-                "disableFailedDocumentStream": True,
+                "failedDocumentStream": {"type": "disabled"},
                 "indexAllowlist": allowlist,
                 "maxShardSizeBytes": 16000000,
                 "resources": {
@@ -618,7 +620,7 @@ class Test0003ApprovalGateIntegration(MATestBase):
             "migrations": [{
                 "metadataMigrationConfig": {},
                 "documentBackfillConfig": {
-                    "disableFailedDocumentStream": True,
+                    "failedDocumentStream": {"type": "disabled"},
                     "maxShardSizeBytes": 16000000,
                     "resources": {
                         "requests": {"cpu": "25m", "memory": "1Gi", "ephemeral-storage": "5Gi"},

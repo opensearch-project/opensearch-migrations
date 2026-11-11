@@ -114,27 +114,6 @@ function validateMaxLeaseDuration(
     }
 }
 
-export const FAILED_DOCUMENT_STREAM_REQUIRED_MESSAGE =
-    "Set failedDocumentStreamS3Bucket to record documents that can't be written, or set " +
-    "disableFailedDocumentStream: true to run without a failed document stream.";
-
-function validateFailedDocumentStreamChoice(
-    ctx: z.RefinementCtx,
-    data: {failedDocumentStreamS3Bucket?: string, disableFailedDocumentStream?: boolean}
-) {
-    const hasBucket = (data.failedDocumentStreamS3Bucket ?? "").trim() !== "";
-    const disabled = data.disableFailedDocumentStream === true;
-    if (hasBucket === disabled) {
-        ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            message: hasBucket
-                ? "failedDocumentStreamS3Bucket and disableFailedDocumentStream can't both be set."
-                : FAILED_DOCUMENT_STREAM_REQUIRED_MESSAGE,
-            path: [hasBucket ? "disableFailedDocumentStream" : "failedDocumentStreamS3Bucket"]
-        });
-    }
-}
-
 function scalableServiceWorkflowOptions(serviceName: string, podReplicasDescription: string) {
     return z.object({
         podReplicas: z.number().int().nonnegative().default(1).optional()
@@ -1176,6 +1155,32 @@ export const USER_RFS_WORKFLOW_OPTIONS = withScalableServiceValidation(z.object(
 }))
     .describe("Kubernetes deployment-level options for the Reindex From Snapshot (RFS) document backfill.");
 
+export const FAILED_DOCUMENT_STREAM_CONFIG = z.discriminatedUnion("type", [
+    z.object({
+        type: z.literal("s3")
+            .describe("Persist terminal document failures to S3."),
+        bucket: z.string().trim().min(1)
+            .describe("S3 bucket where documents that can't be written are recorded."),
+        prefix: z.string().default("rfs-failed-document-stream/").optional()
+            .describe("S3 key prefix. Each RFS run writes under <prefix>/session=<workflow-uid>/. " +
+                "Defaults to 'rfs-failed-document-stream/'."),
+        region: z.string().optional()
+            .describe("AWS region for the S3 bucket. Resolved before submission from this value, the snapshot " +
+                "repository, or the deployment default."),
+        endpoint: z.string().optional()
+            .describe("Optional S3 endpoint override (for example, LocalStack). Resolved before submission from " +
+                "this value, the snapshot repository, or the deployment default."),
+        maxBufferBytes: z.number().default(67108864).optional()
+            .describe("Maximum uncompressed bytes buffered in memory per target index before rotating to a new " +
+                "S3 object. Defaults to 67108864 (64 MiB)."),
+    }).strict(),
+    z.object({
+        type: z.literal("disabled")
+            .describe("Run without recording terminal document failures."),
+    }).strict(),
+]).describe("Required destination for terminal document failures. Select S3 storage or explicitly disable " +
+    "the failed document stream.");
+
 export const USER_RFS_PROCESS_OPTIONS = withOtelExportOptions(z.object({
     indexAllowlist: z.array(z.string()).default([]).optional()
         .describe("Filters which indices are migrated by the document backfill (RFS) — evaluated client-side on the snapshot contents after the snapshot has been taken. " +
@@ -1297,31 +1302,8 @@ export const USER_RFS_PROCESS_OPTIONS = withOtelExportOptions(z.object({
             "so results can be inconsistent. Use only when reconstruction from doc_values and stored fields is insufficient.")
         .checksumFor('replayer')
         .changeRestriction('impossible'),
-    failedDocumentStreamS3Prefix: z.string().default("rfs-failed-document-stream/").optional()
-        .describe("S3 key prefix for the failed document stream where terminal document failures are persisted. " +
-            "Each RFS run writes under <prefix>/session=<workflow-uid>/. " +
-            "Defaults to 'rfs-failed-document-stream/'."),
-    failedDocumentStreamS3Bucket: z.string().optional()
-        .describe("S3 bucket for the failed document stream, where documents that can't be written are recorded. " +
-            "Either this or disableFailedDocumentStream is required; there is no default bucket.")
+    failedDocumentStream: FAILED_DOCUMENT_STREAM_CONFIG
         .changeRestriction('gated'),
-    disableFailedDocumentStream: z.boolean().optional()
-        .describe("Set to true to run without a failed document stream. Documents that can't be written are then " +
-            "logged and counted but not recorded anywhere, and a batch that exhausts its retries fails its work item. " +
-            "Either this or failedDocumentStreamS3Bucket is required.")
-        .changeRestriction('gated'),
-    failedDocumentStreamS3Region: z.string().optional()
-        .describe("AWS region for the failed document stream S3 bucket. Resolved by the config processor before " +
-            "submission (user value, else the snapshot repo's region, else the deployment default). " +
-            "Ignored without a bucket."),
-    failedDocumentStreamS3Endpoint: z.string().optional()
-        .describe("Optional S3 endpoint override for failed document stream uploads (e.g. LocalStack). Resolved by " +
-            "the config processor (user value, else the snapshot repo's endpoint, else the deployment default). " +
-            "Ignored without a bucket."),
-    failedDocumentStreamMaxBufferBytes: z.number().default(67108864).optional()
-        .describe("Maximum uncompressed bytes buffered in memory per target index before the failed document stream rotates " +
-            "to a new S3 object. Bounds heap use when a shard produces a very large number of terminal " +
-            "failures. Default 67108864 (64 MiB)."),
     positionGapStopword: z.string().default("a").optional()
         .describe("Token used to fill skipped Lucene positions when reconstructing analyzed-text fields from postings. " +
             "ES preserves position increments for stop-word-filtered tokens (e.g. 'i like the tree' with stopword 'the' indexes " +
@@ -1362,7 +1344,6 @@ export const USER_RFS_OPTIONS = withOtelExportOptions(z.object({
 })
     .superRefine((data, ctx) => {
         validateMinPodReplicas(ctx, data);
-        validateFailedDocumentStreamChoice(ctx, data);
         validateMaxLeaseDuration(ctx, data);
         validatePipelineRawConfigConflict(ctx, data, "documentTransforms", [
             "docTransformerConfig",

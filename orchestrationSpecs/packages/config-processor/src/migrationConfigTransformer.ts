@@ -18,6 +18,7 @@ import {
     TRANSFORM_PIPELINE,
     TRANSFORM_CONTEXT_VALUE,
     DEPLOYMENT_DEFAULTS_CONFIG,
+    FAILED_DOCUMENT_STREAM_CONFIG,
 } from '@opensearch-migrations/schemas';
 import {StreamSchemaTransformer} from './streamSchemaTransformer';
 import { z } from 'zod';
@@ -465,26 +466,26 @@ function trimToUndefined(value: unknown): string | undefined {
  * Resolve the failed-document-stream S3 region/endpoint before the workflow is created, so the
  * destination is recorded in run history rather than discovered from pod env at runtime.
  *
- * The bucket is the stream's on/off switch and comes from the user's config alone — no default.
+ * The user explicitly selects either an S3 destination or the disabled mode. The workflow-facing
+ * representation remains flat because it is passed directly to the RFS command.
  */
 export function resolveFailedDocumentStreamS3(
-    rest: Record<string, unknown>,
+    config: z.infer<typeof FAILED_DOCUMENT_STREAM_CONFIG>,
     repoConfig: { awsRegion?: string; endpoint?: string } | undefined,
     deploymentDefaults: z.infer<typeof DEPLOYMENT_DEFAULTS_CONFIG>
-): Record<string, string | undefined> {
-    const bucket = trimToUndefined(rest.failedDocumentStreamS3Bucket);
-    const userRegion = trimToUndefined(rest.failedDocumentStreamS3Region);
-    const userEndpoint = trimToUndefined(rest.failedDocumentStreamS3Endpoint);
-
-    if (!bucket) {
-        // Stream off; clear orphan region/endpoint.
+): Record<string, string | number | boolean | undefined> {
+    if (config.type === "disabled") {
         return {
             failedDocumentStreamS3Bucket: undefined,
+            disableFailedDocumentStream: true,
             failedDocumentStreamS3Region: undefined,
             failedDocumentStreamS3Endpoint: undefined,
         };
     }
 
+    const bucket = config.bucket.trim();
+    const userRegion = trimToUndefined(config.region);
+    const userEndpoint = trimToUndefined(config.endpoint);
     const region = userRegion
         ?? trimToUndefined(repoConfig?.awsRegion)
         ?? trimToUndefined(deploymentDefaults.defaultS3Region);
@@ -495,15 +496,18 @@ export function resolveFailedDocumentStreamS3(
     if (!region) {
         throw new Error(
             `failed document stream S3 bucket '${bucket}' was set but no region could be determined. ` +
-            `Set documentBackfillConfig.failedDocumentStreamS3Region, the snapshot repo's awsRegion, ` +
+            `Set documentBackfillConfig.failedDocumentStream.region, the snapshot repo's awsRegion, ` +
             `or the deployment default region.`
         );
     }
 
     return {
+        failedDocumentStreamS3Prefix: config.prefix,
         failedDocumentStreamS3Bucket: bucket,
+        disableFailedDocumentStream: false,
         failedDocumentStreamS3Region: region,
         failedDocumentStreamS3Endpoint: endpoint,
+        failedDocumentStreamMaxBufferBytes: config.maxBufferBytes,
     };
 }
 
@@ -518,7 +522,7 @@ function prepareDocumentBackfillConfig(
         return undefined;
     }
 
-    const {documentTransforms, ...rest} = config;
+    const {documentTransforms, failedDocumentStream, ...rest} = config;
     const fileSourceRegistry = new FileSourceRegistry();
     const generatedConfig = lowerTransformPipeline(documentTransforms, fileSourceRegistry);
     return ARGO_RFS_OPTIONS.parse({
@@ -528,7 +532,7 @@ function prepareDocumentBackfillConfig(
             bulkRequestTrace: rest.logLevels?.bulkRequestTrace ?? "off",
             failedRequests: rest.logLevels?.failedRequests ?? "warn",
         },
-        ...resolveFailedDocumentStreamS3(rest, repoConfig, deploymentDefaults),
+        ...resolveFailedDocumentStreamS3(failedDocumentStream, repoConfig, deploymentDefaults),
         skipApproval: rest.skipApproval ?? skipApprovals,
         ...fileSourceRegistry.resolvedFields,
         ...collectionRoutingFields(collectionRouting),

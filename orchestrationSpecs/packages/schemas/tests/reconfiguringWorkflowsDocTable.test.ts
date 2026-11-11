@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import {z} from "zod";
+import {ARGO_RFS_OPTIONS} from "../src/argoSchemas";
 import {FieldMeta, USER_RFS_OPTIONS} from "../src/userSchemas";
 
 /** docs/reconfiguringWorkflows.md lists every documentBackfillConfig field; keep it in step with the schema. */
@@ -13,7 +14,21 @@ describe("reconfiguringWorkflows.md document backfill field table", () => {
         rows.set(match[1], {category: match[2].trim(), replayerChecksum: match[3] === "✅"});
     }
 
-    const shape = (USER_RFS_OPTIONS.in as unknown as z.ZodObject<any>).shape;
+    const userShape = (USER_RFS_OPTIONS.in as unknown as z.ZodObject<any>).shape;
+    const argoShape = (ARGO_RFS_OPTIONS as unknown as z.ZodObject<any>).shape;
+    const shape = {...userShape};
+    // The public union is lowered into the flat workflow/CRD fields from ARGO_RFS_OPTIONS.
+    delete shape.failedDocumentStream;
+    for (const field of [
+        "failedDocumentStreamS3Prefix",
+        "failedDocumentStreamS3Bucket",
+        "disableFailedDocumentStream",
+        "failedDocumentStreamS3Region",
+        "failedDocumentStreamS3Endpoint",
+        "failedDocumentStreamMaxBufferBytes",
+    ]) {
+        shape[field] = argoShape[field];
+    }
     const expected = Object.entries(shape).map(([field, schema]) => {
         const meta = ((schema as z.ZodTypeAny).meta() ?? {}) as FieldMeta;
         const category = meta.changeRestriction === "impossible" ? "Impossible"
