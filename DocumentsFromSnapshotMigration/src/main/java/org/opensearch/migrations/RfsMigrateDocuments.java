@@ -265,6 +265,16 @@ public class RfsMigrateDocuments {
         long numBytesPerBulkRequest = DEFAULT_MAX_BYTES_PER_BATCH;
 
         @Parameter(required = false,
+            names = { "--split-large-documents" },
+            description = "Optional. Send a document that exceeds --documents-size-per-bulk-request as several bulk " +
+                "requests instead of one oversized request: the first replaces the target document and each later " +
+                "one merges more of its fields with a partial update. Uses no script. Applies to OpenSearch targets " +
+                "and to plain index operations with an explicit ID, on indices that store the complete _source and " +
+                "apply no ingest pipeline; any other oversized document is sent whole as before. Partial documents " +
+                "are visible on the target until the last request. Disabled by default.")
+        boolean splitLargeDocuments;
+
+        @Parameter(required = false,
             names = {"--max-connections", "--maxConnections" },
             description = "Optional.  The maximum number of connections to simultaneously " +
                 "used to communicate to the target, default " + DEFAULT_BATCH_CONCURRENCY)
@@ -659,6 +669,7 @@ public class RfsMigrateDocuments {
         var targetClientFactory = new OpenSearchClientFactory(targetConnectionContext, arguments.maxConnections);
         OpenSearchClient targetClient = targetClientFactory.determineVersionAndCreate(
             arguments.numDocsPerBulkRequest, arguments.numBytesPerBulkRequest);
+        targetClient.setSplitLargeDocuments(arguments.splitLargeDocuments);
         var targetVersion = targetClient.getClusterVersion();
 
         // Build the failed document stream sink and attach it to the target client. The sink is closed in

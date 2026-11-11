@@ -1111,6 +1111,9 @@ export const USER_RFS_PROCESS_OPTIONS = withOtelExportOptions(z.object({
         .describe("Maximum number of documents per bulk indexing request to the target cluster. Lower values reduce per-request latency but increase overhead."),
     documentsSizePerBulkRequest: z.number().default(10*1024*1024).optional()
         .describe("Maximum aggregate document size in bytes per bulk indexing request. Individual documents larger than this limit are sent as single-document requests."),
+    splitLargeDocuments: z.boolean().default(false).optional()
+        .describe("Send a document larger than documentsSizePerBulkRequest as several bulk requests that each fit the limit: the first writes some of its fields and each later partial update merges more. Documents that cannot be split safely are still sent whole. The document is visible while incomplete. OpenSearch targets only.")
+        .changeRestriction('gated'),
     initialLeaseDuration: z.string()
         .regex(/^[-+]?P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?)?$/)
         .default("PT1H").optional()

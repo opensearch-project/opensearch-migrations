@@ -74,6 +74,49 @@ The built-in `BulkVersioningTransformerProvider` supports `internal`, `external`
 and `external_gte`; see the
 [startup examples](../DocumentsFromSnapshotMigration/README.md#native-java-versioning).
 
+## Large documents
+
+A document larger than `--documents-size-per-bulk-request` is normally sent alone, in one request of
+whatever size the document needs. A target that caps request size (a proxy, `http.max_content_length`,
+a managed-service limit) rejects that request and the document fails.
+
+`--split-large-documents` (off by default, OpenSearch targets only) sends such a document as several
+bulk requests that each fit the limit. Documents that fit are sent exactly as before; the option adds
+one size comparison per bulk request to that path.
+
+1. The document's JSON is cut between whole top-level fields. A field holding an object too large for
+   one request is cut between that object's own fields. Field bytes are copied, never re-encoded.
+2. The first fragment is written with a bulk `create`. If the ID already exists, its position is read
+   and the fragment is written with an `index` conditional on that `if_seq_no` / `if_primary_term`,
+   so the existing document is replaced exactly once.
+3. Each remaining fragment is a bulk `update` with a partial `doc`, which the target merges into the
+   stored document. These merges are idempotent, so a retried request changes nothing.
+
+Every request uses the ordinary bulk path: the same retries, compression, metrics and failed document
+stream. One extra `GET <index>` is made per split document.
+
+A document is sent whole, as it is without the option, and a warning is logged when:
+
+- the operation is not a plain index with an explicit ID (server-generated IDs, external versioning or
+  any other bulk option, a `_type`);
+- a single string, number or array is larger than one request, a field name repeats within an object,
+  or a fractional number is not exactly representable as a 64-bit float (the target rewrites the
+  stored `_source` on every merge and would round it);
+- the target index disables, filters or derives `_source`, or sets a default or final ingest pipeline.
+
+Limitations to weigh before enabling it:
+
+- The document is searchable while incomplete, between the first and last request.
+- If the target rejects a later fragment, for example a mapping error, the document is reported once to the
+  failed document stream with its whole source, and the fields already merged stay on the target
+  until that document is migrated again.
+- The stored `_source` is the target's re-serialization of the merged document: the same fields and
+  values, but not byte-for-byte the source text (`1.50` is stored as `1.5`).
+- An object the target must receive in one piece, such as one very large `geo_shape`, is still cut
+  between its fields, and the target is expected to reject the incomplete piece (see the previous point).
+- Amazon OpenSearch Serverless has not been verified. It does not support `if_seq_no`, so an existing
+  document there is replaced unconditionally.
+
 ## Benchmarking
 
 This library supports benchmarks via [Java Microbenchmark Harness or JMH](https://github.com/openjdk/jmh).  These are best to be used with A/B testing that does not involve any external systems, such as string parsers.  Run the command with `./gradlew RFS:jmh` after it has completed results will be available in {project.dir}/build/reports/jmh in addition to the human readable logs.

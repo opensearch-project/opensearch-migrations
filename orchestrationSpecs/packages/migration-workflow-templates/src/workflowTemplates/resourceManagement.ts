@@ -448,6 +448,7 @@ function makeSnapshotMigrationManifest(
             documentBackfillFileSourceVolumeMounts: makeYamlJsonLiteralProxy(expr.dig(config, ["documentBackfillConfig", "fileSourceVolumeMounts"], expr.literal([]))),
             documentBackfillDocumentsPerBulkRequest: makeDirectTypeProxy(expr.dig(config, ["documentBackfillConfig", "documentsPerBulkRequest"], 0x7fffffff)),
             documentBackfillDocumentsSizePerBulkRequest: makeDirectTypeProxy(expr.dig(config, ["documentBackfillConfig", "documentsSizePerBulkRequest"], 10 * 1024 * 1024)),
+            documentBackfillSplitLargeDocuments: makeDirectTypeProxy(expr.dig(config, ["documentBackfillConfig", "splitLargeDocuments"], false)),
             documentBackfillInitialLeaseDuration: makeStringTypeProxy(expr.dig(config, ["documentBackfillConfig", "initialLeaseDuration"], expr.literal("PT1H"))),
             documentBackfillMaxConnections: makeDirectTypeProxy(expr.dig(config, ["documentBackfillConfig", "maxConnections"], 10)),
             documentBackfillMaxShardSizeBytes: makeDirectTypeProxy(expr.dig(config, ["documentBackfillConfig", "maxShardSizeBytes"], 80 * 1024 * 1024 * 1024)),

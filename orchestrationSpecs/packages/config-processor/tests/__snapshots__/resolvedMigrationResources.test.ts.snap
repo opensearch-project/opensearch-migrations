@@ -238,6 +238,7 @@ exports[`resolved migration resources extracts resolved resource parameters from
       },
       "documentBackfillServerGeneratedIds": "AUTO",
       "documentBackfillSkipApproval": false,
+      "documentBackfillSplitLargeDocuments": false,
       "documentBackfillUseRecoverySource": false,
       "documentBackfillUseTargetClusterForWorkCoordination": false,
       "externalSnapshotName": "",

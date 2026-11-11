@@ -5,6 +5,7 @@ import java.net.HttpURLConnection;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.BitSet;
 import java.util.HashMap;
@@ -83,6 +84,7 @@ public abstract class OpenSearchClient {
     private final long maxBytesPerBulkRequest;
 
     private final FailedDocumentStreamContext failedDocumentStream;
+    private volatile boolean splitLargeDocuments;
 
     protected OpenSearchClient(RestClient client, FailedRequestsLogger failedRequestsLogger, Version version,
                                CompressionMode compressionMode, int maxDocsPerBulkRequest, long maxBytesPerBulkRequest) {
@@ -139,6 +141,25 @@ public abstract class OpenSearchClient {
      */
     public void setFailedDocumentStreamWorkItem(String workItemId) {
         failedDocumentStream.workItemId = workItemId;
+    }
+
+    /**
+     * Opt in to sending an index operation larger than the bulk request size as several requests instead of
+     * one oversized request; see {@link LargeDocumentSplit}. Operations that fit are sent exactly as before.
+     */
+    public void setSplitLargeDocuments(boolean enabled) {
+        if (enabled && !version.getFlavor().isOpenSearch()) {
+            throw new IllegalArgumentException("Splitting large documents requires an OpenSearch target, not " + version);
+        }
+        if (enabled && version.getFlavor() == Flavor.AMAZON_SERVERLESS_OPENSEARCH) {
+            log.warn("Splitting large documents has not been verified against OpenSearch Serverless, where a "
+                + "document that already exists is replaced without a sequence-number condition");
+        }
+        splitLargeDocuments = enabled;
+    }
+
+    protected boolean splitsLargeDocuments() {
+        return splitLargeDocuments;
     }
 
     public FailedDocumentStreamSink getFailedDocumentStreamSink() {
@@ -635,10 +656,28 @@ public abstract class OpenSearchClient {
             .bufferUntil(new BatchSizePredicate<>(maxDocsPerBulkRequest, maxBytesPerBulkRequest,
                 (PreparedOperation op) -> op.encoded().size()), true)
             // A split batch completes in source order, before its source checkpoint can advance.
-            .concatMap(batch -> executeBulkWithRetry(indexName, batch, context, allowlist), 1)
+            .concatMap(batch -> splitsLargeDocuments() && batch.get(0).encoded().size() > maxBytesPerBulkRequest
+                ? sendOversized(indexName, batch, context, allowlist)
+                : executeBulkWithRetry(indexName, batch, context, allowlist), 1)
             .reduce((previous, next) -> new BulkResponse(next.statusCode, next.statusText, next.headers, next.body,
                 previous.target.plus(next.target), previous.requests.plus(next.requests)))
             .defaultIfEmpty(new BulkResponse(200, "OK", Map.of(), "{\"errors\":false,\"items\":[]}")));
+    }
+
+    /** An operation above the request size is always alone in its batch: split it, or failing that send it whole. */
+    private Mono<BulkResponse> sendOversized(
+        String indexName, List<PreparedOperation> batch,
+        IRfsContexts.IRequestContext context, DocumentExceptionAllowlist allowlist
+    ) {
+        var whole = batch.get(0);
+        return LargeDocumentSplit.send(whole.encoded(), maxBytesPerBulkRequest,
+                version.getFlavor() != Flavor.AMAZON_SERVERLESS_OPENSEARCH,
+                () -> client.getAsync(indexName + "?flat_settings=true", context),
+                // Failures of any fragment are recorded against the whole original operation.
+                (fragment, allowed) -> executeBulkWithRetry(indexName,
+                    new ArrayList<>(List.of(new PreparedOperation(whole.operation(), fragment))), context, allowed),
+                allowlist)
+            .switchIfEmpty(Mono.defer(() -> executeBulkWithRetry(indexName, batch, context, allowlist)));
     }
 
     private static BulkNdjson.SerializedBulk assemble(List<PreparedOperation> pending) {
@@ -1040,6 +1079,11 @@ public abstract class OpenSearchClient {
         @Override
         protected Retry getBulkRetryStrategy() {
             return unbound.getBulkRetryStrategy();
+        }
+
+        @Override
+        protected boolean splitsLargeDocuments() {
+            return unbound.splitsLargeDocuments();
         }
     }
 }

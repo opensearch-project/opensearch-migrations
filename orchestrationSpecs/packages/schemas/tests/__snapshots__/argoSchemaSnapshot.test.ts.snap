@@ -2345,6 +2345,10 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "type": "number",
                       "default": 10485760
                     },
+                    "splitLargeDocuments": {
+                      "type": "boolean",
+                      "default": false
+                    },
                     "initialLeaseDuration": {
                       "type": "string",
                       "pattern": "^[-+]?P(?:(\\\\d+)D)?(?:T(?:(\\\\d+)H)?(?:(\\\\d+)M)?(?:(\\\\d+(?:\\\\.\\\\d+)?)S)?)?$",
@@ -5348,6 +5352,12 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "type": "number",
                         "default": 10485760,
                         "description": "Maximum aggregate document size in bytes per bulk indexing request. Individual documents larger than this limit are sent as single-document requests."
+                      },
+                      "splitLargeDocuments": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Send a document larger than documentsSizePerBulkRequest as several bulk requests that each fit the limit: the first writes some of its fields and each later partial update merges more. Documents that cannot be split safely are still sent whole. The document is visible while incomplete. OpenSearch targets only.",
+                        "changeRestriction": "gated"
                       },
                       "initialLeaseDuration": {
                         "type": "string",
