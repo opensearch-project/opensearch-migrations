@@ -14,7 +14,7 @@ AZURE_SNAPSHOT_CONFIG_MAP = "migrations-default-azure-config"
 AZURE_CREDENTIALS_SECRET_NAME = "azurite-test-creds"
 
 
-class Test0022AzureSnapshotMigration(MATestBase):
+class Test0025AzureSnapshotMigration(MATestBase):
     """
     End-to-end migration test using an Azure Blob Storage snapshot repository.
 
