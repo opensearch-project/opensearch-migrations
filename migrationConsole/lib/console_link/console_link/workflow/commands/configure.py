@@ -13,8 +13,13 @@ from kubernetes.client.rest import ApiException
 
 from ...models.command_result import CommandResult
 from ..models.config import WorkflowConfig
-from ..models.utils import get_current_namespace, get_workflow_config_store, get_credentials_secret_store
-from .secret_utils import process_secrets, validate_and_find_secrets
+from ..models.utils import (
+    get_azure_credentials_secret_store,
+    get_credentials_secret_store,
+    get_current_namespace,
+    get_workflow_config_store,
+)
+from .secret_utils import find_unusable_azure_secrets, process_secrets, validate_and_find_secrets
 from .hints import hint_after_configure_edit, hint_configure_fix
 
 logger = logging.getLogger(__name__)
@@ -30,6 +35,11 @@ STDIN_SECRET_HELP = (
 )
 STDIN_SECRET_SILENT_HELP = 'Disable terminal echo while reading credentials from stdin.'
 SKIP_CONFIRMATION_HELP = 'Do not prompt for confirmation.'
+AZURE_STDIN_SECRET_FORMAT_ERROR = (
+    "Azure storage credential from stdin was not well-formed. Expected a single non-empty line."
+)
+AZURE_SELECTOR_REQUIRED_ERROR = "--azure requires exactly one of --account-key or --sas-token."
+AZURE_SELECTOR_WITHOUT_AZURE_ERROR = "--account-key and --sas-token can only be used with --azure."
 
 
 def _get_empty_config_template() -> str:
@@ -213,7 +223,7 @@ def _credentials_secret_store(ctx):
 def _ensure_workflow_context(ctx):
     ctx.ensure_object(dict)
     ctx.obj.setdefault('config_store', None)
-    ctx.obj.setdefault('secret_store', None)
+    ctx.obj.setdefault('secret_stores', {})
     ctx.obj.setdefault('namespace', get_current_namespace())
 
 
@@ -226,7 +236,7 @@ def _load_current_config(ctx) -> WorkflowConfig:
     return config
 
 
-def _configured_secret_names(ctx):
+def _configured_secrets_result(ctx):
     config = _load_current_config(ctx)
     result = validate_and_find_secrets(config.raw_yaml)
     if not result.get('valid', False):
@@ -235,6 +245,11 @@ def _configured_secret_names(ctx):
     invalid = result.get('invalidSecrets')
     if invalid:
         raise click.ClickException(f"Invalidly named secrets found: {invalid}")
+    return result
+
+
+def _configured_secret_names(ctx, result=None):
+    result = result or _configured_secrets_result(ctx)
     return sorted(set(result.get('validSecrets', []) or []))
 
 
@@ -250,10 +265,18 @@ def _show_secret_names(names, empty_message):
         click.echo(name)
 
 
-def _missing_config_secret_names(ctx):
-    names = _configured_secret_names(ctx)
+def _missing_config_secret_names(ctx, result=None):
+    names = _configured_secret_names(ctx, result)
     existing = _credentials_secret_store(ctx).secrets_exist(names)
     return [name for name in names if not existing.get(name)]
+
+
+def _missing_azure_secret_names(ctx, result):
+    names = result.get('azureSecrets') or []
+    if not names:
+        return []
+    missing, _ = find_unusable_azure_secrets(get_azure_credentials_secret_store(ctx), names)
+    return missing
 
 
 def _complete_managed_secret(ctx, _param, incomplete):
@@ -312,6 +335,29 @@ def _get_basic_auth_credentials(stdin: bool, silent: bool = False):
     return _prompt_basic_auth_credentials()
 
 
+def _get_azure_credentials(key: str, stdin: bool, silent: bool = False):
+    if silent and not stdin:
+        raise click.ClickException("--silent can only be used with --stdin.")
+    if stdin:
+        value = _read_secret_stdin(silent).rstrip('\r\n')
+        if not value or '\n' in value or '\r' in value:
+            raise click.ClickException(AZURE_STDIN_SECRET_FORMAT_ERROR)
+    else:
+        prompt = "Account key" if key == "accountKey" else "SAS token"
+        value = click.prompt(prompt, hide_input=True, confirmation_prompt=True)
+    return {key: value}
+
+
+def _azure_credential_key(azure: bool, account_key: bool, sas_token: bool) -> Optional[str]:
+    if not azure:
+        if account_key or sas_token:
+            raise click.ClickException(AZURE_SELECTOR_WITHOUT_AZURE_ERROR)
+        return None
+    if account_key == sas_token:
+        raise click.ClickException(AZURE_SELECTOR_REQUIRED_ERROR)
+    return "accountKey" if account_key else "sasToken"
+
+
 def _read_raw_secret(secret_store, name):
     try:
         return secret_store.v1.read_namespaced_secret(name=name, namespace=secret_store.namespace)
@@ -360,14 +406,27 @@ def list_secrets(ctx):
     help=STDIN_SECRET_HELP,
 )
 @click.option('--silent', is_flag=True, default=False, help=STDIN_SECRET_SILENT_HELP)
+@click.option('--azure', is_flag=True, default=False,
+              help='Create Azure storage credentials instead. Requires --account-key or --sas-token; '
+                   'with --stdin, reads the value as a single line.')
+@click.option('--account-key', is_flag=True, default=False,
+              help='With --azure, store an Azure storage account key (key accountKey).')
+@click.option('--sas-token', is_flag=True, default=False,
+              help='With --azure, store an Azure SAS token (key sasToken).')
 @click.argument('name', required=False, shell_complete=_complete_missing_secret)
 @click.pass_context
-def create_secret(ctx, show_missing, stdin, silent, name):
+def create_secret(ctx, show_missing, stdin, silent, azure, account_key, sas_token, name):
     """Create HTTP Basic credentials.
     Interactively prompts for username and password by default.
-    Use --stdin to read USERNAME:PASSWORD non-interactively."""
+    Use --stdin to read USERNAME:PASSWORD non-interactively.
+    Use --azure with --account-key or --sas-token for Azure storage credentials."""
     if show_missing:
-        _show_secret_names(_missing_config_secret_names(ctx), "No missing HTTP Basic credentials found.")
+        result = _configured_secrets_result(ctx)
+        _show_secret_names(_missing_config_secret_names(ctx, result), "No missing HTTP Basic credentials found.")
+        missing_azure = _missing_azure_secret_names(ctx, result)
+        if missing_azure:
+            click.echo("Missing Azure storage credentials:")
+            _show_secret_names(missing_azure, "")
         return
 
     if not name:
@@ -375,14 +434,25 @@ def create_secret(ctx, show_missing, stdin, silent, name):
         click.echo(ctx.get_help())
         ctx.exit(1)
 
-    secret_store = _credentials_secret_store(ctx)
+    azure_key = _azure_credential_key(azure, account_key, sas_token)
+    if azure_key:
+        _ensure_workflow_context(ctx)
+        secret_store = get_azure_credentials_secret_store(ctx)
+        kind = "Azure storage credentials"
+    else:
+        secret_store = _credentials_secret_store(ctx)
+        kind = "HTTP Basic credentials"
     existing = _read_raw_secret(secret_store, name)
     if existing is not None:
         if _secret_has_managed_labels(secret_store, existing):
-            raise click.ClickException(f"Managed HTTP Basic credentials already exist: {name}")
+            raise click.ClickException(f"Managed {kind} already exist: {name}")
         raise click.ClickException(f"Kubernetes Secret {name} already exists but is not managed by workflow configure.")
 
-    message = secret_store.save_secret(name, _get_basic_auth_credentials(stdin, silent))
+    if azure_key:
+        credentials = _get_azure_credentials(azure_key, stdin, silent)
+    else:
+        credentials = _get_basic_auth_credentials(stdin, silent)
+    message = secret_store.save_secret(name, credentials)
     if not stdin:
         click.echo(_credentials_save_message(message))
 

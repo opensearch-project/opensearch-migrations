@@ -22,6 +22,7 @@ conditionalPackageInstalls:
   # Packages for testing and local development
   localstack: true
   fake-gcs-server: false  # local GCS emulator; enable alongside cloudProvider=gcp for local testing
+  azurite: false          # local Azure Blob Storage emulator for azure:// snapshot testing
   # Nice to haves that aren't fully supported yet
   gatekeeper: false
   grafana: false
@@ -88,7 +89,14 @@ aws:
   # given) and disabling the built-in NodePools, whose nodes always use "default".
   nodeClassName: default
 
-cloudProvider: ""
+cloudProvider: ""  # "" | aws | gcp | azure
+
+azure:
+  # Client ID of the user-assigned managed identity that Microsoft Entra Workload ID federates to
+  # this release's service accounts. Set with cloudProvider=azure to annotate the service accounts
+  # (azure.workload.identity/client-id) and label the pods (azure.workload.identity/use) that read
+  # Azure Blob Storage.
+  workloadIdentityClientId: ""
 
 gcp:
   project: ""
@@ -233,6 +241,27 @@ gcsBucketConfiguration:
   useLocalGcs: false   # set true for kind; wires fake-gcs-server as the GCS endpoint
   localGcsEndpoint: "fake-gcs-server"  # K8s service name for fake-gcs-server
 
+azureStorageConfiguration:
+  useLocalAzurite: false       # set true for kind; wires Azurite as the Azure Blob endpoint
+  localAzuriteEndpoint: "azurite"  # K8s service name for Azurite; clusterWorkflows.yaml assumes "azurite"
+  accountName: ""
+  containerName: ""
+  endpoint: ""
+  localCredentialsSecretName: "azurite-test-creds"
+  containerOperationImage: "mcr.microsoft.com/azure-cli:2.91.0"
+  containerOperationImagePullPolicy: "IfNotPresent"
+  # cloudProvider=azure only: create the container on install, delete it on uninstall.
+  create: false
+  deleteOnUninstall: false
+  serviceAccountName: "migrations-service-account"
+  # Used instead of Workload ID by the Argo artifact repository, the console and the container
+  # jobs: a Secret holding one key, accountKey or sasToken (a SAS without a leading "?"); set
+  # `key` to match it. A container-scoped SAS cannot create or delete the container: pre-create
+  # it and leave deleteOnUninstall off, or use Workload ID or an account key.
+  artifactCredentials:
+    secretName: ""
+    key: sasToken
+
 kafkaExternal:
   enabled: false
   brokers: ""
@@ -246,6 +275,8 @@ logs:
     name: logs-pvc
     size: 10Gi
     storageClass: ""
+    # ReadWriteMany needs a storage class every node can mount (fluent-bit runs on each node).
+    accessMode: ReadWriteOnce
   # Alternative to sharedLogsVolume for local clusters: Fluent Bit writes each node's logs to
   # <node name>/ under this node path (valuesForLocalK8s.yaml), and the console mounts the path at
   # /shared-logs-output. kindTesting.sh mounts one host directory here on every node, so the console

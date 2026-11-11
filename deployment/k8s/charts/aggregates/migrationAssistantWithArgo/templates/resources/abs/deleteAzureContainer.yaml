@@ -1,0 +1,70 @@
+{{- if and (eq .Values.cloudProvider "azure") .Values.azureStorageConfiguration.deleteOnUninstall (not .Values.azureStorageConfiguration.useLocalAzurite) }}
+{{- $creds := .Values.azureStorageConfiguration.artifactCredentials }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: delete-azure-container-{{ .Release.Name }}
+  annotations:
+    "helm.sh/hook": pre-delete
+    # After the runtime cleanup hook at weight -10, as in deleteS3Bucket.yaml.
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  # No ttlSecondsAfterFinished, so a failed hook pod stays for kubectl logs (as in deleteS3Bucket.yaml).
+  backoffLimit: 1
+  activeDeadlineSeconds: 600
+  podFailurePolicy:
+    rules:
+      - action: Ignore
+        onPodConditions:
+          - type: DisruptionTarget
+      - action: FailJob
+        onExitCodes:
+          containerName: azure-cli
+          operator: NotIn
+          values: [0]
+  template:
+    metadata:
+      labels:
+        app: azure-container-delete
+        {{- if include "migration.azureWorkloadIdentityEnabled" . }}
+        azure.workload.identity/use: "true"
+        {{- end }}
+      annotations:
+        karpenter.sh/do-not-disrupt: "true"
+    spec:
+      serviceAccountName: {{ .Values.azureStorageConfiguration.serviceAccountName }}
+      restartPolicy: Never
+      containers:
+        - name: azure-cli
+          image: {{ .Values.azureStorageConfiguration.containerOperationImage }}
+          imagePullPolicy: {{ .Values.azureStorageConfiguration.containerOperationImagePullPolicy }}
+          env:
+            - name: AZURE_STORAGE_ACCOUNT
+              value: {{ include "migration.azureAccountName" . | quote }}
+            - name: CONTAINER_NAME
+              value: {{ include "migration.azureContainerName" . | quote }}
+            {{- if $creds.secretName }}
+            - name: {{ ternary "AZURE_STORAGE_KEY" "AZURE_STORAGE_SAS_TOKEN" (eq (include "migration.azureArtifactCredentialsKey" .) "accountKey") }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $creds.secretName }}
+                  key: {{ $creds.key }}
+            {{- end }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              {{- include "migration.azureContainerFunctions" . | nindent 12 }}
+
+              azure_login
+              echo "Target container for deletion: $AZURE_STORAGE_ACCOUNT/$CONTAINER_NAME"
+              if container_exists; then
+                # Deleting a container deletes its blobs, so there is no separate empty step.
+                az storage container delete --name "$CONTAINER_NAME" -o none
+                echo "Container $CONTAINER_NAME deleted."
+              else
+                echo "Container $CONTAINER_NAME does not exist. Skipping deletion."
+              fi
+{{- end }}

@@ -309,6 +309,23 @@ spec:
               {{- if $.Values.gcp.serviceAccountEmail }}
                    --set-string "controller.serviceAccount.annotations.iam\\.gke\\.io/gcp-service-account={{ $.Values.gcp.serviceAccountEmail }}" \
                {{- end }}
+            {{- else if eq $.Values.cloudProvider "azure" }}
+              {{- $azureCreds := $.Values.azureStorageConfiguration.artifactCredentials }}
+                   --set artifactRepository.azure.container="{{ include "migration.azureContainerName" $ }}" \
+                   --set artifactRepository.azure.endpoint="{{ include "migration.azureAccountUrl" $ }}" \
+              {{- if $azureCreds.secretName }}
+                   --set artifactRepository.azure.accountKeySecret.name="{{ $azureCreds.secretName }}" \
+                   --set artifactRepository.azure.accountKeySecret.key="{{ include "migration.azureArtifactCredentialsKey" $ }}" \
+              {{- else if $.Values.azure.workloadIdentityClientId }}
+                   --set artifactRepository.azure.useSDKCreds=true \
+              {{- else }}
+                {{- fail "cloudProvider=azure needs azure.workloadIdentityClientId or azureStorageConfiguration.artifactCredentials.secretName for the Argo artifact repository" }}
+              {{- end }}
+              {{- if $.Values.azure.workloadIdentityClientId }}
+                   --set-string "controller.workflowDefaults.spec.podMetadata.labels.azure\\.workload\\.identity/use=true" \
+                   --set-string "server.serviceAccount.annotations.azure\\.workload\\.identity/client-id={{ $.Values.azure.workloadIdentityClientId }}" \
+                   --set-string "server.podLabels.azure\\.workload\\.identity/use=true" \
+              {{- end }}
             {{- end }}
           {{- end }}
           {{- if eq $name "ack-cloudwatch-controller" }}

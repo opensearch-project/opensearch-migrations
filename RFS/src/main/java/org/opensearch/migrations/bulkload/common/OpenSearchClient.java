@@ -384,7 +384,16 @@ public abstract class OpenSearchClient {
         ObjectNode settings,
         IRfsContexts.ICreateSnapshotContext context
     ) {
-        String targetPath = SNAPSHOT_PREFIX_STR + repoName;
+        registerSnapshotRepo(repoName, settings, context, true);
+    }
+
+    public void registerSnapshotRepo(
+        String repoName,
+        ObjectNode settings,
+        IRfsContexts.ICreateSnapshotContext context,
+        boolean verify
+    ) {
+        String targetPath = SNAPSHOT_PREFIX_STR + repoName + (verify ? "" : "?verify=false");
         log.info("Starting registerSnapshotRepo for repoName={}", repoName);
         long startTime = System.currentTimeMillis();
         var putResponse = client.putAsync(targetPath, settings.toString(), context.createRegisterRequest()).flatMap(resp -> {

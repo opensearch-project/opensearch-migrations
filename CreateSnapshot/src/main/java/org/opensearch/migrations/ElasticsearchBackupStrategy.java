@@ -41,7 +41,8 @@ public class ElasticsearchBackupStrategy implements SourceBackupStrategy {
             args.s3Region,
             args.endpoint,
             args.maxSnapshotRateMBPerNode,
-            args.s3RoleArn
+            args.s3RoleArn,
+            args.skipRepositoryVerification
         );
 
         try {

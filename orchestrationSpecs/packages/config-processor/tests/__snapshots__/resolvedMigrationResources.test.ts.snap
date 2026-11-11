@@ -170,6 +170,7 @@ exports[`resolved migration resources extracts resolved resource parameters from
       "repoPathUri": "s3://bucket/path",
       "repoS3RoleArn": "",
       "repoUseLocalStack": false,
+      "skipRepositoryVerification": false,
       "snapshotLabel": "snap1",
       "snapshotPrefix": "snap1",
       "solrCollections": [],

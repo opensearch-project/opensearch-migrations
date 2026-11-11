@@ -43,6 +43,9 @@ spec:
       # Any references to workflow.parameters must come from top level workflow
       - name: snapshot-configmap
         value: "migrations-default-s3-config"
+      # Secret with the migration tools' Azure credentials (azure:// repos only)
+      - name: azure-credentials-secret-name
+        value: ""
       - name: migration-image-configmap
         value: "migration-image-config"
       - name: monitor-retry-limit
@@ -124,6 +127,8 @@ spec:
             template: generate-migration-configs
             arguments:
               parameters:
+                - name: azure-credentials-secret-name
+                  value: "{{workflow.parameters.azure-credentials-secret-name}}"
                 - name: source-config
                   value: "{{steps.create-source-cluster.outputs.parameters.cluster-config}}"
                 - name: target-config
@@ -283,6 +288,8 @@ spec:
                 name: "{{workflow.parameters.snapshot-configmap}}"
                 key: AWS_REGION
                 optional: true
+          - name: azure-credentials-secret-name
+            default: ""
       container:
         image: "{{inputs.parameters.imageMigrationConsoleLocation}}"
         imagePullPolicy: "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
@@ -300,6 +307,7 @@ spec:
             BUCKET_ENDPOINT='{{inputs.parameters.bucketEndpoint}}'
             SNAPSHOT_ROLE_ARN='{{inputs.parameters.snapshotRoleArn}}'
             AWS_REGION='{{inputs.parameters.awsRegion}}'
+            AZURE_CREDENTIALS_SECRET_NAME='{{inputs.parameters.azure-credentials-secret-name}}'
 
             SUFFIX=$(echo "{{workflow.uid}}" | cut -c1-8)
             SNAPSHOT_NAME_CONFIG=$(echo "$SNAPSHOT_MIGRATION_CONFIGS" | jq '
@@ -309,19 +317,21 @@ spec:
               .[0].snapshotConfig.solrBackupConfig // {"createBackupConfig": {}}
             ')
 
-            # Build snapshot repo config from the full URI (s3://... or gs://...)
+            # Build snapshot repo config from the full URI (s3://..., gs://... or azure://...)
             SNAPSHOT_REPO=$(jq -n \
               --arg uri "$BUCKET_URI" \
               --arg endpoint "$BUCKET_ENDPOINT" \
               --arg suffix "$SUFFIX" \
               --arg roleArn "$SNAPSHOT_ROLE_ARN" \
               --arg region "$AWS_REGION" \
+              --arg azureSecret "$AZURE_CREDENTIALS_SECRET_NAME" \
               '{
                 "repoPathUri": ($uri + "/" + $suffix)
               }
               + (if $endpoint != "" then {"endpoint": $endpoint} else {} end)
               + (if $roleArn != "" then {"s3RoleArn": $roleArn} else {} end)
-              + (if $region != "" then {"awsRegion": $region} else {} end)')
+              + (if $region != "" then {"awsRegion": $region} else {} end)
+              + (if $azureSecret != "" then {"azureCredentialsSecretName": $azureSecret} else {} end)')
             
             SOURCE_WITH_REPO=$(echo "$SOURCE_CONFIG" | jq --argjson repo "$SNAPSHOT_REPO" --argjson snapshotNameConfig "$SNAPSHOT_NAME_CONFIG" --argjson solrBackupConfig "$SOLR_BACKUP_CONFIG" '
               # Add source-specific snapshotInfo with repo and snapshot/backup definition
