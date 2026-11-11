@@ -87,6 +87,21 @@ describe('MigrationConfigTransformer validation', () => {
 
     const cloneBaseConfig = () => JSON.parse(JSON.stringify(baseConfig));
 
+    it('should omit version from transformed target identities while retaining source version', async () => {
+        const result = await transformer.processFromObject(cloneBaseConfig());
+        const snapshotMigration = result.snapshotMigrations![0];
+        const trafficReplay = result.trafficReplays![0];
+
+        expect(snapshotMigration.sourceConnectionIdentity).toEqual(expect.objectContaining({
+            version: "ES 7.10",
+        }));
+        expect(snapshotMigration.targetConnectionIdentity).not.toHaveProperty("version");
+        expect(trafficReplay.targetConnectionIdentity).not.toHaveProperty("version");
+        expect(snapshotMigration.targetConnectionIdentity).toEqual(expect.objectContaining({
+            solrContextPath: "",
+        }));
+    });
+
     it('should reject rogue key at top level', () => {
         const configWithRogueKey = {
             ...baseConfig,

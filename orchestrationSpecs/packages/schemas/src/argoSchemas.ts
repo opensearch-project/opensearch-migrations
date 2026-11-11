@@ -163,9 +163,7 @@ export const DENORMALIZED_REPO_CONFIG =
         repoName: z.string(),
     }));
 
-export const CLUSTER_CONNECTION_IDENTITY = z.object({
-    label: z.string(),
-    version: z.string(),
+const CLUSTER_CONNECTION_IDENTITY_COMMON_FIELDS = {
     endpoint: z.string(),
     allowInsecure: z.boolean(),
     // Solr sources only; "" elsewhere.
@@ -176,6 +174,17 @@ export const CLUSTER_CONNECTION_IDENTITY = z.object({
     authSigv4Service: z.string(),
     authMtlsClientSecretName: z.string(),
     authMtlsCaCertHash: z.string(),
+};
+
+export const SOURCE_CLUSTER_CONNECTION_IDENTITY = z.object({
+    label: z.string(),
+    version: z.string(),
+    ...CLUSTER_CONNECTION_IDENTITY_COMMON_FIELDS,
+});
+
+export const TARGET_CLUSTER_CONNECTION_IDENTITY = z.object({
+    label: z.string(),
+    ...CLUSTER_CONNECTION_IDENTITY_COMMON_FIELDS,
 });
 
 export const COMPLETE_SNAPSHOT_CONFIG =
@@ -378,8 +387,8 @@ export const SNAPSHOT_MIGRATION_CONFIG = z.object({
     snapshotConfigChecksum: z.string(),
     metadataMigrationConfig: ARGO_METADATA_OPTIONS.optional(),
     documentBackfillConfig: ARGO_RFS_OPTIONS.optional(),
-    sourceConnectionIdentity: CLUSTER_CONNECTION_IDENTITY,
-    targetConnectionIdentity: CLUSTER_CONNECTION_IDENTITY,
+    sourceConnectionIdentity: SOURCE_CLUSTER_CONNECTION_IDENTITY,
+    targetConnectionIdentity: TARGET_CLUSTER_CONNECTION_IDENTITY,
     sourceVersion: z.string(),
     sourceLabel: z.string(),
     targetConfig: NAMED_TARGET_CLUSTER_CONFIG,
@@ -410,7 +419,7 @@ export const NAMED_KAFKA_CLIENT_CONFIG =
 export const DENORMALIZED_PROXY_CONFIG = z.object({
     name: z.string(),
     sourceConfig: NAMED_SOURCE_CLUSTER_CONFIG,
-    sourceConnectionIdentity: CLUSTER_CONNECTION_IDENTITY,
+    sourceConnectionIdentity: SOURCE_CLUSTER_CONNECTION_IDENTITY,
     kafkaConfig: NAMED_KAFKA_CLIENT_CONFIG,
     proxyConfig: ARGO_PROXY_OPTIONS,
     configChecksum: z.string(),
@@ -431,7 +440,7 @@ export const DENORMALIZED_PROXY_SETUP_CONFIG = DENORMALIZED_PROXY_CONFIG.omit({
 export const PER_SOURCE_CREATE_SNAPSHOTS_CONFIG = z.object({
     label: z.string(),
     snapshotPrefix: z.string(),
-    sourceConnectionIdentity: CLUSTER_CONNECTION_IDENTITY,
+    sourceConnectionIdentity: SOURCE_CLUSTER_CONNECTION_IDENTITY,
     config: ARGO_CREATE_SNAPSHOT_OPTIONS,
     repo: DENORMALIZED_REPO_CONFIG,
     semaphoreConfigMapName: z.string(),
@@ -476,7 +485,7 @@ export const DENORMALIZED_REPLAY_CONFIG = z.object({
     kafkaConfig: NAMED_KAFKA_CLIENT_CONFIG,
     replayerConfig: ARGO_REPLAYER_OPTIONS,
     toTarget: NAMED_TARGET_CLUSTER_CONFIG,
-    targetConnectionIdentity: CLUSTER_CONNECTION_IDENTITY,
+    targetConnectionIdentity: TARGET_CLUSTER_CONNECTION_IDENTITY,
     configChecksum: z.string(),
     resourceUid: z.string(),
 });
