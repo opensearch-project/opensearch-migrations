@@ -25,9 +25,12 @@ import java.util.regex.Pattern;
 import org.opensearch.migrations.arguments.ArgLogUtils;
 import org.opensearch.migrations.arguments.ArgNameConstants;
 import org.opensearch.migrations.bulkload.SnapshotExtractor;
+import org.opensearch.migrations.bulkload.common.AzureRepo;
+import org.opensearch.migrations.bulkload.common.CollectionRoutedTarget;
 import org.opensearch.migrations.bulkload.common.DeltaMode;
 import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
+import org.opensearch.migrations.bulkload.common.FilterScheme;
 import org.opensearch.migrations.bulkload.common.GcsRepo;
 import org.opensearch.migrations.bulkload.common.GcsUri;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
@@ -35,6 +38,7 @@ import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.RepoUri;
 import org.opensearch.migrations.bulkload.common.S3Repo;
 import org.opensearch.migrations.bulkload.common.S3Uri;
+import org.opensearch.migrations.bulkload.common.ServerlessCollectionRouting;
 import org.opensearch.migrations.bulkload.common.SnapshotReadFailures;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
@@ -173,13 +177,13 @@ public class RfsMigrateDocuments {
 
         @Parameter(required = false,
             names = { "--repo-uri", "--s3-repo-uri", "--s3RepoUri", "--snapshot-local-dir", "--snapshotLocalDir", "--file-system-repo-path" },
-            description = ("Repository URI. Schemes: file:///path, s3://bucket/path, gs://bucket/path (or bare absolute path)"))
+            description = ("Repository URI. Schemes: file:///path, s3://bucket/path, gs://bucket/path, azure://account/container/path (or bare absolute path)"))
         public String repoUri = null;
 
         @Parameter(required = false,
             names = { "--local-dir", "--s3-local-dir", "--s3LocalDir", "--gcs-local-dir", "--gcsLocalDir" },
             description = ("The absolute path to the directory on local disk to download remote repo files to.  " +
-                "Required for s3:// and gs:// repos."))
+                "Required for s3://, gs://, and azure:// repos."))
         public String localDir = null;
 
         @Parameter(required = false,
@@ -189,8 +193,19 @@ public class RfsMigrateDocuments {
 
         @Parameter(required = false,
             names = { "--endpoint", "--s3-endpoint", "--s3Endpoint" },
-            description = ("Custom endpoint for the repository service (e.g. LocalStack for S3, fake-gcs-server for GCS)"))
+            description = ("Custom endpoint for the repository service (e.g. LocalStack for S3, fake-gcs-server for GCS, Azurite for Azure)"))
         public String endpoint = null;
+
+        @Parameter(required = false,
+            names = { ArgNameConstants.AZURE_STORAGE_ACCOUNT_KEY_ARG_KEBAB_CASE, ArgNameConstants.AZURE_STORAGE_ACCOUNT_KEY_ARG_CAMEL_CASE },
+            description = "Optional. Storage account key for an azure:// repo. Mutually exclusive with --azure-storage-sas-token. "
+                + "If neither is set, the ambient Azure identity is used.")
+        public String azureStorageAccountKey = null;
+
+        @Parameter(required = false,
+            names = { ArgNameConstants.AZURE_STORAGE_SAS_TOKEN_ARG_KEBAB_CASE, ArgNameConstants.AZURE_STORAGE_SAS_TOKEN_ARG_CAMEL_CASE },
+            description = "Optional. SAS token for an azure:// repo. Mutually exclusive with --azure-storage-account-key.")
+        public String azureStorageSasToken = null;
 
         @Parameter(required = false,
             names = { "--lucene-dir", "--luceneDir" },
@@ -300,6 +315,17 @@ public class RfsMigrateDocuments {
                 "ALWAYS: always use server-generated IDs. " +
                 "NEVER: always preserve source IDs (may fail on serverless TIMESERIES/VECTOR).")
         public ServerGeneratedIdMode serverGeneratedIds = ServerGeneratedIdMode.AUTO;
+
+        @Parameter(required = false,
+            names = { "--collection-routing", "--collectionRouting" },
+            description = """
+                Optional. JSON object mapping source indices to collections on an OpenSearch Serverless \
+                per-account endpoint (<account-id>.aoss.<region>.on.aws), e.g. \
+                {"staticCollectionRouting": [{"sourceIndex": "shared-config", "collection": "common"}], \
+                "regexCollectionRouting": [{"sourceIndex": "(.+)-\\\\d{4}", "collection": "$1"}]}. \
+                An exact static match wins, otherwise the first regex that matches the whole index name is used. \
+                Requires SigV4 auth with service 'aoss'.""")
+        public String collectionRouting;
 
         @Parameter(required = false,
             names = { "--source-version", "--sourceVersion" },
@@ -516,6 +542,7 @@ public class RfsMigrateDocuments {
     }
 
     public static void validateArgs(Args args) {
+<<<<<<< HEAD
         validateSourceArgs(args);
         if (args.maxLeaseDuration.compareTo(args.initialLeaseDuration) < 0) {
             throw new ParameterException("--max-lease-duration (" + args.maxLeaseDuration
@@ -531,6 +558,14 @@ public class RfsMigrateDocuments {
     }
 
     private static void validateSourceArgs(Args args) {
+=======
+        try {
+            args.targetArgs.setCollectionRouted(ServerlessCollectionRouting.fromJson(args.collectionRouting).isPresent());
+        } catch (IllegalArgumentException e) {
+            throw new ParameterException(e.getMessage(), e);
+        }
+
+>>>>>>> 9286873def0859f36e6130924db91513861af4ed
         // Solr backup path
         if (args.sourceVersion != null && args.sourceVersion.getFlavor() == Flavor.SOLR) {
             if (args.repoUri == null) {
@@ -552,6 +587,9 @@ public class RfsMigrateDocuments {
                 // else here rather than in buildSolrSourceFactory, which fails after the
                 // migration has already started.
                 case RepoUri.GcsRepoUri g -> throw new ParameterException(
+                    "For Solr backup migration, provide --repo-uri with a file:// or s3:// scheme."
+                );
+                case RepoUri.AzureRepoUri a -> throw new ParameterException(
                     "For Solr backup migration, provide --repo-uri with a file:// or s3:// scheme."
                 );
             }
@@ -590,6 +628,18 @@ public class RfsMigrateDocuments {
                 if (args.localDir == null) {
                     throw new ParameterException(
                         "If a GCS repo is being used, --local-dir must be set."
+                    );
+                }
+            }
+            case RepoUri.AzureRepoUri a -> {
+                if (args.localDir == null) {
+                    throw new ParameterException(
+                        "If an Azure repo is being used, --local-dir must be set."
+                    );
+                }
+                if (args.azureStorageAccountKey != null && args.azureStorageSasToken != null) {
+                    throw new ParameterException(
+                        "Supply either --azure-storage-account-key or --azure-storage-sas-token, not both."
                     );
                 }
             }
@@ -690,18 +740,9 @@ public class RfsMigrateDocuments {
             new BulkFlowHeartbeat(targetClient.getBulkRetryBudget(), targetClient.getBulkInFlightLimit())));
         logFailedDocumentStreamStatus(failedDocumentStreamSink, resolvedSessionId);
 
-        boolean useServerGeneratedIds = switch (arguments.serverGeneratedIds) {
-            case ALWAYS -> true;
-            case NEVER -> false;
-            case AUTO -> {
-                var collectionType = targetClientFactory.detectServerlessCollectionType();
-                if (collectionType.requiresServerGeneratedIds()) {
-                    log.atInfo().setMessage("Auto-enabling server-generated IDs for {} serverless collection").addArgument(collectionType).log();
-                    yield true;
-                }
-                yield false;
-            }
-        };
+        var collectionRoutedTarget = buildCollectionRoutedTarget(arguments, targetClientFactory);
+        boolean useServerGeneratedIds = resolveUseServerGeneratedIds(
+            arguments.serverGeneratedIds, targetClientFactory, collectionRoutedTarget);
 
         var docTransformerConfig = TransformerConfigUtils.getTransformerConfig(arguments.docTransformationParams);
         if (docTransformerConfig != null) {
@@ -720,15 +761,81 @@ public class RfsMigrateDocuments {
 
         MigrationSourceFactory sourceFactory;
         if (arguments.sourceVersion != null && arguments.sourceVersion.getFlavor() == Flavor.SOLR) {
-            sourceFactory = buildSolrSourceFactory(arguments, targetClient, docTransformerSupplier, useServerGeneratedIds, context);
+            sourceFactory = buildSolrSourceFactory(arguments, targetClient, docTransformerSupplier,
+                useServerGeneratedIds, collectionRoutedTarget, context);
         } else {
             sourceFactory = buildElasticsearchSourceFactory(arguments, targetClient,
-                docTransformerSupplier, useServerGeneratedIds, emitDocType, context);
+                docTransformerSupplier, useServerGeneratedIds, collectionRoutedTarget, emitDocType, context);
         }
 
         var coordinatorInfo = resolveCoordinatorConnection(arguments, targetConnectionContext, targetVersion);
         runMigration(workerId, arguments, coordinatorInfo, context, sourceFactory, failedDocumentStreamSink,
             targetClient::getBulkFlowSummary);
+    }
+
+    /** Returns null unless the target is collection-routed. */
+    static CollectionRoutedTarget buildCollectionRoutedTarget(Args arguments, OpenSearchClientFactory targetClientFactory) {
+        return ServerlessCollectionRouting.fromJson(arguments.collectionRouting)
+            .map(routing -> new CollectionRoutedTarget(routing,
+                collection -> requiresServerGeneratedIds(arguments.serverGeneratedIds, targetClientFactory, collection)))
+            .orElse(null);
+    }
+
+    static boolean resolveUseServerGeneratedIds(
+        ServerGeneratedIdMode mode,
+        OpenSearchClientFactory targetClientFactory,
+        CollectionRoutedTarget collectionRoutedTarget
+    ) {
+        return switch (mode) {
+            case ALWAYS -> true;
+            case NEVER -> false;
+            // A collection-routed target decides per collection in CollectionRoutedTarget
+            case AUTO -> {
+                if (collectionRoutedTarget != null) {
+                    yield false;
+                }
+                var collectionType = targetClientFactory.detectServerlessCollectionType();
+                if (collectionType.requiresServerGeneratedIds()) {
+                    log.atInfo().setMessage("Auto-enabling server-generated IDs for {} serverless collection").addArgument(collectionType).log();
+                    yield true;
+                }
+                yield false;
+            }
+        };
+    }
+
+    /** Fails before any work item is created or acquired if an allowlisted index has no collection. */
+    static void validateCollectionRouting(
+        CollectionRoutedTarget collectionRoutedTarget,
+        org.opensearch.migrations.bulkload.pipeline.source.DocumentSource documentSource,
+        List<String> indexAllowlist
+    ) {
+        if (collectionRoutedTarget == null) {
+            return;
+        }
+        var allowed = FilterScheme.filterByAllowList(indexAllowlist, FilterScheme.FilterContext.INDEX);
+        collectionRoutedTarget.validateSourceIndices(
+            documentSource.listCollections().stream().filter(allowed).toList());
+    }
+
+    static boolean requiresServerGeneratedIds(
+        ServerGeneratedIdMode mode,
+        OpenSearchClientFactory targetClientFactory,
+        String collection
+    ) {
+        return switch (mode) {
+            case ALWAYS -> true;
+            case NEVER -> false;
+            case AUTO -> {
+                var collectionType = targetClientFactory.detectServerlessCollectionType(collection);
+                if (collectionType.requiresServerGeneratedIds()) {
+                    log.atInfo().setMessage("Auto-enabling server-generated IDs for {} serverless collection {}")
+                        .addArgument(collectionType).addArgument(collection).log();
+                    yield true;
+                }
+                yield false;
+            }
+        };
     }
 
     private static void runMigration(
@@ -877,6 +984,7 @@ public class RfsMigrateDocuments {
         OpenSearchClient targetClient,
         Supplier<IJsonTransformer> docTransformerSupplier,
         boolean useServerGeneratedIds,
+        CollectionRoutedTarget collectionRoutedTarget,
         boolean emitDocType,
         RootDocumentMigrationContext context
     ) {
@@ -896,6 +1004,13 @@ public class RfsMigrateDocuments {
                     Paths.get(arguments.localDir),
                     new GcsUri(g.rawUri()),
                     arguments.endpoint,
+                    finder);
+                case RepoUri.AzureRepoUri a -> AzureRepo.create(
+                    Paths.get(arguments.localDir),
+                    a.azureUri(),
+                    arguments.endpoint,
+                    arguments.azureStorageAccountKey,
+                    arguments.azureStorageSasToken,
                     finder);
                 case RepoUri.S3RepoUri s -> S3Repo.create(
                     Paths.get(arguments.localDir),
@@ -937,7 +1052,7 @@ public class RfsMigrateDocuments {
 
             return prepareAndMigrate(documentSource,
                 workCoordinator, processManager, targetClient, docTransformerSupplier,
-                useServerGeneratedIds, allowlist, progressCursor, cancellationRunnableRef,
+                useServerGeneratedIds, collectionRoutedTarget, allowlist, progressCursor, cancellationRunnableRef,
                 workItemTimeProvider, arguments, context, metricsReporter);
         };
     }
@@ -949,6 +1064,7 @@ public class RfsMigrateDocuments {
         OpenSearchClient targetClient,
         Supplier<IJsonTransformer> docTransformerSupplier,
         boolean useServerGeneratedIds,
+        CollectionRoutedTarget collectionRoutedTarget,
         DocumentExceptionAllowlist allowlist,
         AtomicReference<WorkItemCursor> progressCursor,
         AtomicReference<Runnable> cancellationRunnableRef,
@@ -957,6 +1073,7 @@ public class RfsMigrateDocuments {
         RootDocumentMigrationContext context,
         BiFunction<WorkItem, WorkItemCursor, Map<String, Object>> metricsReporter
     ) throws IOException, InterruptedException, NoWorkLeftException {
+        validateCollectionRouting(collectionRoutedTarget, documentSource, arguments.indexAllowlist);
         var scopedWorkCoordinator = prepareWorkCoordination(
             workCoordinator, processManager, documentSource,
             arguments.indexAllowlist, context);
@@ -969,6 +1086,7 @@ public class RfsMigrateDocuments {
             .batchConcurrency(arguments.maxConnections)
             .transformerSupplier(docTransformerSupplier)
             .allowServerGeneratedIds(useServerGeneratedIds)
+            .collectionRoutedTarget(collectionRoutedTarget)
             .allowlist(allowlist)
             .workCoordinator(scopedWorkCoordinator)
             .workItemTimeProvider(workItemTimeProvider)
@@ -1574,6 +1692,7 @@ public class RfsMigrateDocuments {
         OpenSearchClient targetClient,
         Supplier<IJsonTransformer> docTransformerSupplier,
         boolean useServerGeneratedIds,
+        CollectionRoutedTarget collectionRoutedTarget,
         RootDocumentMigrationContext context
     ) {
         return (workCoordinator, processManager, progressCursor, cancellationRunnableRef, workItemTimeProvider, metricsReporter) -> {
@@ -1616,7 +1735,7 @@ public class RfsMigrateDocuments {
 
             return prepareAndMigrate(documentSource,
                 workCoordinator, processManager, targetClient, docTransformerSupplier,
-                useServerGeneratedIds, allowlist, progressCursor, cancellationRunnableRef,
+                useServerGeneratedIds, collectionRoutedTarget, allowlist, progressCursor, cancellationRunnableRef,
                 workItemTimeProvider, arguments, context, metricsReporter);
         };
     }

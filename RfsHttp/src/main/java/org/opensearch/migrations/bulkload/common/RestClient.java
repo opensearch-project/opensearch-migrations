@@ -48,6 +48,7 @@ public class RestClient {
     @Getter
     private final ConnectionContext connectionContext;
     private final HttpClient client;
+    private final Map<String, List<String>> defaultHeaders;
 
     public static final String READ_METERING_HANDLER_NAME = "REST_CLIENT_READ_METERING_HANDLER";
     public static final String WRITE_METERING_HANDLER_NAME = "REST_CLIENT_WRITE_METERING_HANDLER";
@@ -112,6 +113,18 @@ public class RestClient {
             .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, (int) DEFAULT_CONNECT_TIMEOUT.toMillis())
             .responseTimeout(responseTimeout)
             .keepAlive(true);
+        this.defaultHeaders = Map.of();
+    }
+
+    private RestClient(RestClient other, Map<String, List<String>> defaultHeaders) {
+        this.connectionContext = other.connectionContext;
+        this.client = other.client;
+        this.defaultHeaders = Map.copyOf(defaultHeaders);
+    }
+
+    /** Returns a client on the same connections that adds these headers to every request, replacing any from this client */
+    public RestClient withDefaultHeaders(Map<String, List<String>> defaultHeaders) {
+        return new RestClient(this, defaultHeaders);
     }
 
     public static String getHostHeaderValue(ConnectionContext connectionContext) {
@@ -168,6 +181,7 @@ public class RestClient {
         if (body != null) {
             headers.put(CONTENT_TYPE_HEADER_NAME, List.of(JSON_CONTENT_TYPE));
         }
+        headers.putAll(defaultHeaders);
         if (additionalHeaders != null) {
             additionalHeaders.forEach((key, value) -> {
                     if (headers.containsKey(key.toLowerCase())) {
@@ -245,6 +259,14 @@ public class RestClient {
         return asyncRequest(HttpMethod.GET, path, null, null, context);
     }
 
+    public Mono<HttpResponse> getAsync(
+        String path,
+        Map<String, List<String>> additionalHeaders,
+        IRfsContexts.IRequestContext context
+    ) {
+        return asyncRequest(HttpMethod.GET, path, null, additionalHeaders, context);
+    }
+
     public Mono<HttpResponse> postAsync(
         String path,
         String body,
@@ -284,6 +306,15 @@ public class RestClient {
 
     public Mono<HttpResponse> putAsync(String path, String body, IRfsContexts.IRequestContext context) {
         return asyncRequest(HttpMethod.PUT, path, body, null, context);
+    }
+
+    public Mono<HttpResponse> putAsync(
+        String path,
+        String body,
+        Map<String, List<String>> additionalHeaders,
+        IRfsContexts.IRequestContext context
+    ) {
+        return asyncRequest(HttpMethod.PUT, path, body, additionalHeaders, context);
     }
 
     public HttpResponse put(String path, String body, IRfsContexts.IRequestContext context) {

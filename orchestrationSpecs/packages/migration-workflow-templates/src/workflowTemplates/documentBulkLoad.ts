@@ -41,7 +41,11 @@ import {CommonWorkflowParameters, workflowIdentityEnvVars, workflowScriptCommand
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 import {makeTargetParamDict, makeRfsCoordinatorParamDict} from "./commonUtils/clusterSettingManipulators";
 import {getHttpAuthSecretName} from "./commonUtils/clusterSettingManipulators";
-import {getTargetHttpAuthCredsEnvVars, getCoordinatorHttpAuthCredsEnvVars} from "./commonUtils/basicCredsGetters";
+import {
+    getAzureStorageCredsEnvVars,
+    getCoordinatorHttpAuthCredsEnvVars,
+    getTargetHttpAuthCredsEnvVars
+} from "./commonUtils/basicCredsGetters";
 import {K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
 import {RfsCoordinatorCluster, getRfsCoordinatorClusterName, makeRfsCoordinatorConfig} from "./rfsCoordinatorCluster";
 import {makePodDisruptionBudgetDefinition} from "./commonUtils/podDisruptionBudget";
@@ -142,6 +146,7 @@ const startHistoricalBackfillInputs = {
     rfsJsonConfig: defineRequiredParam<string>(),
     targetBasicCredsSecretNameOrEmpty: defineRequiredParam<string>(),
     coordinatorBasicCredsSecretNameOrEmpty: defineRequiredParam<string>(),
+    azureCredsSecretNameOrEmpty: defineRequiredParam<string>(),
     ...SCALABLE_WORKLOAD_INPUTS,
     jvmArgs: defineRequiredParam<string>(),
     loggingConfigurationOverrideConfigMap: defineRequiredParam<string>(),
@@ -173,6 +178,7 @@ function getRfsDeploymentManifest
     podReplicas: BaseExpression<number>,
     targetBasicCredsSecretNameOrEmpty: AllowLiteralOrExpression<string>,
     coordinatorBasicCredsSecretNameOrEmpty: AllowLiteralOrExpression<string>,
+    azureCredsSecretNameOrEmpty: AllowLiteralOrExpression<string>,
 
     useLocalstackAwsCreds: BaseExpression<boolean>,
     loggingConfigMap: BaseExpression<string>,
@@ -215,6 +221,7 @@ function getRfsDeploymentManifest
         env: [
             ...getTargetHttpAuthCredsEnvVars(args.targetBasicCredsSecretNameOrEmpty),
             ...getCoordinatorHttpAuthCredsEnvVars(args.coordinatorBasicCredsSecretNameOrEmpty),
+<<<<<<< HEAD
             // Log levels from documentBackfillConfig.logLevels, read by RFS's log4j2.properties. Terminal
             // document failures go to the durable S3 failed document stream; the pod-local FailedRequests log
             // defaults to WARN as a local-dev safety net.
@@ -226,6 +233,16 @@ function getRfsDeploymentManifest
                 name: "BULK_REQUEST_TRACE_LOG_LEVEL",
                 value: makeStringTypeProxy(args.bulkRequestTraceLogLevel)
             },
+=======
+            ...getAzureStorageCredsEnvVars(args.azureCredsSecretNameOrEmpty),
+            // Terminal RFS document failures go to a durable S3 failed document stream
+            // (see RFS/.../reindexer/faileddocumentstream). The previous OFF override turned off the
+            // pod-local FailedRequests log because no durable replacement existed; we can now keep the
+            // in-pod logger at WARN as a local-dev safety net. The S3 sink is enabled via the
+            // --failed-document-stream-s3-* args, which the config processor resolves (including the
+            // deployment default) before submission — RFS no longer reads any S3 default from the pod
+            // environment. Per-pod session id comes from the workflow.
+>>>>>>> 9286873def0859f36e6130924db91513861af4ed
             {
                 name: "FAILED_REQUESTS_LOGGER_LEVEL",
                 value: makeStringTypeProxy(args.failedRequestsLogLevel)
@@ -504,6 +521,7 @@ function makeRfsDeploymentDefinition(
             sessionName: inputs.sessionName,
             targetBasicCredsSecretNameOrEmpty: inputs.targetBasicCredsSecretNameOrEmpty,
             coordinatorBasicCredsSecretNameOrEmpty: inputs.coordinatorBasicCredsSecretNameOrEmpty,
+            azureCredsSecretNameOrEmpty: inputs.azureCredsSecretNameOrEmpty,
             rfsImageName: inputs.imageReindexFromSnapshotLocation,
             rfsImagePullPolicy: inputs.imageReindexFromSnapshotPullPolicy,
             workflowName: expr.getWorkflowValue("name"),
@@ -603,6 +621,7 @@ export const DocumentBulkLoad = documentBulkLoadBaseBuilder
                     minPodReplicas: scaling.minPodReplicas,
                     targetBasicCredsSecretNameOrEmpty: getHttpAuthSecretName(b.inputs.targetConfig),
                     coordinatorBasicCredsSecretNameOrEmpty: getHttpAuthSecretName(b.inputs.rfsCoordinatorConfig),
+                    azureCredsSecretNameOrEmpty: expr.dig(expr.deserializeRecord(b.inputs.snapshotConfig), ["repoConfig", "azureCredentialsSecretName"], ""),
                     loggingConfigurationOverrideConfigMap: expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["loggingConfigurationOverrideConfigMap"], ""),
                     jvmArgs: expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["jvmArgs"], ""),
                     rootLogLevel: expr.getLoose(expr.getLoose(expr.deserializeRecord(b.inputs.documentBackfillConfig), "logLevels"), "root"),

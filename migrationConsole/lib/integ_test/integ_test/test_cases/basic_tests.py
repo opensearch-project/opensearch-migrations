@@ -63,6 +63,7 @@ class Test0001SingleDocumentBackfill(MATestBase):
         self.target_cluster = None
 
     def prepare_workflow_snapshot_and_migration_config(self):
+<<<<<<< HEAD
         snapshot_and_migration_configs = [{
             "migrations": [{
                 "metadataMigrationConfig": {},
@@ -73,6 +74,14 @@ class Test0001SingleDocumentBackfill(MATestBase):
             }]
         }]
         self.workflow_snapshot_and_migration_config = snapshot_and_migration_configs
+=======
+        # Base default plus the target cluster as work coordinator. Keeping the base backfill
+        # sizing matters: without maxShardSizeBytes the RFS pod requests ~200Gi of ephemeral
+        # storage (2.5 x the 80Gi default), which small nodes can't schedule.
+        super().prepare_workflow_snapshot_and_migration_config()
+        for migration in self.workflow_snapshot_and_migration_config[0]["migrations"]:
+            migration["documentBackfillConfig"]["useTargetClusterForWorkCoordination"] = True
+>>>>>>> 9286873def0859f36e6130924db91513861af4ed
 
     def prepare_clusters(self):
         # Create single document

@@ -1,5 +1,5 @@
 import { describe, it, expect } from '@jest/globals';
-import { scrapeSecrets, getCategorizedCredentialsSecretsFromConfig } from '../src/findSecrets';
+import { scrapeSecrets, scrapeAzureSecrets, getCategorizedCredentialsSecretsFromConfig } from '../src/findSecrets';
 import { z } from 'zod';
 import { OVERALL_MIGRATION_CONFIG } from '@opensearch-migrations/schemas';
 
@@ -235,5 +235,38 @@ describe('scrapeAndCategorize', () => {
         const result = getCategorizedCredentialsSecretsFromConfig(config);
         expect(result.validSecrets).toBeUndefined();
         expect(result.invalidSecrets).toBeUndefined();
+    });
+});
+
+describe('scrapeAzureSecrets', () => {
+    it('should extract Azure credential secret names from source cluster snapshot repos', () => {
+        const config = {
+            sourceClusters: {
+                source1: {
+                    authConfig: { basic: { secretName: 'source-basic' } },
+                    snapshotInfo: {
+                        repos: {
+                            azureRepo: { repoPathUri: 'azure://acct/container/path', azureCredentialsSecretName: 'azure-creds' },
+                            s3Repo: { repoPathUri: 's3://bucket/path' }
+                        },
+                        snapshots: {}
+                    }
+                }
+            }
+        };
+
+        expect(scrapeAzureSecrets(config as any)).toEqual(['azure-creds']);
+        expect(scrapeSecrets(config as any)).toEqual(['source-basic']);
+    });
+
+    it('should return empty array when no repo names an Azure credential secret', () => {
+        const config = {
+            sourceClusters: {
+                source1: { snapshotInfo: { repos: { r: { repoPathUri: 'azure://acct/container', azureCredentialsSecretName: '' } }, snapshots: {} } },
+                source2: {}
+            }
+        };
+
+        expect(scrapeAzureSecrets(config as any)).toEqual([]);
     });
 });

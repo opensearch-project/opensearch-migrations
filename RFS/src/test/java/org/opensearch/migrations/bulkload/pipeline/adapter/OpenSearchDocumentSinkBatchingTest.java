@@ -1,6 +1,5 @@
 package org.opensearch.migrations.bulkload.pipeline.adapter;
 
-import java.io.IOException;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -20,6 +19,7 @@ import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
 import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
 import org.opensearch.migrations.bulkload.common.RestClient;
+import org.opensearch.migrations.bulkload.common.SourceFormat;
 import org.opensearch.migrations.bulkload.common.bulk.BulkNdjson;
 import org.opensearch.migrations.bulkload.common.bulk.BulkOperationConverter;
 import org.opensearch.migrations.bulkload.common.bulk.IndexOp;
@@ -161,7 +161,7 @@ class OpenSearchDocumentSinkBatchingTest {
     @ParameterizedTest
     @ValueSource(strings = {"{\n\"text\":\"invalid\nstring\"}", "{\"text\":\"invalid\rstring\"}", "{\n\"value\":}"})
     void rejectsInvalidJsonBeforeNormalizingLineBreaks(String source) {
-        assertThrows(IOException.class, () -> BulkNdjson.encodeRaw(doc("d1", source), "idx", false, MAPPER));
+        assertThrows(SourceFormat.InvalidDocumentSourceException.class, () -> BulkNdjson.encodeRaw(doc("d1", source), "idx", false, MAPPER));
     }
 
     @Test
@@ -197,7 +197,7 @@ class OpenSearchDocumentSinkBatchingTest {
     void rejectsUnescapedControlBytesInsideStrings() {
         for (char control = 0; control < ' '; control++) {
             var source = "{\n\"text\":\"before" + control + "after\"}";
-            assertThrows(IOException.class, () -> BulkNdjson.encodeRaw(doc("d1", source), "idx", false, MAPPER),
+            assertThrows(SourceFormat.InvalidDocumentSourceException.class, () -> BulkNdjson.encodeRaw(doc("d1", source), "idx", false, MAPPER),
                 "Invalid control byte " + (int) control + " must not be replaced with a space");
         }
     }

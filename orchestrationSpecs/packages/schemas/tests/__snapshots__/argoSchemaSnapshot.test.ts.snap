@@ -248,8 +248,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                 "properties": {
                                   "repoPathUri": {
                                     "type": "string",
-                                    "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9])(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
-                                    "description": "Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH' or 'gs://BUCKET_NAME/OPTIONAL_PATH'. The scheme determines the backend. The bucket must already exist and be accessible from the source cluster. For GCS, the source cluster must have the \`repository-gcs\` plugin installed with a configured client."
+                                    "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]|azure:\\\\/\\\\/[a-z0-9]{3,24}\\\\/(?=[a-z0-9-]{3,63}(?:\\\\/|$))[a-z0-9]+(?:-[a-z0-9]+)*)(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
+                                    "description": "Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH', 'gs://BUCKET_NAME/OPTIONAL_PATH', or 'azure://STORAGE_ACCOUNT/CONTAINER/OPTIONAL_PATH'. The scheme determines the backend. The bucket or container must already exist and be accessible from the source cluster. For GCS, the source cluster must have the \`repository-gcs\` plugin installed with a configured client. For Azure Blob Storage, the source cluster must have the \`repository-azure\` plugin installed with a configured client."
                                   },
                                   "awsRegion": {
                                     "type": "string",
@@ -260,19 +260,29 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                     "type": "string",
                                     "pattern": "^(?:(?:https?|localstacks?):\\\\/\\\\/[^/]+\\\\/?)?$",
                                     "default": "",
-                                    "description": "Override the storage endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. LocalStack endpoints are automatically resolved to IP addresses during config transformation. Used for S3 (LocalStack) or GCS (fake-gcs-server) testing."
+                                    "description": "Override the storage endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. LocalStack endpoints are automatically resolved to IP addresses during config transformation. Used for S3 (LocalStack), GCS (fake-gcs-server), or Azure (Azurite) testing. Honored by the tools that read a snapshot repository directly, for every scheme. Snapshot creation registers the repository on the cluster instead, and only repository-s3 has a repository-level endpoint setting, so creation ignores this for gs:// and azure://."
                                   },
                                   "s3RoleArn": {
                                     "type": "string",
                                     "pattern": "^(arn:aws(-[a-z]+)*:iam::\\\\d{12}:role(\\\\/[\\\\w+=,.@-]+)*\\\\/[\\\\w+=,.@-]+)?$",
                                     "default": "",
+<<<<<<< HEAD
                                     "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3 (e.g. 'arn:aws:iam::123456789012:role/service-role/SnapshotRole'). Used for s3:// URIs only; ignored for gs://. Leave empty if the cluster's own IAM role already has S3 access."
+=======
+                                    "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3. Used for s3:// URIs only; ignored for gs:// and azure://. Leave empty if the cluster's own IAM role already has S3 access."
+                                  },
+                                  "azureCredentialsSecretName": {
+                                    "type": "string",
+                                    "pattern": "^(?:[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*)?$",
+                                    "default": "",
+                                    "description": "Name of a Kubernetes Secret holding either an 'accountKey' or a 'sasToken' key, used by the migration tools to read an azure:// repository. Used for azure:// URIs only; ignored otherwise. Leave empty to use the ambient Azure identity."
+>>>>>>> 9286873def0859f36e6130924db91513861af4ed
                                   }
                                 },
                                 "required": [
                                   "repoPathUri"
                                 ],
-                                "description": "Configuration for a snapshot repository used by the source cluster. The URI scheme in repoPathUri determines whether the backend is S3 or GCS. For GCS, authentication is expected to be provided to the source cluster out-of-band (e.g. via a service-account key loaded into the cluster keystore, or via Workload Identity)."
+                                "description": "Configuration for a snapshot repository used by the source cluster. The URI scheme in repoPathUri determines whether the backend is S3, GCS, or Azure Blob Storage. For GCS, authentication is expected to be provided to the source cluster out-of-band (e.g. via a service-account key loaded into the cluster keystore, or via Workload Identity). For Azure Blob Storage, the source cluster likewise expects an account key or SAS token in its keystore, while the migration tools' own Azure reader authenticates separately, from azureCredentialsSecretName when set and otherwise from the ambient Azure identity."
                               },
                               "description": "Elasticsearch/OpenSearch snapshot repositories registered with the source cluster."
                             },
@@ -407,8 +417,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                 "properties": {
                                   "repoPathUri": {
                                     "type": "string",
-                                    "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9])(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
-                                    "description": "Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH' or 'gs://BUCKET_NAME/OPTIONAL_PATH'. The scheme determines the backend. The bucket must already exist and be accessible from the source cluster. For GCS, the source cluster must have the \`repository-gcs\` plugin installed with a configured client."
+                                    "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]|azure:\\\\/\\\\/[a-z0-9]{3,24}\\\\/(?=[a-z0-9-]{3,63}(?:\\\\/|$))[a-z0-9]+(?:-[a-z0-9]+)*)(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
+                                    "description": "Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH', 'gs://BUCKET_NAME/OPTIONAL_PATH', or 'azure://STORAGE_ACCOUNT/CONTAINER/OPTIONAL_PATH'. The scheme determines the backend. The bucket or container must already exist and be accessible from the source cluster. For GCS, the source cluster must have the \`repository-gcs\` plugin installed with a configured client. For Azure Blob Storage, the source cluster must have the \`repository-azure\` plugin installed with a configured client."
                                   },
                                   "awsRegion": {
                                     "type": "string",
@@ -419,19 +429,29 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                     "type": "string",
                                     "pattern": "^(?:(?:https?|localstacks?):\\\\/\\\\/[^/]+\\\\/?)?$",
                                     "default": "",
-                                    "description": "Override the storage endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. LocalStack endpoints are automatically resolved to IP addresses during config transformation. Used for S3 (LocalStack) or GCS (fake-gcs-server) testing."
+                                    "description": "Override the storage endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. LocalStack endpoints are automatically resolved to IP addresses during config transformation. Used for S3 (LocalStack), GCS (fake-gcs-server), or Azure (Azurite) testing. Honored by the tools that read a snapshot repository directly, for every scheme. Snapshot creation registers the repository on the cluster instead, and only repository-s3 has a repository-level endpoint setting, so creation ignores this for gs:// and azure://."
                                   },
                                   "s3RoleArn": {
                                     "type": "string",
                                     "pattern": "^(arn:aws(-[a-z]+)*:iam::\\\\d{12}:role(\\\\/[\\\\w+=,.@-]+)*\\\\/[\\\\w+=,.@-]+)?$",
                                     "default": "",
+<<<<<<< HEAD
                                     "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3 (e.g. 'arn:aws:iam::123456789012:role/service-role/SnapshotRole'). Used for s3:// URIs only; ignored for gs://. Leave empty if the cluster's own IAM role already has S3 access."
+=======
+                                    "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3. Used for s3:// URIs only; ignored for gs:// and azure://. Leave empty if the cluster's own IAM role already has S3 access."
+                                  },
+                                  "azureCredentialsSecretName": {
+                                    "type": "string",
+                                    "pattern": "^(?:[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*)?$",
+                                    "default": "",
+                                    "description": "Name of a Kubernetes Secret holding either an 'accountKey' or a 'sasToken' key, used by the migration tools to read an azure:// repository. Used for azure:// URIs only; ignored otherwise. Leave empty to use the ambient Azure identity."
+>>>>>>> 9286873def0859f36e6130924db91513861af4ed
                                   }
                                 },
                                 "required": [
                                   "repoPathUri"
                                 ],
-                                "description": "Configuration for a snapshot repository used by the source cluster. The URI scheme in repoPathUri determines whether the backend is S3 or GCS. For GCS, authentication is expected to be provided to the source cluster out-of-band (e.g. via a service-account key loaded into the cluster keystore, or via Workload Identity)."
+                                "description": "Configuration for a snapshot repository used by the source cluster. The URI scheme in repoPathUri determines whether the backend is S3, GCS, or Azure Blob Storage. For GCS, authentication is expected to be provided to the source cluster out-of-band (e.g. via a service-account key loaded into the cluster keystore, or via Workload Identity). For Azure Blob Storage, the source cluster likewise expects an account key or SAS token in its keystore, while the migration tools' own Azure reader authenticates separately, from azureCredentialsSecretName when set and otherwise from the ambient Azure identity."
                               },
                               "description": "Solr backup repositories registered with the source cluster."
                             },
@@ -1664,8 +1684,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                         "properties": {
                           "repoPathUri": {
                             "type": "string",
-                            "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9])(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
-                            "description": "Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH' or 'gs://BUCKET_NAME/OPTIONAL_PATH'. The scheme determines the backend. The bucket must already exist and be accessible from the source cluster. For GCS, the source cluster must have the \`repository-gcs\` plugin installed with a configured client."
+                            "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]|azure:\\\\/\\\\/[a-z0-9]{3,24}\\\\/(?=[a-z0-9-]{3,63}(?:\\\\/|$))[a-z0-9]+(?:-[a-z0-9]+)*)(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
+                            "description": "Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH', 'gs://BUCKET_NAME/OPTIONAL_PATH', or 'azure://STORAGE_ACCOUNT/CONTAINER/OPTIONAL_PATH'. The scheme determines the backend. The bucket or container must already exist and be accessible from the source cluster. For GCS, the source cluster must have the \`repository-gcs\` plugin installed with a configured client. For Azure Blob Storage, the source cluster must have the \`repository-azure\` plugin installed with a configured client."
                           },
                           "awsRegion": {
                             "type": "string",
@@ -1679,6 +1699,11 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           "s3RoleArn": {
                             "type": "string",
                             "pattern": "^(arn:aws(-[a-z]+)*:iam::\\\\d{12}:role(\\\\/[\\\\w+=,.@-]+)*\\\\/[\\\\w+=,.@-]+)?$",
+                            "default": ""
+                          },
+                          "azureCredentialsSecretName": {
+                            "type": "string",
+                            "pattern": "^(?:[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*)?$",
                             "default": ""
                           },
                           "useLocalStack": {
@@ -2227,6 +2252,11 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                         "additionalProperties": false
                       },
                       "default": []
+                    },
+                    "collectionRouting": {
+                      "type": "string",
+                      "description": "JSON object holding the staticCollectionRouting and regexCollectionRouting lists for a collection-routed OpenSearch Serverless target.",
+                      "changeRestriction": "impossible"
                     }
                   },
                   "required": [
@@ -2635,6 +2665,11 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                         "additionalProperties": false
                       },
                       "default": []
+                    },
+                    "collectionRouting": {
+                      "type": "string",
+                      "description": "JSON object holding the staticCollectionRouting and regexCollectionRouting lists for a collection-routed OpenSearch Serverless target.",
+                      "changeRestriction": "impossible"
                     }
                   },
                   "required": [
@@ -2840,6 +2875,10 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       ],
                       "description": "Authentication configuration for connecting to the cluster. Supports HTTP Basic (Kubernetes Secret), AWS SigV4, or mutual TLS."
                     },
+                    "collectionRouted": {
+                      "type": "boolean",
+                      "description": "Set to true when the endpoint is an OpenSearch Serverless per-account endpoint (<account-id>.aoss.<region>.on.aws), which selects the collection from a request header. Requires SigV4 auth with service 'aoss', and every snapshot migration to this target must define staticCollectionRouting or regexCollectionRouting. A replayer to this target needs a request transform that adds the x-amz-aoss-collection-name header. Migration console cluster commands don't send the collection header, so most of them don't work against this target."
+                    },
                     "label": {
                       "type": "string",
                       "pattern": "^[a-zA-Z0-9_]+$"
@@ -2861,8 +2900,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "properties": {
                         "repoPathUri": {
                           "type": "string",
-                          "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9])(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
-                          "description": "Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH' or 'gs://BUCKET_NAME/OPTIONAL_PATH'. The scheme determines the backend. The bucket must already exist and be accessible from the source cluster. For GCS, the source cluster must have the \`repository-gcs\` plugin installed with a configured client."
+                          "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]|azure:\\\\/\\\\/[a-z0-9]{3,24}\\\\/(?=[a-z0-9-]{3,63}(?:\\\\/|$))[a-z0-9]+(?:-[a-z0-9]+)*)(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
+                          "description": "Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH', 'gs://BUCKET_NAME/OPTIONAL_PATH', or 'azure://STORAGE_ACCOUNT/CONTAINER/OPTIONAL_PATH'. The scheme determines the backend. The bucket or container must already exist and be accessible from the source cluster. For GCS, the source cluster must have the \`repository-gcs\` plugin installed with a configured client. For Azure Blob Storage, the source cluster must have the \`repository-azure\` plugin installed with a configured client."
                         },
                         "awsRegion": {
                           "type": "string",
@@ -2876,6 +2915,11 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                         "s3RoleArn": {
                           "type": "string",
                           "pattern": "^(arn:aws(-[a-z]+)*:iam::\\\\d{12}:role(\\\\/[\\\\w+=,.@-]+)*\\\\/[\\\\w+=,.@-]+)?$",
+                          "default": ""
+                        },
+                        "azureCredentialsSecretName": {
+                          "type": "string",
+                          "pattern": "^(?:[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*)?$",
                           "default": ""
                         },
                         "useLocalStack": {
@@ -3576,6 +3620,10 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       ],
                       "description": "Authentication configuration for connecting to the cluster. Supports HTTP Basic (Kubernetes Secret), AWS SigV4, or mutual TLS."
                     },
+                    "collectionRouted": {
+                      "type": "boolean",
+                      "description": "Set to true when the endpoint is an OpenSearch Serverless per-account endpoint (<account-id>.aoss.<region>.on.aws), which selects the collection from a request header. Requires SigV4 auth with service 'aoss', and every snapshot migration to this target must define staticCollectionRouting or regexCollectionRouting. A replayer to this target needs a request transform that adds the x-amz-aoss-collection-name header. Migration console cluster commands don't send the collection header, so most of them don't work against this target."
+                    },
                     "label": {
                       "type": "string",
                       "pattern": "^[a-zA-Z0-9_]+$"
@@ -3955,8 +4003,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "properties": {
                         "repoPathUri": {
                           "type": "string",
-                          "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9])(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
-                          "description": "Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH' or 'gs://BUCKET_NAME/OPTIONAL_PATH'. The scheme determines the backend. The bucket must already exist and be accessible from the source cluster. For GCS, the source cluster must have the \`repository-gcs\` plugin installed with a configured client."
+                          "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]|azure:\\\\/\\\\/[a-z0-9]{3,24}\\\\/(?=[a-z0-9-]{3,63}(?:\\\\/|$))[a-z0-9]+(?:-[a-z0-9]+)*)(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
+                          "description": "Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH', 'gs://BUCKET_NAME/OPTIONAL_PATH', or 'azure://STORAGE_ACCOUNT/CONTAINER/OPTIONAL_PATH'. The scheme determines the backend. The bucket or container must already exist and be accessible from the source cluster. For GCS, the source cluster must have the \`repository-gcs\` plugin installed with a configured client. For Azure Blob Storage, the source cluster must have the \`repository-azure\` plugin installed with a configured client."
                         },
                         "awsRegion": {
                           "type": "string",
@@ -3967,19 +4015,29 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "type": "string",
                           "pattern": "^(?:(?:https?|localstacks?):\\\\/\\\\/[^/]+\\\\/?)?$",
                           "default": "",
-                          "description": "Override the storage endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. LocalStack endpoints are automatically resolved to IP addresses during config transformation. Used for S3 (LocalStack) or GCS (fake-gcs-server) testing."
+                          "description": "Override the storage endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. LocalStack endpoints are automatically resolved to IP addresses during config transformation. Used for S3 (LocalStack), GCS (fake-gcs-server), or Azure (Azurite) testing. Honored by the tools that read a snapshot repository directly, for every scheme. Snapshot creation registers the repository on the cluster instead, and only repository-s3 has a repository-level endpoint setting, so creation ignores this for gs:// and azure://."
                         },
                         "s3RoleArn": {
                           "type": "string",
                           "pattern": "^(arn:aws(-[a-z]+)*:iam::\\\\d{12}:role(\\\\/[\\\\w+=,.@-]+)*\\\\/[\\\\w+=,.@-]+)?$",
                           "default": "",
+<<<<<<< HEAD
                           "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3 (e.g. 'arn:aws:iam::123456789012:role/service-role/SnapshotRole'). Used for s3:// URIs only; ignored for gs://. Leave empty if the cluster's own IAM role already has S3 access."
+=======
+                          "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3. Used for s3:// URIs only; ignored for gs:// and azure://. Leave empty if the cluster's own IAM role already has S3 access."
+                        },
+                        "azureCredentialsSecretName": {
+                          "type": "string",
+                          "pattern": "^(?:[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*)?$",
+                          "default": "",
+                          "description": "Name of a Kubernetes Secret holding either an 'accountKey' or a 'sasToken' key, used by the migration tools to read an azure:// repository. Used for azure:// URIs only; ignored otherwise. Leave empty to use the ambient Azure identity."
+>>>>>>> 9286873def0859f36e6130924db91513861af4ed
                         }
                       },
                       "required": [
                         "repoPathUri"
                       ],
-                      "description": "Configuration for a snapshot repository used by the source cluster. The URI scheme in repoPathUri determines whether the backend is S3 or GCS. For GCS, authentication is expected to be provided to the source cluster out-of-band (e.g. via a service-account key loaded into the cluster keystore, or via Workload Identity)."
+                      "description": "Configuration for a snapshot repository used by the source cluster. The URI scheme in repoPathUri determines whether the backend is S3, GCS, or Azure Blob Storage. For GCS, authentication is expected to be provided to the source cluster out-of-band (e.g. via a service-account key loaded into the cluster keystore, or via Workload Identity). For Azure Blob Storage, the source cluster likewise expects an account key or SAS token in its keystore, while the migration tools' own Azure reader authenticates separately, from azureCredentialsSecretName when set and otherwise from the ambient Azure identity."
                     },
                     "description": "Elasticsearch/OpenSearch snapshot repositories registered with the source cluster."
                   },
@@ -4114,8 +4172,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "properties": {
                         "repoPathUri": {
                           "type": "string",
-                          "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9])(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
-                          "description": "Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH' or 'gs://BUCKET_NAME/OPTIONAL_PATH'. The scheme determines the backend. The bucket must already exist and be accessible from the source cluster. For GCS, the source cluster must have the \`repository-gcs\` plugin installed with a configured client."
+                          "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]|azure:\\\\/\\\\/[a-z0-9]{3,24}\\\\/(?=[a-z0-9-]{3,63}(?:\\\\/|$))[a-z0-9]+(?:-[a-z0-9]+)*)(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
+                          "description": "Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH', 'gs://BUCKET_NAME/OPTIONAL_PATH', or 'azure://STORAGE_ACCOUNT/CONTAINER/OPTIONAL_PATH'. The scheme determines the backend. The bucket or container must already exist and be accessible from the source cluster. For GCS, the source cluster must have the \`repository-gcs\` plugin installed with a configured client. For Azure Blob Storage, the source cluster must have the \`repository-azure\` plugin installed with a configured client."
                         },
                         "awsRegion": {
                           "type": "string",
@@ -4126,19 +4184,29 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "type": "string",
                           "pattern": "^(?:(?:https?|localstacks?):\\\\/\\\\/[^/]+\\\\/?)?$",
                           "default": "",
-                          "description": "Override the storage endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. LocalStack endpoints are automatically resolved to IP addresses during config transformation. Used for S3 (LocalStack) or GCS (fake-gcs-server) testing."
+                          "description": "Override the storage endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. LocalStack endpoints are automatically resolved to IP addresses during config transformation. Used for S3 (LocalStack), GCS (fake-gcs-server), or Azure (Azurite) testing. Honored by the tools that read a snapshot repository directly, for every scheme. Snapshot creation registers the repository on the cluster instead, and only repository-s3 has a repository-level endpoint setting, so creation ignores this for gs:// and azure://."
                         },
                         "s3RoleArn": {
                           "type": "string",
                           "pattern": "^(arn:aws(-[a-z]+)*:iam::\\\\d{12}:role(\\\\/[\\\\w+=,.@-]+)*\\\\/[\\\\w+=,.@-]+)?$",
                           "default": "",
+<<<<<<< HEAD
                           "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3 (e.g. 'arn:aws:iam::123456789012:role/service-role/SnapshotRole'). Used for s3:// URIs only; ignored for gs://. Leave empty if the cluster's own IAM role already has S3 access."
+=======
+                          "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3. Used for s3:// URIs only; ignored for gs:// and azure://. Leave empty if the cluster's own IAM role already has S3 access."
+                        },
+                        "azureCredentialsSecretName": {
+                          "type": "string",
+                          "pattern": "^(?:[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*)?$",
+                          "default": "",
+                          "description": "Name of a Kubernetes Secret holding either an 'accountKey' or a 'sasToken' key, used by the migration tools to read an azure:// repository. Used for azure:// URIs only; ignored otherwise. Leave empty to use the ambient Azure identity."
+>>>>>>> 9286873def0859f36e6130924db91513861af4ed
                         }
                       },
                       "required": [
                         "repoPathUri"
                       ],
-                      "description": "Configuration for a snapshot repository used by the source cluster. The URI scheme in repoPathUri determines whether the backend is S3 or GCS. For GCS, authentication is expected to be provided to the source cluster out-of-band (e.g. via a service-account key loaded into the cluster keystore, or via Workload Identity)."
+                      "description": "Configuration for a snapshot repository used by the source cluster. The URI scheme in repoPathUri determines whether the backend is S3, GCS, or Azure Blob Storage. For GCS, authentication is expected to be provided to the source cluster out-of-band (e.g. via a service-account key loaded into the cluster keystore, or via Workload Identity). For Azure Blob Storage, the source cluster likewise expects an account key or SAS token in its keystore, while the migration tools' own Azure reader authenticates separately, from azureCredentialsSecretName when set and otherwise from the ambient Azure identity."
                     },
                     "description": "Solr backup repositories registered with the source cluster."
                   },
@@ -4396,6 +4464,10 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
               }
             ],
             "description": "Authentication configuration for connecting to the cluster. Supports HTTP Basic (Kubernetes Secret), AWS SigV4, or mutual TLS."
+          },
+          "collectionRouted": {
+            "type": "boolean",
+            "description": "Set to true when the endpoint is an OpenSearch Serverless per-account endpoint (<account-id>.aoss.<region>.on.aws), which selects the collection from a request header. Requires SigV4 auth with service 'aoss', and every snapshot migration to this target must define staticCollectionRouting or regexCollectionRouting. A replayer to this target needs a request transform that adds the x-amz-aoss-collection-name header. Migration console cluster commands don't send the collection header, so most of them don't work against this target."
           }
         },
         "required": [
@@ -5681,6 +5753,54 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       }
                     },
                     "description": "Configuration for backfilling documents from the snapshot to the target using Reindex From Snapshot. Omit to skip document backfill."
+                  },
+                  "staticCollectionRouting": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "sourceIndex": {
+                          "type": "string",
+                          "pattern": "\\\\S",
+                          "description": "Exact source index name."
+                        },
+                        "collection": {
+                          "type": "string",
+                          "pattern": "\\\\S",
+                          "description": "OpenSearch Serverless collection name, used as is."
+                        }
+                      },
+                      "required": [
+                        "sourceIndex",
+                        "collection"
+                      ],
+                      "description": "Routes one source index to one OpenSearch Serverless collection."
+                    },
+                    "description": "Exact source index to OpenSearch Serverless collection mappings. With regexCollectionRouting, needs at least one entry when the target is collectionRouted and is not allowed otherwise. Shared by metadata migration and document backfill so an index's metadata and documents reach the same collection. Templates aren't migrated to collection-routed targets."
+                  },
+                  "regexCollectionRouting": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "sourceIndex": {
+                          "type": "string",
+                          "pattern": "\\\\S",
+                          "description": "Java regular expression that must match the whole source index name (e.g. '(.+)-\\\\d{4}')."
+                        },
+                        "collection": {
+                          "type": "string",
+                          "pattern": "\\\\S",
+                          "description": "Collection name replacement pattern, which may reference the regex's capture groups by number or name (e.g. '$1' or '\${tenant}')."
+                        }
+                      },
+                      "required": [
+                        "sourceIndex",
+                        "collection"
+                      ],
+                      "description": "Routes source indices that match a regex to an OpenSearch Serverless collection."
+                    },
+                    "description": "Ordered regex source index to OpenSearch Serverless collection mappings, used when no static entry matches. Same rules as staticCollectionRouting."
                   }
                 },
                 "description": "Configuration for a single migration pass from a snapshot. At least one of metadataMigrationConfig or documentBackfillConfig must be provided."

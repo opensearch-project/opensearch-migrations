@@ -259,6 +259,107 @@ describe('MigrationConfigTransformer validation', () => {
         expect(migration?.documentBackfillConfig?.skipApproval).toBe(false);
     });
 
+    it('should pass collectionRouting to both metadata and backfill as JSON for a collection-routed target', async () => {
+        const config = cloneBaseConfig() as any;
+        // A replayer on a collection-routed target would need a request transform
+        delete config.traffic;
+        config.targetClusters.target1 = {
+            endpoint: "https://123456789012.aoss.us-east-1.on.aws",
+            authConfig: {sigv4: {region: "us-east-1", service: "aoss"}},
+            collectionRouted: true
+        };
+        const collectionRouting = {
+            staticCollectionRouting: [{sourceIndex: "shared-config", collection: "common"}],
+            regexCollectionRouting: [{sourceIndex: "(.+)[-_]\\d{4}", collection: "$1"}]
+        };
+        config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0] = {
+            ...collectionRouting,
+            metadataMigrationConfig: {},
+            documentBackfillConfig: {}
+        };
+
+        const result = await transformer.processFromObject(config);
+        const migration = result.snapshotMigrations?.[0] as any;
+
+        expect(JSON.parse(migration.metadataMigrationConfig.collectionRouting)).toEqual(collectionRouting);
+        expect(JSON.parse(migration.documentBackfillConfig.collectionRouting)).toEqual(collectionRouting);
+        expect(migration.targetConfig.collectionRouted).toBe(true);
+    });
+
+    it('should pass a replayer with a request transform through for a collection-routed target', async () => {
+        const config = cloneBaseConfig() as any;
+        config.targetClusters.target1 = {
+            endpoint: "https://123456789012.aoss.us-east-1.on.aws",
+            authConfig: {sigv4: {region: "us-east-1", service: "aoss"}},
+            collectionRouted: true
+        };
+        config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0] = {
+            staticCollectionRouting: [{sourceIndex: "shared-config", collection: "common"}],
+            metadataMigrationConfig: {},
+            documentBackfillConfig: {}
+        };
+        config.traffic.replayers.replay1.replayerConfig = {
+            requestTransforms: {entryPoint: {javascript: "(m) => m"}}
+        };
+
+        const result = await transformer.processFromObject(config);
+        const replay = result.trafficReplays?.[0] as any;
+
+        expect(replay.replayerConfig.transformerConfig).toEqual(expect.any(String));
+        expect(replay.toTarget.authConfig.sigv4.service).toBe("aoss");
+    });
+
+    it('should pass only the routing lists that are set', async () => {
+        const config = cloneBaseConfig() as any;
+        delete config.traffic;
+        config.targetClusters.target1 = {
+            endpoint: "https://123456789012.aoss.us-east-1.on.aws",
+            authConfig: {sigv4: {region: "us-east-1", service: "aoss"}},
+            collectionRouted: true
+        };
+        const regexCollectionRouting = [{sourceIndex: "(vectors)_.*", collection: "tenant-$1"}];
+        config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0] = {
+            regexCollectionRouting,
+            metadataMigrationConfig: {}
+        };
+
+        const result = await transformer.processFromObject(config);
+        const migration = result.snapshotMigrations?.[0] as any;
+
+        expect(JSON.parse(migration.metadataMigrationConfig.collectionRouting)).toEqual({regexCollectionRouting});
+    });
+
+    it('should reject the old single collectionRouting list', async () => {
+        const config = cloneBaseConfig() as any;
+        delete config.traffic;
+        config.targetClusters.target1 = {
+            endpoint: "https://123456789012.aoss.us-east-1.on.aws",
+            authConfig: {sigv4: {region: "us-east-1", service: "aoss"}},
+            collectionRouted: true
+        };
+        config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0] = {
+            collectionRouting: [{sourceIndex: "regex:(.+)-\\d{4}", collection: "$1"}],
+            metadataMigrationConfig: {}
+        };
+
+        // The routed-target rule points users of the old field at the new ones
+        await expect(transformer.processFromObject(config)).rejects.toThrow(
+            /needs at least one staticCollectionRouting or regexCollectionRouting entry/);
+    });
+
+    it('should leave collectionRouting out for other targets', async () => {
+        const config = cloneBaseConfig();
+        config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0] = {
+            metadataMigrationConfig: {},
+            documentBackfillConfig: {}
+        };
+        const result = await transformer.processFromObject(config);
+        const migration = result.snapshotMigrations?.[0] as any;
+
+        expect(migration.metadataMigrationConfig).not.toHaveProperty('collectionRouting');
+        expect(migration.documentBackfillConfig).not.toHaveProperty('collectionRouting');
+    });
+
     it('should carry metadata memory overrides from user input into populated workflow resources', async () => {
         const config = cloneBaseConfig();
         const inputResources = {

@@ -6,8 +6,12 @@ import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
+<<<<<<< HEAD
 import java.util.ArrayList;
 import java.util.Arrays;
+=======
+import java.util.Base64;
+>>>>>>> 9286873def0859f36e6130924db91513861af4ed
 import java.util.BitSet;
 import java.util.HashMap;
 import java.util.List;
@@ -24,6 +28,7 @@ import java.util.regex.Pattern;
 import org.opensearch.migrations.AwarenessAttributeSettings;
 import org.opensearch.migrations.Flavor;
 import org.opensearch.migrations.Version;
+import org.opensearch.migrations.bulkload.common.SourceFormat.InvalidDocumentSourceException;
 import org.opensearch.migrations.bulkload.common.bulk.BulkNdjson;
 import org.opensearch.migrations.bulkload.common.bulk.BulkOperationConverter;
 import org.opensearch.migrations.bulkload.common.bulk.BulkOperationSpec;
@@ -67,6 +72,8 @@ import reactor.util.retry.Retry;
 @Slf4j
 public abstract class OpenSearchClient {
     protected static final ObjectMapper OBJECT_MAPPER = ObjectMapperFactory.createDefaultMapper();
+    /** Failed document stream type for a source that is not JSON and could not be converted to JSON. */
+    public static final String INVALID_SOURCE_FORMAT = "invalid_source_format";
     private static final int DEFAULT_MAX_RETRY_ATTEMPTS = 3;
     private static final Duration DEFAULT_BACKOFF = Duration.ofSeconds(1);
     private static final Duration DEFAULT_MAX_BACKOFF = Duration.ofSeconds(10);
@@ -111,6 +118,7 @@ public abstract class OpenSearchClient {
     private final int maxDocsPerBulkRequest;
     private final long maxBytesPerBulkRequest;
 
+<<<<<<< HEAD
     // failed document stream context — null when no failed document stream is configured. The bootstrap in RfsMigrateDocuments
     // calls setFailedDocumentStreamContext(...) to install an S3FailedDocumentStreamSink when a bucket is provided.
     // volatile: emitFailedDocumentStreamRecord runs on concurrent bulk-write threads (batchConcurrency defaults
@@ -141,9 +149,19 @@ public abstract class OpenSearchClient {
     public static final String DOCUMENT_TOO_LARGE = "document_too_large";
     /** {@code measured} value for the encoded document body checked against {@code maxDocumentSizeBytes}. */
     public static final String MEASURED_REQUEST_BODY = "requestBody";
+=======
+    private final FailedDocumentStreamContext failedDocumentStream;
+>>>>>>> 9286873def0859f36e6130924db91513861af4ed
 
     protected OpenSearchClient(RestClient client, FailedRequestsLogger failedRequestsLogger, Version version,
                                CompressionMode compressionMode, int maxDocsPerBulkRequest, long maxBytesPerBulkRequest) {
+        this(client, failedRequestsLogger, version, compressionMode, maxDocsPerBulkRequest, maxBytesPerBulkRequest,
+            new FailedDocumentStreamContext());
+    }
+
+    private OpenSearchClient(RestClient client, FailedRequestsLogger failedRequestsLogger, Version version,
+                             CompressionMode compressionMode, int maxDocsPerBulkRequest, long maxBytesPerBulkRequest,
+                             FailedDocumentStreamContext failedDocumentStream) {
         if (maxDocsPerBulkRequest < 1 || maxBytesPerBulkRequest < 1) {
             throw new IllegalArgumentException("Bulk request count and byte limits must be positive");
         }
@@ -153,6 +171,20 @@ public abstract class OpenSearchClient {
         this.compressionMode = compressionMode;
         this.maxDocsPerBulkRequest = maxDocsPerBulkRequest;
         this.maxBytesPerBulkRequest = maxBytesPerBulkRequest;
+        this.failedDocumentStream = failedDocumentStream;
+    }
+
+    /**
+     * Returns a client that sends every request to one OpenSearch Serverless collection behind a
+     * per-account endpoint. It shares this client's connections and failed document stream context.
+     */
+    public OpenSearchClient forCollection(String serverlessCollection) {
+        return new CollectionBoundClient(this, serverlessCollection);
+    }
+
+    /** True for an OpenSearch Serverless per-account endpoint that selects the collection from a request header */
+    public boolean isCollectionRouted() {
+        return client.getConnectionContext().isCollectionRouted();
     }
 
     /**
@@ -161,9 +193,9 @@ public abstract class OpenSearchClient {
      * requests are issued.
      */
     public void setFailedDocumentStreamContext(FailedDocumentStreamSink failedDocumentStreamSink, String sessionId, String workerId) {
-        this.failedDocumentStreamSink = failedDocumentStreamSink;
-        this.failedDocumentStreamSessionId = sessionId;
-        this.failedDocumentStreamWorkerId = workerId;
+        failedDocumentStream.sink = failedDocumentStreamSink;
+        failedDocumentStream.sessionId = sessionId;
+        failedDocumentStream.workerId = workerId;
     }
 
     /**
@@ -175,11 +207,11 @@ public abstract class OpenSearchClient {
      * exact work item that produced it.
      */
     public void setFailedDocumentStreamWorkItem(String workItemId) {
-        this.failedDocumentStreamWorkItemId = workItemId;
+        failedDocumentStream.workItemId = workItemId;
     }
 
     public FailedDocumentStreamSink getFailedDocumentStreamSink() {
-        return failedDocumentStreamSink;
+        return failedDocumentStream.sink;
     }
 
     /**
@@ -703,6 +735,7 @@ public abstract class OpenSearchClient {
                                               boolean allowServerGeneratedIds,
                                               DocumentExceptionAllowlist allowlist)
     {
+<<<<<<< HEAD
         return sendBulkRequest(indexName, docs, context, allowServerGeneratedIds, allowlist, 1);
     }
 
@@ -715,6 +748,17 @@ public abstract class OpenSearchClient {
         return sendBulkRequests(indexName, docs, op -> new PreparedOperation(() -> op,
             BulkNdjson.encode(allowServerGeneratedIds ? stripDocumentId(op) : op, OBJECT_MAPPER)),
             TRANSFORMED_PATH, context, allowlist, splitRequestConcurrency);
+=======
+        return sendBulkRequests(indexName, docs, op -> {
+            try {
+                return new PreparedOperation(() -> op,
+                    BulkNdjson.encode(allowServerGeneratedIds ? stripDocumentId(op) : op, OBJECT_MAPPER));
+            } catch (InvalidDocumentSourceException e) {
+                reportInvalidDocumentSource(indexName, op.getOperation().getId(), op.getRawDocument(), e);
+                return null;
+            }
+        }, context, allowlist);
+>>>>>>> 9286873def0859f36e6130924db91513861af4ed
     }
 
     /** Send raw source bytes without a byte[]→Map→byte[] round-trip. */
@@ -722,6 +766,7 @@ public abstract class OpenSearchClient {
                                                   IRfsContexts.IRequestContext context,
                                                   boolean allowServerGeneratedIds,
                                                   DocumentExceptionAllowlist allowlist) {
+<<<<<<< HEAD
         return sendBulkRequestRaw(indexName, docs, context, allowServerGeneratedIds, allowlist, 1);
     }
 
@@ -734,6 +779,64 @@ public abstract class OpenSearchClient {
             () -> BulkOperationConverter.fromRawDocument(doc, indexName),
             BulkNdjson.encodeRaw(doc, indexName, allowServerGeneratedIds, OBJECT_MAPPER)),
             RAW_PATH, context, allowlist, splitRequestConcurrency);
+=======
+        return sendBulkRequests(indexName, docs, doc -> {
+            try {
+                return new PreparedOperation(() -> BulkOperationConverter.fromRawDocument(doc, indexName),
+                    BulkNdjson.encodeRaw(doc, indexName, allowServerGeneratedIds, OBJECT_MAPPER));
+            } catch (InvalidDocumentSourceException e) {
+                reportInvalidDocumentSource(indexName, doc.id(), doc.source(), e);
+                return null;
+            }
+        }, context, allowlist);
+    }
+
+    /**
+     * Fail one document whose source cannot be sent as JSON, without failing the rest of its batch or shard.
+     * The record carries the source as base64 because it cannot be embedded as JSON.
+     */
+    public void reportInvalidDocumentSource(String indexName, String docId, byte[] source, Exception cause) {
+        log.atWarn().setCause(cause)
+            .setMessage("Skipping document {} for index '{}': its source cannot be sent as JSON")
+            .addArgument(docId)
+            .addArgument(indexName)
+            .log();
+        if (failedDocumentStream.sink == null) {
+            return;
+        }
+        try {
+            var requestItem = OBJECT_MAPPER.createObjectNode();
+            requestItem.putObject("operation").put("_index", indexName).put("_id", docId);
+            if (source != null) {
+                requestItem.put("documentBase64", Base64.getEncoder().encodeToString(source));
+            }
+            var responseItem = OBJECT_MAPPER.createObjectNode();
+            responseItem.putObject("index").put("_index", indexName).put("_id", docId).put("status", 400)
+                .putObject("error").put("type", INVALID_SOURCE_FORMAT).put("reason", cause.getMessage());
+            failedDocumentStream.sink.write(FailedDocumentStreamRecord.builder()
+                .sessionId(failedDocumentStream.sessionId)
+                .workerId(failedDocumentStream.workerId)
+                .workItemId(failedDocumentStream.workItemId)
+                .targetIndex(indexName)
+                .documentId(docId)
+                .failureType(INVALID_SOURCE_FORMAT)
+                .failureClass(FailureClass.NON_RETRYABLE)
+                .timestamp(Instant.now().toString())
+                .requestItem(requestItem)
+                .responseItem(responseItem)
+                .build()).subscribe(
+                    v -> {},
+                    err -> log.atError().setCause(err)
+                        .setMessage("Failed to buffer failed document stream record for index {}")
+                        .addArgument(indexName)
+                        .log());
+        } catch (Exception e) {
+            log.atError().setCause(e)
+                .setMessage("Unexpected error while emitting failed document stream record for index {}")
+                .addArgument(indexName)
+                .log();
+        }
+>>>>>>> 9286873def0859f36e6130924db91513861af4ed
     }
 
     /** A raw document whose exact encoded bytes were prepared while the source pipeline sized its batch. */
@@ -779,6 +882,7 @@ public abstract class OpenSearchClient {
             );
         }
         // The batching predicate and retry state must be fresh for every subscription.
+<<<<<<< HEAD
         return Mono.defer(() -> {
             var tooLarge = new long[1];
             var batchPreparationStartedNanos = new long[] {System.nanoTime()};
@@ -843,6 +947,17 @@ public abstract class OpenSearchClient {
                 .addArgument(sinceLastWarning)
                 .log();
         }
+=======
+        return Mono.defer(() -> Flux.fromIterable(docs)
+            .mapNotNull(prepare)
+            .bufferUntil(new BatchSizePredicate<>(maxDocsPerBulkRequest, maxBytesPerBulkRequest,
+                (PreparedOperation op) -> op.encoded().size()), true)
+            // A split batch completes in source order, before its source checkpoint can advance.
+            .concatMap(batch -> executeBulkWithRetry(indexName, batch, context, allowlist), 1)
+            .reduce((previous, next) -> new BulkResponse(next.statusCode, next.statusText, next.headers, next.body,
+                previous.target.plus(next.target), previous.requests.plus(next.requests)))
+            .defaultIfEmpty(new BulkResponse(200, "OK", Map.of(), "{\"errors\":false,\"items\":[]}")));
+>>>>>>> 9286873def0859f36e6130924db91513861af4ed
     }
 
     private static BulkNdjson.SerializedBulk assemble(List<PreparedOperation> pending) {
@@ -1799,7 +1914,7 @@ public abstract class OpenSearchClient {
     }
 
     void emitFailedDocumentStreamRecord(String indexName, BulkOperationSpec op, ItemFailure failure, FailureClass cls) {
-        if (failedDocumentStreamSink == null) {
+        if (failedDocumentStream.sink == null) {
             return;
         }
         try {
@@ -1811,10 +1926,17 @@ public abstract class OpenSearchClient {
                 ? OBJECT_MAPPER.readTree(failure.getResponseItemJson()) : null;
             String failureType = failure != null ? failure.getErrorType() : null;
             FailedDocumentStreamRecord failedDocumentStreamRecord = FailedDocumentStreamRecord.builder()
+<<<<<<< HEAD
                 .sessionId(failedDocumentStreamSessionId)
                 .workerId(failedDocumentStreamWorkerId)
                 .workItemId(failedDocumentStreamWorkItemId)
                 .targetIndex(effectiveIndex)
+=======
+                .sessionId(failedDocumentStream.sessionId)
+                .workerId(failedDocumentStream.workerId)
+                .workItemId(failedDocumentStream.workItemId)
+                .targetIndex(indexName)
+>>>>>>> 9286873def0859f36e6130924db91513861af4ed
                 .documentId(docId)
                 .failureType(failureType)
                 .failureClass(cls)
@@ -1823,7 +1945,7 @@ public abstract class OpenSearchClient {
                 .target(targetPortion(op, effectiveIndex, docId))
                 .responseItem(responseItem)
                 .build();
-            failedDocumentStreamSink.write(failedDocumentStreamRecord).subscribe(
+            failedDocumentStream.sink.write(failedDocumentStreamRecord).subscribe(
                 v -> {},
                 err -> log.atError().setCause(err)
                     .setMessage("Failed to buffer failed document stream record for index {}: {}")
@@ -1996,6 +2118,45 @@ public abstract class OpenSearchClient {
         @Override
         public int statusCode() {
             return response.statusCode;
+        }
+    }
+
+    // Null sink when no failed document stream is configured. The bootstrap in RfsMigrateDocuments installs an
+    // S3FailedDocumentStreamSink when a bucket is provided. volatile: records are emitted on concurrent bulk-write
+    // threads (batchConcurrency defaults to 10) while the pipeline thread writes these, so they need safe
+    // publication across threads.
+    private static final class FailedDocumentStreamContext {
+        private volatile FailedDocumentStreamSink sink;
+        private volatile String sessionId = "unknown-session";
+        private volatile String workerId = "unknown-worker";
+        // Canonical work-item id (index + shard + checkpoint) for the work item currently being processed.
+        // Updated per work item via setFailedDocumentStreamWorkItem; null until the first work item starts.
+        private volatile String workItemId;
+    }
+
+    private static final class CollectionBoundClient extends OpenSearchClient {
+        private final OpenSearchClient unbound;
+
+        private CollectionBoundClient(OpenSearchClient unbound, String serverlessCollection) {
+            super(unbound.client.withDefaultHeaders(ServerlessCollectionRouting.headersFor(serverlessCollection)),
+                unbound.failedRequestsLogger, unbound.version, unbound.compressionMode,
+                unbound.maxDocsPerBulkRequest, unbound.maxBytesPerBulkRequest, unbound.failedDocumentStream);
+            this.unbound = unbound;
+        }
+
+        @Override
+        protected String getCreateIndexPath(String indexName) {
+            return unbound.getCreateIndexPath(indexName);
+        }
+
+        @Override
+        protected String getBulkRequestPath(String indexName) {
+            return unbound.getBulkRequestPath(indexName);
+        }
+
+        @Override
+        protected Retry getBulkRetryStrategy() {
+            return unbound.getBulkRetryStrategy();
         }
     }
 }

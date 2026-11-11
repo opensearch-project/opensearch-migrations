@@ -14,6 +14,8 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
 
 import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
+import org.opensearch.migrations.bulkload.common.SourceFormat;
+import org.opensearch.migrations.bulkload.common.SourceFormat.InvalidDocumentSourceException;
 import org.opensearch.migrations.bulkload.common.bulk.enums.OperationType;
 import org.opensearch.migrations.bulkload.common.bulk.operations.BaseOperationMeta;
 import org.opensearch.migrations.bulkload.common.bulk.operations.DeleteOperationMeta;
@@ -111,13 +113,17 @@ public final class BulkNdjson {
     public static EncodedOperation encodePreparedRaw(PreparedRawOperation prepared) {
         byte[] body = prepared.rawBody();
         if (body != null) {
-            body = singleLineJson(body);
+            body = singleLineJson(SourceFormat.toJson(body));
         }
         return new EncodedOperation(prepared.action(), body, prepared.upsert());
     }
 
-    /** Validate before normalizing whitespace, preserving escapes and numeric spelling. */
-    private static byte[] singleLineJson(byte[] bytes) throws IOException {
+    /**
+     * Validate before normalizing whitespace, preserving escapes and numeric spelling.
+     *
+     * @throws InvalidDocumentSourceException if the bytes are not valid JSON; only this document is affected
+     */
+    private static byte[] singleLineJson(byte[] bytes) {
         try (JsonParser parser = JSON_FACTORY.createParser(bytes)) {
             while (parser.nextToken() != null) {
                 // Consume all tokens to verify structural validity without materializing the body.
@@ -133,7 +139,7 @@ public final class BulkNdjson {
             }
             return singleLine;
         } catch (IOException e) {
-            throw new IOException("Raw source bytes are not valid JSON", e);
+            throw new InvalidDocumentSourceException("Raw source bytes are not valid JSON", e);
         }
     }
 

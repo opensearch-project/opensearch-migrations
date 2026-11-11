@@ -237,32 +237,66 @@ function validateOptionalDefaultConsistency<T extends z.ZodTypeAny>(
 
 export const OPTIONAL_STORAGE_ENDPOINT_PATTERN = /^(?:(?:https?|localstacks?):\/\/[^/]+\/?)?$/;
 
+<<<<<<< HEAD
 // An assumable IAM role ARN in any partition (aws, aws-cn, aws-us-gov, aws-iso-b, ...), with an optional
 // IAM path (role/service-role/Name). Only roles can be assumed, so users, groups, and policies are rejected.
 export const S3_ROLE_ARN_PATTERN = /^(arn:aws(-[a-z]+)*:iam::\d{12}:role(\/[\w+=,.@-]+)*\/[\w+=,.@-]+)?$/;
 
 // Provider-agnostic repository config. The URI scheme (s3:// or gs://) determines the backend.
 // S3 bucket names: 3-63 chars; GCS bucket names: up to 220 chars including dotted segments.
+=======
+// Name lengths: S3 bucket 3-63, GCS bucket 3-222 (dotted names), Azure account 3-24, Azure container 3-63.
+const S3_BUCKET_PATTERN = "[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]";
+const GCS_BUCKET_PATTERN = "[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]";
+const AZURE_ACCOUNT_PATTERN = "[a-z0-9]{3,24}";
+// The lookahead bounds the container's length; the rest rules out leading, trailing and repeated hyphens.
+const AZURE_CONTAINER_PATTERN = "(?=[a-z0-9-]{3,63}(?:\\/|$))[a-z0-9]+(?:-[a-z0-9]+)*";
+const REPO_SUBPATH_PATTERN = "(\\/[a-zA-Z0-9!\\-_.*'()/]*)?";
+const REPO_PATH_URI_PATTERN = new RegExp(
+    `^(?:s3:\\/\\/${S3_BUCKET_PATTERN}|gs:\\/\\/${GCS_BUCKET_PATTERN}` +
+    `|azure:\\/\\/${AZURE_ACCOUNT_PATTERN}\\/${AZURE_CONTAINER_PATTERN})${REPO_SUBPATH_PATTERN}$`);
+
+>>>>>>> 9286873def0859f36e6130924db91513861af4ed
 export const REPO_CONFIG = z.object({
-    repoPathUri: z.string().regex(/^(?:s3:\/\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\/\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9])(\/[a-zA-Z0-9!\-_.*'()/]*)?$/)
-        .describe("Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH' or 'gs://BUCKET_NAME/OPTIONAL_PATH'. " +
-            "The scheme determines the backend. The bucket must already exist and be accessible from the source cluster. " +
-            "For GCS, the source cluster must have the `repository-gcs` plugin installed with a configured client."),
+    repoPathUri: z.string().regex(REPO_PATH_URI_PATTERN)
+        .describe("Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH', 'gs://BUCKET_NAME/OPTIONAL_PATH', " +
+            "or 'azure://STORAGE_ACCOUNT/CONTAINER/OPTIONAL_PATH'. " +
+            "The scheme determines the backend. The bucket or container must already exist and be accessible from the source cluster. " +
+            "For GCS, the source cluster must have the `repository-gcs` plugin installed with a configured client. " +
+            "For Azure Blob Storage, the source cluster must have the `repository-azure` plugin installed with a configured client."),
     awsRegion: z.string().default("").optional()
         .describe("AWS region where the S3 bucket resides (e.g. 'us-east-2'). Required for s3:// URIs; ignored otherwise."),
     endpoint: z.string().regex(OPTIONAL_STORAGE_ENDPOINT_PATTERN).default("").optional()
         .describe("Override the storage endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. " +
             "LocalStack endpoints are automatically resolved to IP addresses during config transformation. " +
+<<<<<<< HEAD
             "Used for S3 (LocalStack) or GCS (fake-gcs-server) testing."),
     s3RoleArn: z.string().regex(S3_ROLE_ARN_PATTERN).default("").optional()
         .describe("IAM role ARN that the source cluster will assume to read/write snapshots to S3 " +
             "(e.g. 'arn:aws:iam::123456789012:role/service-role/SnapshotRole'). " +
             "Used for s3:// URIs only; ignored for gs://. " +
             "Leave empty if the cluster's own IAM role already has S3 access.")
+=======
+            "Used for S3 (LocalStack), GCS (fake-gcs-server), or Azure (Azurite) testing. " +
+            "Honored by the tools that read a snapshot repository directly, for every scheme. " +
+            "Snapshot creation registers the repository on the cluster instead, and only repository-s3 " +
+            "has a repository-level endpoint setting, so creation ignores this for gs:// and azure://."),
+    s3RoleArn: z.string().regex(/^(arn:aws(-[a-z]+)*:iam::\d{12}:(user|role|group|policy)\/[a-zA-Z0-9+=,.@_-]+)?$/).default("").optional()
+        .describe("IAM role ARN that the source cluster will assume to read/write snapshots to S3. " +
+            "Used for s3:// URIs only; ignored for gs:// and azure://. " +
+            "Leave empty if the cluster's own IAM role already has S3 access."),
+    azureCredentialsSecretName: z.string().regex(/^(?:[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*)?$/).default("").optional()
+        .describe("Name of a Kubernetes Secret holding either an 'accountKey' or a 'sasToken' key, used by the " +
+            "migration tools to read an azure:// repository. Used for azure:// URIs only; ignored otherwise. " +
+            "Leave empty to use the ambient Azure identity.")
+>>>>>>> 9286873def0859f36e6130924db91513861af4ed
 }).describe("Configuration for a snapshot repository used by the source cluster. " +
-    "The URI scheme in repoPathUri determines whether the backend is S3 or GCS. " +
+    "The URI scheme in repoPathUri determines whether the backend is S3, GCS, or Azure Blob Storage. " +
     "For GCS, authentication is expected to be provided to the source cluster out-of-band " +
-    "(e.g. via a service-account key loaded into the cluster keystore, or via Workload Identity).");
+    "(e.g. via a service-account key loaded into the cluster keystore, or via Workload Identity). " +
+    "For Azure Blob Storage, the source cluster likewise expects an account key or SAS token in its " +
+    "keystore, while the migration tools' own Azure reader authenticates separately, from " +
+    "azureCredentialsSecretName when set and otherwise from the ambient Azure identity.");
 
 export const PORT_NUMBER_PATTERN = "(?:[1-9]\\d{0,3}|[1-5]\\d{4}|6[0-4]\\d{3}|65[0-4]\\d{2}|655[0-2]\\d|6553[0-5])";
 export const OPTIONAL_PORT_PATTERN = `(?::${PORT_NUMBER_PATTERN})?`;
@@ -368,6 +402,12 @@ function hasTransformPipelineEntries(value: unknown): boolean {
 
 function hasConfiguredString(value: unknown): boolean {
     return typeof value === "string" && value.trim().length > 0;
+}
+
+function hasRequestTransform(config: z.infer<typeof USER_REPLAYER_OPTIONS> | undefined): boolean {
+    return (config?.requestTransforms?.length ?? 0) > 0
+        || [config?.transformerConfig, config?.transformerConfigEncoded, config?.transformerConfigFile]
+            .some(hasConfiguredString);
 }
 
 function validatePipelineRawConfigConflict(
@@ -1458,11 +1498,17 @@ export const CLUSTER_CONFIG = z.object({
 export const TARGET_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
     endpoint:  z.string().regex(new RegExp(HTTP_ENDPOINT_PATTERN))
         .describe("HTTP(S) endpoint URL for the target cluster (e.g. 'https://target-cluster:9200/'). Required for target clusters."),
+    collectionRouted: z.boolean().optional()
+        .describe("Set to true when the endpoint is an OpenSearch Serverless per-account endpoint (<account-id>.aoss.<region>.on.aws), " +
+            "which selects the collection from a request header. Requires SigV4 auth with service 'aoss', and every snapshot migration " +
+            "to this target must define staticCollectionRouting or regexCollectionRouting. " +
+            "A replayer to this target needs a request transform that adds the x-amz-aoss-collection-name header. " +
+            "Migration console cluster commands don't send the collection header, so most of them don't work against this target."),
 }).describe("Connection configuration for a target OpenSearch cluster. Extends the base cluster config with a required endpoint.");
 
 export const SOURCE_CLUSTER_REPOS_RECORD =
     z.record(z.string(), REPO_CONFIG)
-    .describe("Map of snapshot repository names to their backing-store configurations. Keys are the repository names as registered in the source cluster. Each value's repoPathUri scheme determines the backend (s3:// or gs://).");
+    .describe("Map of snapshot repository names to their backing-store configurations. Keys are the repository names as registered in the source cluster. Each value's repoPathUri scheme determines the backend (s3://, gs://, or azure://).");
 
 export const CAPTURE_CONFIG = z.object({
     kafka: z.string().regex(K8S_NAMING_PATTERN).default("default").optional()
@@ -1829,6 +1875,25 @@ export const NORMALIZED_COMPLETE_SNAPSHOT_CONFIG = z.object({
         .describe("Resolved name of the snapshot to use for migration.")
 }).describe("A fully resolved snapshot configuration with a concrete snapshot name.");
 
+export const STATIC_COLLECTION_ROUTING = z.array(z.object({
+    sourceIndex: z.string().regex(/\S/, "must not be blank")
+        .describe("Exact source index name."),
+    collection: z.string().regex(/\S/, "must not be blank")
+        .describe("OpenSearch Serverless collection name, used as is."),
+}).describe("Routes one source index to one OpenSearch Serverless collection."))
+    .describe("Exact source index to collection mappings for a collection-routed target. A static match wins over every regex entry. " +
+        "Each sourceIndex may appear only once.");
+
+export const REGEX_COLLECTION_ROUTING = z.array(z.object({
+    sourceIndex: z.string().regex(/\S/, "must not be blank")
+        .describe("Java regular expression that must match the whole source index name (e.g. '(.+)-\\d{4}')."),
+    collection: z.string().regex(/\S/, "must not be blank")
+        .describe("Collection name replacement pattern, which may reference the regex's capture groups by number or name (e.g. '$1' or '${tenant}')."),
+}).describe("Routes source indices that match a regex to an OpenSearch Serverless collection."))
+    .describe("Ordered regex mappings for a collection-routed target, used when no static entry matches. The first regex that matches " +
+        "the whole index name wins. Patterns and group references are validated with JavaScript's regex engine, which " +
+        "rejects Java-only syntax such as (?i), a++ and (?>a), and then fully by Java when the migration starts.");
+
 export const USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG = z.object({
     label: z.string().regex(/^[a-zA-Z][a-zA-Z0-9]*/).default("").optional()
         .describe("Unique label for this migration within its snapshot group. Auto-generated as 'migration-<index>' if not specified. Must start with a letter and contain only alphanumeric characters."),
@@ -1836,6 +1901,13 @@ export const USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG = z.object({
         .describe("Configuration for migrating index metadata (mappings, settings, templates) from the snapshot to the target. Omit to skip metadata migration."),
     documentBackfillConfig: USER_RFS_OPTIONS.optional()
         .describe("Configuration for backfilling documents from the snapshot to the target using Reindex From Snapshot. Omit to skip document backfill."),
+    staticCollectionRouting: STATIC_COLLECTION_ROUTING.optional()
+        .describe("Exact source index to OpenSearch Serverless collection mappings. With regexCollectionRouting, needs at least one entry " +
+            "when the target is collectionRouted and is not allowed otherwise. Shared by metadata migration and document backfill " +
+            "so an index's metadata and documents reach the same collection. Templates aren't migrated to collection-routed targets."),
+    regexCollectionRouting: REGEX_COLLECTION_ROUTING.optional()
+        .describe("Ordered regex source index to OpenSearch Serverless collection mappings, used when no static entry matches. " +
+            "Same rules as staticCollectionRouting."),
 }).describe("Configuration for a single migration pass from a snapshot. At least one of metadataMigrationConfig or documentBackfillConfig must be provided.").refine(data =>
         data.metadataMigrationConfig !== undefined ||
         data.documentBackfillConfig !== undefined,
@@ -1881,6 +1953,119 @@ export const SOURCE_CLUSTERS_MAP = z.record(z.string(), SOURCE_CLUSTER_CONFIG)
     .describe("Map of source cluster names to their configurations. Keys are used as labels throughout the migration workflow.");
 export const TARGET_CLUSTERS_MAP = z.record(z.string(), TARGET_CLUSTER_CONFIG)
     .describe("Map of target cluster names to their configurations. Keys are used as labels and must be referenced by snapshotMigrationConfigs and traffic replayers.");
+
+// Keep in sync with REPLACEMENT_TOKEN in ServerlessCollectionRouting.java. In order: an escaped character, ${name},
+// $n, then the incomplete forms ${, $ and a trailing backslash.
+const COLLECTION_REPLACEMENT_TOKEN = /\\.|\$\{([^}]*)}|\$(\d)|\$\{|\$|\\/gs;
+
+/** Returns why a regex route's collection can't work with its pattern, or undefined when it can. */
+function collectionReplacementProblem(collection: string, groupCount: number, groupNames: string[]): string | undefined {
+    for (const [token, groupName, groupNumber] of collection.matchAll(COLLECTION_REPLACEMENT_TOKEN)) {
+        if (groupName !== undefined) {
+            if (!groupNames.includes(groupName)) {
+                return `references undefined group '${groupName}'`;
+            }
+        } else if (groupNumber !== undefined) {
+            if (Number(groupNumber) > groupCount) {
+                return `references undefined group ${groupNumber}`;
+            }
+        } else if (token === "${") {
+            return "has an unclosed '${'";
+        } else if (token === "$") {
+            return "has '$' that is not a group reference";
+        } else if (token === "\\") {
+            return "ends with an unescaped backslash";
+        }
+    }
+    return undefined;
+}
+
+function validateRegexRoute(
+    route: z.infer<typeof REGEX_COLLECTION_ROUTING>[number],
+    routePath: (string | number)[],
+    ctx: z.RefinementCtx
+) {
+    let compiled: RegExp;
+    try {
+        compiled = new RegExp(route.sourceIndex);
+    } catch {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `regexCollectionRouting sourceIndex '${route.sourceIndex}' is not a valid regular expression. ` +
+                `This check uses JavaScript's engine, so it also rejects Java-only syntax such as (?i), a++ and (?>a).`,
+            path: [...routePath, 'sourceIndex']
+        });
+        return;
+    }
+    // An empty alternative always matches, which exposes the groups without needing an index name that fits the pattern
+    const groups = new RegExp(`${compiled.source}|`).exec("")!;
+    const problem = collectionReplacementProblem(route.collection, groups.length - 1, Object.keys(groups.groups ?? {}));
+    if (problem !== undefined) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `Collection '${route.collection}' for regex '${route.sourceIndex}' in regexCollectionRouting ${problem}.`,
+            path: [...routePath, 'collection']
+        });
+    }
+}
+
+function validateCollectionRouting(
+    targetCluster: z.infer<typeof TARGET_CLUSTER_CONFIG> | undefined,
+    mc: z.infer<typeof NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG>,
+    i: number,
+    ctx: z.RefinementCtx
+) {
+    if (!targetCluster) {
+        return;
+    }
+    const routed = targetCluster.collectionRouted === true;
+    if (routed) {
+        const sigv4 = HTTP_AUTH_SIGV4.safeParse(targetCluster.authConfig);
+        if (!sigv4.success || sigv4.data.sigv4.service !== "aoss") {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: `Target '${mc.toTarget}' is collectionRouted, which requires sigv4 authConfig with service 'aoss'.`,
+                path: ['targetClusters', mc.toTarget, 'authConfig']
+            });
+        }
+    }
+    for (const [snapName, migrations] of Object.entries(mc.perSnapshotConfig)) {
+        migrations.forEach((migration, j) => {
+            const entryPath = ['snapshotMigrationConfigs', i, 'perSnapshotConfig', snapName, j];
+            const staticRoutes = migration.staticCollectionRouting;
+            const regexRoutes = migration.regexCollectionRouting;
+            const hasRoutingField = staticRoutes !== undefined || regexRoutes !== undefined;
+            const routeCount = (staticRoutes?.length ?? 0) + (regexRoutes?.length ?? 0);
+            if (routed && routeCount === 0) {
+                ctx.addIssue({
+                    code: z.ZodIssueCode.custom,
+                    message: `Target '${mc.toTarget}' is collectionRouted, so perSnapshotConfig['${snapName}'][${j}] needs at least one ` +
+                        `staticCollectionRouting or regexCollectionRouting entry.`,
+                    path: [...entryPath, 'staticCollectionRouting']
+                });
+            } else if (!routed && hasRoutingField) {
+                ctx.addIssue({
+                    code: z.ZodIssueCode.custom,
+                    message: `perSnapshotConfig['${snapName}'][${j}] sets collection routing, but target '${mc.toTarget}' is not collectionRouted.`,
+                    path: [...entryPath, staticRoutes !== undefined ? 'staticCollectionRouting' : 'regexCollectionRouting']
+                });
+            }
+            const seen = new Set<string>();
+            (staticRoutes ?? []).forEach((route, k) => {
+                if (seen.has(route.sourceIndex)) {
+                    ctx.addIssue({
+                        code: z.ZodIssueCode.custom,
+                        message: `staticCollectionRouting lists source index '${route.sourceIndex}' more than once.`,
+                        path: [...entryPath, 'staticCollectionRouting', k, 'sourceIndex']
+                    });
+                }
+                seen.add(route.sourceIndex);
+            });
+            (regexRoutes ?? []).forEach((route, k) =>
+                validateRegexRoute(route, [...entryPath, 'regexCollectionRouting', k], ctx));
+        });
+    }
+}
 
 export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
 (
@@ -1931,6 +2116,8 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
                     path: ['snapshotMigrationConfigs', i, 'toTarget']
                 });
             }
+
+            validateCollectionRouting(data.targetClusters[mc.toTarget], mc, i, ctx);
 
             if (mc.perSnapshotConfig) {
                 const sourceCluster = data.sourceClusters[mc.fromSource];
@@ -2074,6 +2261,15 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
                             path: ['traffic', 'replayers', replayerName, 'dependsOnSnapshotMigrations', j, 'source']
                         });
                     }
+                }
+
+                if (data.targetClusters[rc.toTarget]?.collectionRouted && !hasRequestTransform(rc.replayerConfig)) {
+                    ctx.addIssue({
+                        code: z.ZodIssueCode.custom,
+                        message: `Replayer '${replayerName}' targets '${rc.toTarget}', which is collectionRouted, so it needs ` +
+                            `a request transform that adds the x-amz-aoss-collection-name header to each request.`,
+                        path: ['traffic', 'replayers', replayerName, 'toTarget']
+                    });
                 }
 
                 // When the target has sigv4 or basic auth, the workflow auto-derives the replayer's auth

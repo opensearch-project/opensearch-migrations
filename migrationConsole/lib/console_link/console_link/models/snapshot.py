@@ -6,7 +6,7 @@ from cerberus import Validator
 from datetime import datetime
 from pydantic import BaseModel, Field, field_serializer
 from requests.exceptions import HTTPError
-from typing import Any, Dict, List, Optional, TypeAlias
+from typing import Annotated, Any, Dict, List, Literal, Optional, TypeAlias
 
 from console_link.models.cluster import (AuthMethod, Cluster, DEFAULT_SOLR_CONTEXT_PATH, HttpMethod,
                                          NoSourceClusterDefinedError)
@@ -78,6 +78,13 @@ SNAPSHOT_SCHEMA = {
                     'endpoint': {'type': 'string', 'required': False, 'empty': True},
                 }
             },
+            'azure': {
+                'type': 'dict',
+                'nullable': True,
+                'schema': {
+                    'repo_uri': {'type': 'string', 'required': True, 'empty': False},
+                }
+            },
             'fs': {
                 'type': 'dict',
                 'schema': {
@@ -85,7 +92,7 @@ SNAPSHOT_SCHEMA = {
                 }
             }
         },
-        'check_with': contains_one_of({'s3', 'fs', 'gcs'})
+        'check_with': contains_one_of({'s3', 'fs', 'gcs', 'azure'})
     }
 }
 
@@ -388,6 +395,78 @@ class GcsSnapshot(Snapshot):
         if self._is_solr_source():
             collections = self._get_solr_collections()
             command_args["--solr-collections"] = ",".join(collections)
+
+        wait = kwargs.get('wait', False)
+        max_snapshot_rate_mb_per_node = kwargs.get('max_snapshot_rate_mb_per_node')
+        extra_args = kwargs.get('extra_args')
+
+        if not wait:
+            command_args["--no-wait"] = FlagOnlyArgument
+        if max_snapshot_rate_mb_per_node is not None:
+            command_args["--max-snapshot-rate-mb-per-node"] = max_snapshot_rate_mb_per_node
+        if extra_args:
+            for arg in extra_args:
+                command_args[arg] = FlagOnlyArgument
+
+        command_runner = CommandRunner(base_command, command_args, sensitive_fields=["--source-password"])
+        try:
+            command_runner.run()
+            logger.info(f"Snapshot {self.config['snapshot_name']} creation initiated successfully")
+            return f"Snapshot {self.config['snapshot_name']} creation initiated successfully"
+        except CommandRunnerError as e:
+            logger.debug(f"Failed to create snapshot: {str(e)}")
+            ex = FailedToCreateSnapshot()
+            ex.add_note(f"Failure from {str(e)}")
+            raise ex
+
+    def status(self, *args, deep_check=False, **kwargs) -> CommandResult:
+        if not self.source_cluster:
+            raise NoSourceClusterDefinedError()
+        if self._is_solr_source():
+            return _solr_backup_status(self.source_cluster, self.snapshot_name, deep_check=deep_check,
+                                       context_path=self.source_cluster.solr_context_path)
+        return get_snapshot_status(self.source_cluster, self.snapshot_name, self.snapshot_repo_name, deep_check)
+
+    def delete(self, *args, **kwargs) -> str:
+        if not self.source_cluster:
+            raise NoSourceClusterDefinedError()
+        if self._is_solr_source():
+            return SOLR_NO_DELETE_MSG
+        return delete_snapshot(self.source_cluster, self.snapshot_name, self.snapshot_repo_name)
+
+    def delete_all_snapshots(self, *args, **kwargs) -> str:
+        if not self.source_cluster:
+            raise NoSourceClusterDefinedError()
+        if self._is_solr_source():
+            return SOLR_NO_DELETE_MSG
+        return delete_all_snapshots(self.source_cluster, self.snapshot_repo_name)
+
+    def delete_snapshot_repo(self, *args, **kwargs) -> str:
+        if not self.source_cluster:
+            raise NoSourceClusterDefinedError()
+        if self._is_solr_source():
+            return SOLR_NO_SNAPSHOT_REPO_MSG
+        return delete_snapshot_repo(self.source_cluster, self.snapshot_repo_name)
+
+
+class AzureSnapshot(Snapshot):
+    def __init__(self, config: Dict, source_cluster: Optional[Cluster]) -> None:
+        super().__init__(config, source_cluster)
+        self.azure_repo_uri = config['azure']['repo_uri']
+
+    def create(self, *args, **kwargs) -> str:
+        if not self.source_cluster:
+            raise NoSourceClusterDefinedError
+        base_command = CREATE_SNAPSHOT_COMMAND
+
+        command_args = self._collect_universal_command_args()
+        command_args["--repo-uri"] = self.azure_repo_uri
+
+        if self._is_solr_source():
+            collections = self.solr_collections or self._get_solr_collections()
+            command_args["--solr-collections"] = ",".join(collections)
+            if self.solr_topology:
+                command_args["--solr-topology"] = self.solr_topology
 
         wait = kwargs.get('wait', False)
         max_snapshot_rate_mb_per_node = kwargs.get('max_snapshot_rate_mb_per_node')
@@ -1154,6 +1233,7 @@ class SnapshotSourceType(str, Enum):
     filesystem = "filesytem"
     s3 = "s3"
     gcs = "gcs"
+    azure = "azure"
 
 
 class SnapshotSource(BaseModel):
@@ -1161,22 +1241,31 @@ class SnapshotSource(BaseModel):
 
 
 class FileSystemSnapshotSource(SnapshotSource):
-    type: SnapshotSourceType = SnapshotSourceType.filesystem
+    type: Literal[SnapshotSourceType.filesystem] = SnapshotSourceType.filesystem
     path: str
 
 
 class S3SnapshotSource(SnapshotSource):
-    type: SnapshotSourceType = SnapshotSourceType.s3
+    type: Literal[SnapshotSourceType.s3] = SnapshotSourceType.s3
     uri: str
     region: str
 
 
 class GcsSnapshotSource(SnapshotSource):
-    type: SnapshotSourceType = SnapshotSourceType.gcs
+    type: Literal[SnapshotSourceType.gcs] = SnapshotSourceType.gcs
     uri: str
 
 
-SnapshotType: TypeAlias = FileSystemSnapshotSource | S3SnapshotSource | GcsSnapshotSource
+class AzureSnapshotSource(SnapshotSource):
+    type: Literal[SnapshotSourceType.azure] = SnapshotSourceType.azure
+    uri: str
+
+
+# Tagged because Azure and GCS sources share fields; untagged, an azure payload parses as GCS.
+SnapshotType: TypeAlias = Annotated[
+    FileSystemSnapshotSource | S3SnapshotSource | GcsSnapshotSource | AzureSnapshotSource,
+    Field(discriminator="type"),
+]
 
 
 class SnapshotConfig(BaseModel):
