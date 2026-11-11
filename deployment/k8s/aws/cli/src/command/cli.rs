@@ -102,6 +102,25 @@ fn env_with_stage(mut env: Env, args: &[String]) -> Env {
     env
 }
 
+/// Flags that consume the following token as their value, for positional scans.
+const VALUE_FLAGS: &[&str] = &["--stage"];
+
+/// First positional (non-flag) token, skipping any value-taking flag's value
+/// (so `agent --stage x kiro-cli` picks `kiro-cli`, not `x`).
+fn first_positional(args: &[String]) -> Option<String> {
+    let mut i = 0;
+    while i < args.len() {
+        let a = &args[i];
+        if a.starts_with('-') {
+            let takes_value = !a.contains('=') && VALUE_FLAGS.contains(&a.as_str());
+            i += if takes_value { 2 } else { 1 };
+            continue;
+        }
+        return Some(a.clone());
+    }
+    None
+}
+
 // ---------------------------------------------------------------------------
 // resume — the controller
 // ---------------------------------------------------------------------------
@@ -557,8 +576,8 @@ fn cmd_agent<R: CommandRunner>(env: Env, runner: &R, args: &[String]) -> Result<
             "no deployed stage found in state. Run `migration-assistant` first or pass --stage <name>.",
         ));
     }
-    // Positional (non-flag) arg picks the agent.
-    let picked = args.iter().find(|a| !a.starts_with('-')).cloned();
+    // Positional arg picks the agent; skip value-taking flags' values.
+    let picked = first_positional(args);
     let picked = match picked {
         Some(p) => p,
         None => {
@@ -1027,5 +1046,28 @@ mod tests {
         );
         assert_eq!(stage_from_args(&args(&["--stage=stg"])), Some("stg".into()));
         assert_eq!(stage_from_args(&args(&["--region", "x"])), None);
+    }
+
+    #[test]
+    fn agent_positional_skips_stage_value() {
+        assert_eq!(
+            first_positional(&args(&["--stage", "x", "kiro-cli"])),
+            Some("kiro-cli".into())
+        );
+        assert_eq!(
+            first_positional(&args(&["kiro-cli", "--stage", "x"])),
+            Some("kiro-cli".into())
+        );
+        assert_eq!(
+            first_positional(&args(&["--stage=x", "kiro-cli"])),
+            Some("kiro-cli".into())
+        );
+        assert_eq!(first_positional(&args(&["--stage", "x"])), None);
+        assert_eq!(first_positional(&args(&["--stage=x"])), None);
+        assert_eq!(
+            first_positional(&args(&["--verbose", "kiro-cli"])),
+            Some("kiro-cli".into())
+        );
+        assert_eq!(first_positional(&args(&[])), None);
     }
 }
