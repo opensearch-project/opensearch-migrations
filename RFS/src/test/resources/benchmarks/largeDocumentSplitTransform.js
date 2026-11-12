@@ -7,6 +7,10 @@ function main(context) {
   const selectedIds = new Set(
     selectedIdValues == null ? [] : Array.from(selectedIdValues, value => String(value))
   );
+  const configuredMaxExpanded = Number(context.get("maxExpandedPerInvocation"));
+  const maxExpandedPerInvocation = Number.isFinite(configuredMaxExpanded) && configuredMaxExpanded > 0
+    ? Math.floor(configuredMaxExpanded)
+    : Number.POSITIVE_INFINITY;
   const targetBytes = Number(context.get("targetBytes"));
   const valueBytes = Number(context.get("valueBytes"));
   const containerCount = Number(context.get("containerCount"));
@@ -62,35 +66,42 @@ function main(context) {
     return payload;
   }
 
-  return documents => documents.map(document => {
-    if (document.operation_type !== "index") {
-      return document;
-    }
-    const id = String(document.operation._id);
-    const idHash = hashId(id);
+  return documents => {
+    let expandedDocuments = 0;
+    return documents.map(document => {
+      if (document.operation_type !== "index") {
+        return document;
+      }
+      const id = String(document.operation._id);
+      const idHash = hashId(id);
 
-    // Exercise create-only semantics and remove concurrency fields that are not valid with create.
-    document.operation._index = targetIndex;
-    document.operation.op_type = "create";
-    delete document.operation.version;
-    delete document.operation.version_type;
-    delete document.operation.if_seq_no;
-    delete document.operation.if_primary_term;
+      // Exercise create-only semantics and remove concurrency fields that are not valid with create.
+      document.operation._index = targetIndex;
+      document.operation.op_type = "create";
+      delete document.operation.version;
+      delete document.operation.version_type;
+      delete document.operation.if_seq_no;
+      delete document.operation.if_primary_term;
 
-    const existingPayload = document.document.benchmark_payload;
-    const alreadyExpanded = existingPayload != null
-      && Number(existingPayload.target_bytes) > 0;
-    const selected = targetBytes > 0 && (
-      selectedIds.size > 0 ? selectedIds.has(id) : idHash % sampleModulo === 0
-    );
-    if (!alreadyExpanded) {
-      document.document.benchmark_payload = makePayload(
-        selected ? idHash : -1,
-        selected ? targetBytes : 0
+      const existingPayload = document.document.benchmark_payload;
+      const alreadyExpanded = existingPayload != null
+        && Number(existingPayload.target_bytes) > 0;
+      const selectedById = targetBytes > 0 && (
+        selectedIds.size > 0 ? selectedIds.has(id) : idHash % sampleModulo === 0
       );
-    }
-    return document;
-  });
+      const selected = selectedById && expandedDocuments < maxExpandedPerInvocation;
+      if (!alreadyExpanded) {
+        document.document.benchmark_payload = makePayload(
+          selected ? idHash : -1,
+          selected ? targetBytes : 0
+        );
+        if (selected) {
+          ++expandedDocuments;
+        }
+      }
+      return document;
+    });
+  };
 }
 
 (() => main)();

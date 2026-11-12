@@ -14,6 +14,7 @@ import org.opensearch.migrations.bulkload.pipeline.model.Document;
 import org.opensearch.migrations.transform.IJsonTransformer;
 import org.opensearch.migrations.transform.TransformationLoader;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
@@ -87,6 +88,33 @@ class LargeDocumentSplitBenchmarkTransformTest {
                     assertTrue(payloadBytes < 1024, "unselected document " + i + " should only be decorated");
                 }
             }
+        }
+    }
+
+    @Test
+    void capsExpandedDocumentsWithinOneTransformInvocation() throws Exception {
+        var operations = IntStream.range(0, 3)
+            .mapToObj(i -> (IndexOp) BulkOperationConverter.fromRawDocument(
+                new Document("document-" + i, SOURCE, Document.Operation.UPSERT, Map.of(), Map.of()),
+                "products"
+            ))
+            .toList();
+
+        try (var transformer = transformer(Map.of(
+            "selectedIds", List.of("document-0", "document-1", "document-2"),
+            "maxExpandedPerInvocation", 1,
+            "targetBytes", 64 * 1024
+        ))) {
+            @SuppressWarnings("unchecked")
+            var transformed = (List<Map<String, Object>>) transformer.transformJson(
+                operations.stream().map(op -> op.toTransformerMap(MAPPER)).toList());
+
+            long expanded = transformed.stream()
+                .map(operation -> MAPPER.convertValue(operation, IndexOp.class))
+                .<JsonNode>map(operation -> MAPPER.valueToTree(operation.getDocument()))
+                .filter(document -> document.path("benchmark_payload").path("target_bytes").asInt() > 0)
+                .count();
+            assertEquals(1, expanded);
         }
     }
 
