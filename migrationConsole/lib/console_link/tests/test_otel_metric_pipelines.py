@@ -61,6 +61,17 @@ def test_eks_emf_metric_names_and_dimensions_are_unchanged():
                 "metric_name_selectors": ["container_memory_working_set_bytes"],
             },
             {
+                "dimensions": [["container", "namespace", "pod"]],
+                "metric_name_selectors": [
+                    "container_spec_cpu_quota",
+                    "container_spec_cpu_period",
+                    "container_spec_memory_limit_bytes",
+                    "container_cpu_cfs_periods_total",
+                    "container_cpu_cfs_throttled_periods_total",
+                    "container_cpu_cfs_throttled_seconds_total",
+                ],
+            },
+            {
                 "dimensions": [["container", "namespace"]],
                 "metric_name_selectors": ["container_cpu_usage_seconds_total"],
             },
@@ -93,7 +104,15 @@ def test_eks_cadvisor_cpu_is_summed_per_node_from_deltas_before_emf():
     collector = _load_collector_config(CHART_DIR / "valuesEks.yaml")
 
     assert collector["processors"]["cumulativetodelta/cadvisor"] == {
-        "include": {"metrics": ["container_cpu_usage_seconds_total"], "match_type": "strict"},
+        "include": {
+            "metrics": [
+                "container_cpu_usage_seconds_total",
+                "container_cpu_cfs_periods_total",
+                "container_cpu_cfs_throttled_periods_total",
+                "container_cpu_cfs_throttled_seconds_total",
+            ],
+            "match_type": "strict",
+        },
     }
     assert collector["processors"]["metricstransform/cadvisor"] == {
         "transforms": [{

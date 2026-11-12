@@ -147,9 +147,9 @@ class RfsMigrateDocumentsHelpersTest {
     }
 
     @Test
-    void failedDocumentStreamDisabledReason_namesTheMissingBucket() {
+    void failedDocumentStreamDisabledReason_namesTheOptOutFlag() {
         assertThat(RfsMigrateDocuments.FAILED_DOCUMENT_STREAM_DISABLED_REASON,
-            equalTo("failed document stream disabled: no --failed-document-stream-s3-bucket configured"));
+            org.hamcrest.Matchers.containsString("--disable-failed-document-stream"));
     }
 
     @Test
@@ -317,7 +317,93 @@ class RfsMigrateDocumentsHelpersTest {
         args.luceneDir = "/tmp/lucene";
         args.sourceVersion = Version.fromString("ES_7.10");
         args.repoUri = "/tmp/snapshot";  // bare absolute path -> file:// repo
+        args.failedDocumentStreamArgs.disableFailedDocumentStream = true;
         return args;
+    }
+
+    @Test
+    void validateArgs_rejectsAMaxLeaseShorterThanTheInitialLease() {
+        var args = validEsArgs();
+        args.initialLeaseDuration = java.time.Duration.ofHours(2);
+        args.maxLeaseDuration = java.time.Duration.ofHours(1);
+        var thrown = assertThrows(ParameterException.class, () -> RfsMigrateDocuments.validateArgs(args));
+        assertThat(thrown.getMessage(), org.hamcrest.Matchers.containsString("--max-lease-duration"));
+    }
+
+    @Test
+    void validateArgs_acceptsAMaxLeaseEqualToTheInitialLease() {
+        var args = validEsArgs();
+        args.initialLeaseDuration = java.time.Duration.ofHours(1);
+        args.maxLeaseDuration = java.time.Duration.ofHours(1);
+        assertDoesNotThrow(() -> RfsMigrateDocuments.validateArgs(args));
+    }
+
+    @Test
+    void bulkResponseTimeoutDefaultsTo310SecondsAndIsReadFromInlineJson() {
+        assertThat(new RfsMigrateDocuments.Args().bulkResponseTimeout, equalTo(Duration.ofSeconds(310)));
+        var args = new RfsMigrateDocuments.Args();
+        JsonCommandLineParser.newBuilder().addObject(args).build()
+            .parse(new String[]{"---INLINE-JSON", "{\"bulkResponseTimeout\": \"PT2M\"}"});
+        assertThat(args.bulkResponseTimeout, equalTo(Duration.ofMinutes(2)));
+    }
+
+    @Test
+    void validateArgs_rejectsANonPositiveBulkResponseTimeout() {
+        var args = validEsArgs();
+        args.bulkResponseTimeout = Duration.ZERO;
+        assertThrows(ParameterException.class, () -> RfsMigrateDocuments.validateArgs(args));
+    }
+
+    @Test
+    void expertLimitsHaveTodaysDefaultsAndAreReadFromInlineJson() {
+        var defaults = new RfsMigrateDocuments.Args();
+        assertThat(defaults.maxLeaseDuration, equalTo(java.time.Duration.ofDays(1)));
+
+        var args = new RfsMigrateDocuments.Args();
+        JsonCommandLineParser.newBuilder().addObject(args).build()
+            .parse(new String[]{"---INLINE-JSON", "{\"maxLeaseDuration\": \"PT6H\"}"});
+        assertThat(args.maxLeaseDuration, equalTo(java.time.Duration.ofHours(6)));
+    }
+
+    @Test
+    void validateArgs_requiresAFailedDocumentStreamOrAnExplicitOptOut() {
+        var args = validEsArgs();
+        args.failedDocumentStreamArgs.disableFailedDocumentStream = false;
+        var thrown = assertThrows(ParameterException.class, () -> RfsMigrateDocuments.validateArgs(args));
+        assertThat(thrown.getMessage(), org.hamcrest.Matchers.containsString("--failed-document-stream-s3-bucket"));
+        assertThat(thrown.getMessage(), org.hamcrest.Matchers.containsString("--disable-failed-document-stream"));
+    }
+
+    @Test
+    void validateArgs_rejectsABucketTogetherWithTheOptOut() {
+        var args = validEsArgs();
+        args.failedDocumentStreamArgs.failedDocumentStreamS3Bucket = "bucket";
+        var thrown = assertThrows(ParameterException.class, () -> RfsMigrateDocuments.validateArgs(args));
+        assertThat(thrown.getMessage(), org.hamcrest.Matchers.containsString("can't both be set"));
+    }
+
+    @Test
+    void validateArgs_acceptsABucketWithoutTheOptOut() {
+        var args = validEsArgs();
+        args.failedDocumentStreamArgs.disableFailedDocumentStream = false;
+        args.failedDocumentStreamArgs.failedDocumentStreamS3Bucket = "bucket";
+        assertDoesNotThrow(() -> RfsMigrateDocuments.validateArgs(args));
+    }
+
+    @Test
+    void validateArgs_treatsABlankBucketAsMissing() {
+        var args = validEsArgs();
+        args.failedDocumentStreamArgs.disableFailedDocumentStream = false;
+        args.failedDocumentStreamArgs.failedDocumentStreamS3Bucket = "  ";
+        assertThrows(ParameterException.class, () -> RfsMigrateDocuments.validateArgs(args));
+    }
+
+    @Test
+    void disableFailedDocumentStream_isReadFromInlineJson() {
+        var args = new RfsMigrateDocuments.Args();
+        JsonCommandLineParser.newBuilder().addObject(args).build()
+            .parse(new String[]{"---INLINE-JSON", "{\"disableFailedDocumentStream\": true}"});
+        assertThat(args.failedDocumentStreamArgs.disableFailedDocumentStream, is(true));
     }
 
     @Test
@@ -688,6 +774,51 @@ class RfsMigrateDocumentsHelpersTest {
     void getSuccessorWorkItemIds_throwsWhenWorkItemNull() {
         assertThrows(IllegalStateException.class,
             () -> RfsMigrateDocuments.getSuccessorWorkItemIds(null, new WorkItemCursor(0L)));
+    }
+
+    // ---- executeCleanShutdownProcess --------------------------------------
+
+    @Test
+    void shutdownSizesTheSuccessorsLeaseFromThisLeaseAndShardSetupTime() throws Exception {
+        var initialLease = Duration.ofMinutes(1);
+        // The lease had doubled six times (64 min) to fit a slow shard; setup this time took 30 s of it, under the
+        // 2.5% threshold, so the successor gets one doubling less: exponent 5. A fixed 1 would cut it to 2 min.
+        var leaseExpiration = Instant.EPOCH.plus(initialLease.multipliedBy(64));
+        var timeProvider = new org.opensearch.migrations.bulkload.workcoordination.WorkItemTimeProvider();
+        timeProvider.getLeaseAcquisitionTimeRef().set(Instant.EPOCH);
+        timeProvider.getDocumentMigraionStartTimeRef().set(Instant.EPOCH.plusSeconds(30));
+        var workItem = new IWorkCoordinator.WorkItemAndDuration.WorkItem("movies", 2, 0L);
+        var coordinator = mock(IWorkCoordinator.class);
+
+        RfsMigrateDocuments.executeCleanShutdownProcess(
+            new java.util.concurrent.atomic.AtomicReference<>(
+                new IWorkCoordinator.WorkItemAndDuration(leaseExpiration, workItem)),
+            new java.util.concurrent.atomic.AtomicReference<>(new WorkItemCursor(42L)),
+            coordinator, new java.util.concurrent.atomic.AtomicBoolean(), timeProvider, initialLease, Duration.ofDays(1),
+            () -> null, () -> null, null, (w, c) -> java.util.Map.of());
+
+        verify(coordinator).createSuccessorWorkItemsAndMarkComplete(
+            org.mockito.ArgumentMatchers.eq(workItem.toString()),
+            org.mockito.ArgumentMatchers.eq(java.util.List.of(
+                new IWorkCoordinator.WorkItemAndDuration.WorkItem("movies", 2, 42L).toString())),
+            org.mockito.ArgumentMatchers.eq(5), org.mockito.ArgumentMatchers.isNull(), any(), any());
+    }
+
+    @Test
+    void shutdownSuccessorLeaseExponentIsCappedAndFallsBackToOneWithoutTimes() {
+        var initialLease = Duration.ofMinutes(1);
+        var timeProvider = new org.opensearch.migrations.bulkload.workcoordination.WorkItemTimeProvider();
+        var leaseExpiration = Instant.EPOCH.plus(initialLease.multipliedBy(64));
+        assertThat(RfsMigrateDocuments.getShutdownSuccessorLeaseExponent(timeProvider, initialLease,
+            Duration.ofDays(1), leaseExpiration), is(1));
+
+        timeProvider.getLeaseAcquisitionTimeRef().set(Instant.EPOCH);
+        // Setup took half the lease, so the uncapped successor exponent would be 7; an 8-minute cap stops it at 3.
+        timeProvider.getDocumentMigraionStartTimeRef().set(Instant.EPOCH.plus(initialLease.multipliedBy(32)));
+        assertThat(RfsMigrateDocuments.getShutdownSuccessorLeaseExponent(timeProvider, initialLease,
+            Duration.ofDays(1), leaseExpiration), is(7));
+        assertThat(RfsMigrateDocuments.getShutdownSuccessorLeaseExponent(timeProvider, initialLease,
+            Duration.ofMinutes(8), leaseExpiration), is(3));
     }
 
     // ---- NoWorkLeftException ---------------------------------------------

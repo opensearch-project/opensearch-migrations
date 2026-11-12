@@ -102,7 +102,7 @@ class LargeDocumentSplitEndToEndTest {
             assertEquals("doc1", record.getValue().getDocumentId());
             assertEquals("mapper_parsing_exception", record.getValue().getFailureType());
             assertTrue(record.getValue().getResponseItem().has("update"), record.getValue().getResponseItem().toString());
-            assertEquals("seven", record.getValue().getRequestItem().path("document").path("count").asText());
+            assertEquals("seven", record.getValue().getTarget().path("body").path("count").asText());
             // The fields merged before the rejection stay on the target until the document is migrated again.
             stored = get(rest, context, "strict/_doc/doc1?routing=" + ROUTING);
             assertTrue(stored.path("_source").has("title"));

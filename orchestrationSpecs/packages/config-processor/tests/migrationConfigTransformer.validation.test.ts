@@ -154,7 +154,8 @@ describe('MigrationConfigTransformer validation', () => {
                     skipEvaluateApproval: innerValue,
                     skipMigrateApproval: innerValue
                 },
-                documentBackfillConfig: innerValue === undefined ? {} : {
+                documentBackfillConfig: innerValue === undefined ? {disableFailedDocumentStream: true} : {
+                    disableFailedDocumentStream: true,
                     skipApproval: innerValue
                 }
             };
@@ -176,7 +177,7 @@ describe('MigrationConfigTransformer validation', () => {
         config.snapshotMigrationConfigs[0].skipApprovals = false;
         config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0] = {
             metadataMigrationConfig: {},
-            documentBackfillConfig: {}
+            documentBackfillConfig: {disableFailedDocumentStream: true}
         };
 
         const result = await transformer.processFromObject(config);
@@ -185,6 +186,55 @@ describe('MigrationConfigTransformer validation', () => {
         expect(migration?.metadataMigrationConfig?.skipEvaluateApproval).toBe(false);
         expect(migration?.metadataMigrationConfig?.skipMigrateApproval).toBe(false);
         expect(migration?.documentBackfillConfig?.skipApproval).toBe(false);
+    });
+
+    it('should materialize component log-level defaults before building workflows', async () => {
+        const config = cloneBaseConfig();
+        config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0] = {
+            metadataMigrationConfig: {},
+            documentBackfillConfig: {disableFailedDocumentStream: true}
+        };
+
+        const result = await transformer.processFromObject(config);
+        const migration = result.snapshotMigrations[0];
+
+        expect(result.proxies[0].proxyConfig.logLevels).toEqual({root: "info"});
+        expect(result.trafficReplays[0].replayerConfig.logLevels).toEqual({root: "info"});
+        expect(migration.metadataMigrationConfig?.logLevels).toEqual({root: "info"});
+        expect(migration.documentBackfillConfig?.logLevels).toEqual({
+            root: "info",
+            bulkRequestTrace: "off",
+            failedRequests: "warn",
+        });
+    });
+
+    it('should preserve configured log levels while materializing missing defaults', async () => {
+        const config = cloneBaseConfig();
+        config.traffic.proxies.proxy1.proxyConfig.logLevels = {root: "debug"};
+        config.traffic.replayers.replay1.replayerConfig = {
+            logLevels: {root: "trace"},
+        };
+        config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0] = {
+            metadataMigrationConfig: {
+                logLevels: {root: "warn"},
+            },
+            documentBackfillConfig: {
+                disableFailedDocumentStream: true,
+                logLevels: {root: "error"},
+            },
+        };
+
+        const result = await transformer.processFromObject(config);
+        const migration = result.snapshotMigrations[0];
+
+        expect(result.proxies[0].proxyConfig.logLevels).toEqual({root: "debug"});
+        expect(result.trafficReplays[0].replayerConfig.logLevels).toEqual({root: "trace"});
+        expect(migration.metadataMigrationConfig?.logLevels).toEqual({root: "warn"});
+        expect(migration.documentBackfillConfig?.logLevels).toEqual({
+            root: "error",
+            bulkRequestTrace: "off",
+            failedRequests: "warn",
+        });
     });
 
     it('should let per-gate skip flags override broader skipApprovals', async () => {
@@ -196,6 +246,7 @@ describe('MigrationConfigTransformer validation', () => {
                 skipEvaluateApproval: false
             },
             documentBackfillConfig: {
+                disableFailedDocumentStream: true,
                 skipApproval: false
             }
         };
@@ -224,7 +275,7 @@ describe('MigrationConfigTransformer validation', () => {
         config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0] = {
             ...collectionRouting,
             metadataMigrationConfig: {},
-            documentBackfillConfig: {}
+            documentBackfillConfig: {disableFailedDocumentStream: true}
         };
 
         const result = await transformer.processFromObject(config);
@@ -245,7 +296,7 @@ describe('MigrationConfigTransformer validation', () => {
         config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0] = {
             staticCollectionRouting: [{sourceIndex: "shared-config", collection: "common"}],
             metadataMigrationConfig: {},
-            documentBackfillConfig: {}
+            documentBackfillConfig: {disableFailedDocumentStream: true}
         };
         config.traffic.replayers.replay1.replayerConfig = {
             requestTransforms: {entryPoint: {javascript: "(m) => m"}}
@@ -300,7 +351,7 @@ describe('MigrationConfigTransformer validation', () => {
         const config = cloneBaseConfig();
         config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0] = {
             metadataMigrationConfig: {},
-            documentBackfillConfig: {}
+            documentBackfillConfig: {disableFailedDocumentStream: true}
         };
         const result = await transformer.processFromObject(config);
         const migration = result.snapshotMigrations?.[0] as any;
@@ -536,6 +587,7 @@ describe('MigrationConfigTransformer validation', () => {
                     }
                 },
                 documentBackfillConfig: {
+                    disableFailedDocumentStream: true,
                     documentTransforms: [
                         {
                             transformName: "TypeMappingSanitizationTransformerProvider",
@@ -952,6 +1004,7 @@ describe('MigrationConfigTransformer validation', () => {
     it('should keep workload identity stable across gated RFS changes only', async () => {
         const withBackfill = JSON.parse(JSON.stringify(baseConfig));
         withBackfill.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0].documentBackfillConfig = {
+            disableFailedDocumentStream: true,
             maxConnections: 4,
         };
 
@@ -1007,11 +1060,11 @@ describe('MigrationConfigTransformer validation', () => {
         const withMetadataOnly = cloneBaseConfig(); // baseConfig already has only metadataMigrationConfig
 
         const withBoth = cloneBaseConfig();
-        withBoth.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0].documentBackfillConfig = {};
+        withBoth.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0].documentBackfillConfig = {disableFailedDocumentStream: true};
 
         const withBackfillOnly = cloneBaseConfig();
         delete withBackfillOnly.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0].metadataMigrationConfig;
-        withBackfillOnly.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0].documentBackfillConfig = {};
+        withBackfillOnly.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0].documentBackfillConfig = {disableFailedDocumentStream: true};
 
         const metadataOnly = (await transformer.processFromObject(withMetadataOnly)).snapshotMigrations[0];
         const both = (await transformer.processFromObject(withBoth)).snapshotMigrations[0];
@@ -1323,6 +1376,7 @@ describe('MigrationConfigTransformer validation', () => {
                                     skipMigrateApproval: true,
                                 },
                                 documentBackfillConfig: {
+                                    disableFailedDocumentStream: true,
                                     podReplicas: 1,
                                 },
                             }

@@ -9,9 +9,13 @@ import java.util.Set;
 import java.util.function.BiFunction;
 
 import org.opensearch.migrations.Version;
+import org.opensearch.migrations.bulkload.common.bulk.IndexOp;
+import org.opensearch.migrations.bulkload.common.bulk.enums.IndexOpType;
+import org.opensearch.migrations.bulkload.common.bulk.operations.IndexOperationMeta;
 import org.opensearch.migrations.bulkload.common.http.CompressionMode;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.common.http.HttpResponse;
+import org.opensearch.migrations.bulkload.common.retry.BulkRetryPolicy;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
 import org.opensearch.migrations.bulkload.pipeline.model.MigrationMetrics;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
@@ -84,7 +88,7 @@ class LargeDocumentSplitTest {
         var client = new OpenSearchClient_OS_2_11(transport, mock(FailedRequestsLogger.class),
             Version.fromString(version), CompressionMode.UNCOMPRESSED, 100, MAX_REQUEST_BYTES) {
             @Override
-            protected Retry getBulkRetryStrategy() {
+            protected Retry getBulkRetryStrategy(BulkRetryPolicy.Batch batch) {
                 return Retry.max(0);
             }
         };
@@ -101,6 +105,24 @@ class LargeDocumentSplitTest {
         }
         return client.sendBulkRequestRaw(INDEX, documents, mock(IRfsContexts.IRequestContext.class),
             serverGeneratedIds, DocumentExceptionAllowlist.empty()).block();
+    }
+
+    private OpenSearchClient.BulkResponse sendCreate(
+        OpenSearchClient client, String id, String source, DocumentExceptionAllowlist allowlist
+    ) {
+        var bytes = source.getBytes(StandardCharsets.UTF_8);
+        var operation = IndexOp.builder()
+            .operation(IndexOperationMeta.builder()
+                .index(INDEX)
+                .id(id)
+                .routing("r")
+                .opType(IndexOpType.CREATE)
+                .build())
+            .rawDocument(bytes)
+            .originalSourceBytes(bytes)
+            .build();
+        return client.sendBulkRequest(INDEX, List.of(operation), mock(IRfsContexts.IRequestContext.class),
+            false, allowlist).block();
     }
 
     /** Applies every action of one bulk request to the in-memory target. */
@@ -126,7 +148,8 @@ class LargeDocumentSplitTest {
     private ObjectNode apply(String type, JsonNode metadata, ObjectNode body) {
         var id = metadata.path("_id").asText("generated" + nextSeqNo);
         var existing = stored.get(id);
-        if ("create".equals(type) && existing != null
+        boolean createOnly = "create".equals(type) || "create".equals(metadata.path("op_type").asText());
+        if (createOnly && existing != null
             || metadata.has("if_seq_no") && metadata.get("if_seq_no").asLong() != seqNos.get(id)) {
             return error(409, "version_conflict_engine_exception");
         }
@@ -186,6 +209,38 @@ class LargeDocumentSplitTest {
     }
 
     @Test
+    void oversizedCreateOnlyDocumentIsCreatedThenMerged() throws Exception {
+        var response = sendCreate(client("OS 2.11", true), "created", LARGE, DocumentExceptionAllowlist.empty());
+
+        assertEquals(MAPPER.readTree(LARGE), stored.get("created"));
+        assertEquals("create", actionTypes().get(0));
+        assertTrue(actionTypes().subList(1, actionTypes().size()).stream().allMatch("update"::equals));
+        assertTrue(requests.stream().noneMatch(request -> request.contains("\"op_type\"")), requests.toString());
+        assertEquals(MigrationMetrics.Failures.ZERO, response.failures);
+        verify(failures, never()).write(any());
+    }
+
+    @Test
+    void existingCreateOnlyDocumentStopsAtTheInitialConflictEvenWhenConflictsAreAllowlisted() throws Exception {
+        sendCreate(client("OS 2.11", true), "created", LARGE, DocumentExceptionAllowlist.empty());
+        var original = stored.get("created").deepCopy();
+        requests.clear();
+        org.mockito.Mockito.clearInvocations(failures);
+
+        var response = sendCreate(client("OS 2.11", true), "created",
+            LARGE.replace("\"tail\":true", "\"tail\":false"),
+            new DocumentExceptionAllowlist(Set.of("version_conflict_engine_exception")));
+
+        assertEquals(List.of("create"), actionTypes());
+        assertEquals(original, stored.get("created"));
+        assertEquals(new MigrationMetrics.Failures(1, 0), response.failures);
+        var record = ArgumentCaptor.forClass(FailedDocumentStreamRecord.class);
+        verify(failures).write(record.capture());
+        assertEquals("version_conflict_engine_exception", record.getValue().getFailureType());
+        assertTrue(record.getValue().getResponseItem().has("create"));
+    }
+
+    @Test
     void existingDocumentIsReplacedAtTheSequenceNumberJustRead() throws Exception {
         var client = client("OS 2.11", true);
         send(client, false, LARGE.replace("\"tail\":true", "\"stale\":{\"gone\":1}"));
@@ -235,7 +290,8 @@ class LargeDocumentSplitTest {
         verify(failures).write(record.capture());
         assertEquals("doc0", record.getValue().getDocumentId());
         assertEquals("mapper_parsing_exception", record.getValue().getFailureType());
-        assertTrue(record.getValue().getRequestItem().toString().contains("x".repeat(250)), "the whole document");
+        assertTrue(record.getValue().getTarget().path("body").toString().contains("x".repeat(250)),
+            "the whole document");
         assertTrue(record.getValue().getResponseItem().has("update"), "the request that failed");
     }
 

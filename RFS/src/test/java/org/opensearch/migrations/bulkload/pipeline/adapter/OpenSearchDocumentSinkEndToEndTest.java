@@ -253,7 +253,7 @@ public class OpenSearchDocumentSinkEndToEndTest {
                 assertEquals("version_conflict_engine_exception", failure.getFailureType());
                 assertEquals(FailureClass.NON_RETRYABLE, failure.getFailureClass());
                 assertEquals(409, failure.getResponseItem().path("index").path("status").asInt());
-                assertTrue(failure.getRequestItem().path("document").has("title"),
+                assertTrue(failure.getSource().path("body").has("title"),
                     "Failed document records must include the source even when the request used raw bytes");
             }
         }

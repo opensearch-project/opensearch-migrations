@@ -44,7 +44,7 @@ import software.amazon.awssdk.services.s3.S3AsyncClient;
  * All access to the per-index writers (serialize, gzip append, rotation, flush, close) is marshalled
  * onto a single dedicated worker thread, exactly as the replayer's {@code S3TupleSink}
  * does. This is deliberate: {@link #write} is invoked from
- * {@code OpenSearchClient.compactPendingDocs}/{@code emitRetryExhaustedToFailedDocumentStream}, which
+ * {@code OpenSearchClient.compactPendingDocs}/{@code finishWithTerminalFailure}, which
  * run inline on the reactor-netty event-loop thread that delivered the bulk response. Doing the
  * CPU-bound JSON serialization + gzip deflation and the blocking local temp-file I/O on that event
  * loop would stall other in-flight HTTP requests sharing it — precisely when failures are spiking. By

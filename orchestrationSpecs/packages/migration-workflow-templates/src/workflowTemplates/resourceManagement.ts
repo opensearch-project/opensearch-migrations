@@ -4,6 +4,7 @@ import {
     BaseExpression,
     expr,
     ExpressionType,
+    FromParameterExpression,
     FunctionExpression,
     INTERNAL,
     InputParamDef,
@@ -13,6 +14,7 @@ import {
     NonSerializedPlainObject,
     selectInputsForRegister,
     Serialized,
+    StepOutputSource,
     TemplateBuilder,
     ToJsonExpression,
     typeToken,
@@ -46,6 +48,26 @@ import {
     K8S_USER_APPROVAL_WAIT_RETRY_STRATEGY,
 } from "./commonUtils/resourceRetryStrategy";
 import {prefixedScalableWorkloadFields, scalingFromRecord} from "./commonUtils/scalableWorkload";
+
+/**
+ * An output of a reconcile template with a VAP-retry loop. It comes from the first apply when that succeeded,
+ * otherwise from the self-recursive retryLoop step that eventually applied the resource. Without the fallback,
+ * every output is empty after a recovered denial (an approved gated change, a reset and retry, or a change-restriction
+ * override), which leaves the SnapshotMigration UID empty for the ownerReferences of the resources it owns.
+ */
+function reconcileOutput(
+    tryApplyStatus: BaseExpression<string>,
+    tryApplyOutput: BaseExpression<string>,
+    retryLoopStatus: BaseExpression<string>,
+    outputName: string
+): BaseExpression<string, "complicatedExpression"> {
+    const retried = new FromParameterExpression<string, StepOutputSource>(
+        {kind: "steps_output", stepName: "retryLoop", parameterName: outputName});
+    return expr.ternary(
+        expr.equals(tryApplyStatus, "Succeeded"),
+        tryApplyOutput,
+        expr.ternary(expr.equals(retryLoopStatus, "Succeeded"), retried, expr.literal("")));
+}
 
 const CRD_API_VERSION = "migrations.opensearch.org/v1alpha1";
 const RUN_NUMBER_LABEL = "migrations.opensearch.org/run-number";
@@ -460,6 +482,9 @@ function makeSnapshotMigrationManifest(
             documentBackfillCoordinatorRetryMaxRetries: makeDirectTypeProxy(expr.dig(config, ["documentBackfillConfig", "coordinatorRetryMaxRetries"], 7)),
             documentBackfillCoordinatorRetryInitialDelayMs: makeDirectTypeProxy(expr.dig(config, ["documentBackfillConfig", "coordinatorRetryInitialDelayMs"], 1000)),
             documentBackfillCoordinatorRetryMaxDelayMs: makeDirectTypeProxy(expr.dig(config, ["documentBackfillConfig", "coordinatorRetryMaxDelayMs"], 64000)),
+            documentBackfillFailedDocumentStreamS3Bucket: makeStringTypeProxy(expr.dig(config, ["documentBackfillConfig", "failedDocumentStreamS3Bucket"], expr.literal(""))),
+            documentBackfillDisableFailedDocumentStream: makeDirectTypeProxy(expr.dig(config, ["documentBackfillConfig", "disableFailedDocumentStream"], false)),
+            documentBackfillMaxDocumentSizeBytes: makeDirectTypeProxy(expr.dig(config, ["documentBackfillConfig", "maxDocumentSizeBytes"], 0)),
         },
     };
 }
@@ -710,6 +735,8 @@ export const ResourceManagement = WorkflowBuilder.create({
         // would propagate a placeholder UID (e.g. "imported" for BYOS/imported-cluster paths)
         // and Kubernetes GC would delete the owned resources within ~1s as orphaned children.
         .addJsonPathOutput("resourceUid", "{.metadata.uid}", typeToken<string>())
+        // The RFS session name recorded the first time this resource's backfill started; empty until then.
+        .addJsonPathOutput("rfsSessionName", "{.status.rfsSessionName}", typeToken<string>())
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
 
@@ -797,12 +824,44 @@ export const ResourceManagement = WorkflowBuilder.create({
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
 
-    .addTemplate("patchKafkaClusterPending", t => buildPatchStatusTemplate(t, "KafkaCluster", {}))
-    .addTemplate("patchCapturedTrafficPending", t => buildPatchStatusTemplate(t, "CapturedTraffic", {}))
     .addTemplate("patchCaptureProxyPending", t => buildPatchStatusTemplate(t, "CaptureProxy", {}))
-    .addTemplate("patchDataSnapshotPending", t => buildPatchStatusTemplate(t, "DataSnapshot", {}))
-    .addTemplate("patchSnapshotMigrationPending", t => buildPatchStatusTemplate(t, "SnapshotMigration", {}))
-    .addTemplate("patchTrafficReplayPending", t => buildPatchStatusTemplate(t, "TrafficReplay", {}))
+
+    .addTemplate("patchResourcePending", t => t
+        .addRequiredInput("resourceKind", typeToken<string>())
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "patch",
+                flags: ["--type", "merge", "--subresource=status"],
+                manifest: {
+                    apiVersion: CRD_API_VERSION,
+                    kind: makeStringTypeProxy(b.inputs.resourceKind),
+                    metadata: {name: b.inputs.resourceName},
+                    status: {phase: "Pending"}
+                }
+            }))
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+    )
+
+    // Argo resolves a step's `when` strictly: a reference to an output that doesn't exist requeues the step until it
+    // does, so a `when` can't read the outputs of a step that may have failed, even behind a status check that's
+    // false. Callers gate this on the apply having succeeded, which leaves its output unresolved when it didn't.
+    .addTemplate("markPendingIfChanged", t => t
+        .addRequiredInput("resourceKind", typeToken<string>())
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addRequiredInput("currentConfigChecksum", typeToken<string>())
+        .addRequiredInput("configChecksum", typeToken<string>())
+        .addSteps(b => b
+            .addStep("patchPending", INTERNAL, "patchResourcePending", c =>
+                c.register({
+                    resourceKind: b.inputs.resourceKind,
+                    resourceName: b.inputs.resourceName,
+                }),
+                {when: {templateExp: expr.and(expr.literal(true),
+                    expr.not(expr.equals(b.inputs.currentConfigChecksum, b.inputs.configChecksum)))}}
+            )
+        )
+    )
 
     // ── Root reconcile wrappers ──────────────────────────────────────────
 
@@ -819,15 +878,14 @@ export const ResourceManagement = WorkflowBuilder.create({
                 }),
                 {continueOn: {failed: true}}
             )
-            .addStep("markPending", INTERNAL, "patchKafkaClusterPending", c =>
+            .addStep("markPending", INTERNAL, "markPendingIfChanged", c =>
                 c.register({
+                    resourceKind: expr.literal("KafkaCluster"),
                     resourceName: expr.jsonPathStrict(b.inputs.kafkaClusterConfig, "name"),
-                    phase: expr.literal("Pending"),
+                    currentConfigChecksum: c.steps.tryApply.outputs.currentConfigChecksum,
+                    configChecksum: b.inputs.configChecksum,
                 }),
-                {when: c => ({templateExp: expr.and(
-                    expr.equals(c.tryApply.status, "Succeeded"),
-                    expr.not(expr.equals(c.tryApply.outputs.currentConfigChecksum, b.inputs.configChecksum))
-                )})}
+                {when: c => ({templateExp: expr.equals(c.tryApply.status, "Succeeded")})}
             )
             .addStep("waitForFix", INTERNAL, "waitForUserApproval", c =>
                 c.register({
@@ -861,11 +919,7 @@ export const ResourceManagement = WorkflowBuilder.create({
             )
         )
         .addExpressionOutput("currentConfigChecksum", c =>
-            expr.ternary(
-                expr.equals(c.steps.tryApply.status, "Succeeded"),
-                c.steps.tryApply.outputs.currentConfigChecksum,
-                expr.literal("")
-            ))
+            reconcileOutput(c.steps.tryApply.status, c.steps.tryApply.outputs.currentConfigChecksum, c.steps.retryLoop.status, "currentConfigChecksum"))
     )
 
     .addTemplate("reconcileCapturedTrafficResource", t => t
@@ -899,15 +953,14 @@ export const ResourceManagement = WorkflowBuilder.create({
                 }),
                 {continueOn: {failed: true}}
             )
-            .addStep("markPending", INTERNAL, "patchCapturedTrafficPending", c =>
+            .addStep("markPending", INTERNAL, "markPendingIfChanged", c =>
                 c.register({
+                    resourceKind: expr.literal("CapturedTraffic"),
                     resourceName: b.inputs.topicCrName,
-                    phase: expr.literal("Pending"),
+                    currentConfigChecksum: c.steps.tryApply.outputs.currentConfigChecksum,
+                    configChecksum: b.inputs.configChecksum,
                 }),
-                {when: c => ({templateExp: expr.and(
-                    expr.equals(c.tryApply.status, "Succeeded"),
-                    expr.not(expr.equals(c.tryApply.outputs.currentConfigChecksum, b.inputs.configChecksum))
-                )})}
+                {when: c => ({templateExp: expr.equals(c.tryApply.status, "Succeeded")})}
             )
             .addStep("waitForFix", INTERNAL, "waitForUserApproval", c =>
                 c.register({
@@ -950,11 +1003,7 @@ export const ResourceManagement = WorkflowBuilder.create({
             )
         )
         .addExpressionOutput("currentConfigChecksum", c =>
-            expr.ternary(
-                expr.equals(c.steps.tryApply.status, "Succeeded"),
-                c.steps.tryApply.outputs.currentConfigChecksum,
-                expr.literal("")
-            ))
+            reconcileOutput(c.steps.tryApply.status, c.steps.tryApply.outputs.currentConfigChecksum, c.steps.retryLoop.status, "currentConfigChecksum"))
     )
 
     .addTemplate("reconcileCaptureProxyResource", t => t
@@ -974,15 +1023,14 @@ export const ResourceManagement = WorkflowBuilder.create({
                 }),
                 {continueOn: {failed: true}}
             )
-            .addStep("markPending", INTERNAL, "patchCaptureProxyPending", c =>
+            .addStep("markPending", INTERNAL, "markPendingIfChanged", c =>
                 c.register({
+                    resourceKind: expr.literal("CaptureProxy"),
                     resourceName: b.inputs.proxyName,
-                    phase: expr.literal("Pending"),
+                    currentConfigChecksum: c.steps.tryApply.outputs.currentConfigChecksum,
+                    configChecksum: b.inputs.configChecksum,
                 }),
-                {when: c => ({templateExp: expr.and(
-                    expr.equals(c.tryApply.status, "Succeeded"),
-                    expr.not(expr.equals(c.tryApply.outputs.currentConfigChecksum, b.inputs.configChecksum))
-                )})}
+                {when: c => ({templateExp: expr.equals(c.tryApply.status, "Succeeded")})}
             )
             .addStep("waitForFix", INTERNAL, "waitForUserApproval", c =>
                 c.register({
@@ -1018,11 +1066,7 @@ export const ResourceManagement = WorkflowBuilder.create({
             )
         )
         .addExpressionOutput("currentConfigChecksum", c =>
-            expr.ternary(
-                expr.equals(c.steps.tryApply.status, "Succeeded"),
-                c.steps.tryApply.outputs.currentConfigChecksum,
-                expr.literal("")
-            ))
+            reconcileOutput(c.steps.tryApply.status, c.steps.tryApply.outputs.currentConfigChecksum, c.steps.retryLoop.status, "currentConfigChecksum"))
     )
 
     .addTemplate("reconcileDataSnapshotResource", t => t
@@ -1042,15 +1086,14 @@ export const ResourceManagement = WorkflowBuilder.create({
                 }),
                 {continueOn: {failed: true}}
             )
-            .addStep("markPending", INTERNAL, "patchDataSnapshotPending", c =>
+            .addStep("markPending", INTERNAL, "markPendingIfChanged", c =>
                 c.register({
+                    resourceKind: expr.literal("DataSnapshot"),
                     resourceName: b.inputs.resourceName,
-                    phase: expr.literal("Pending"),
+                    currentConfigChecksum: c.steps.tryApply.outputs.currentConfigChecksum,
+                    configChecksum: b.inputs.configChecksum,
                 }),
-                {when: c => ({templateExp: expr.and(
-                    expr.equals(c.tryApply.status, "Succeeded"),
-                    expr.not(expr.equals(c.tryApply.outputs.currentConfigChecksum, b.inputs.configChecksum))
-                )})}
+                {when: c => ({templateExp: expr.equals(c.tryApply.status, "Succeeded")})}
             )
             // VAP-retry recovery loop, matching the other reconciles. DataSnapshot has no gated
             // fields today, so this does not fire during normal reconfiguration; it is the recovery
@@ -1091,11 +1134,7 @@ export const ResourceManagement = WorkflowBuilder.create({
             )
         )
         .addExpressionOutput("currentConfigChecksum", c =>
-            expr.ternary(
-                expr.equals(c.steps.tryApply.status, "Succeeded"),
-                c.steps.tryApply.outputs.currentConfigChecksum,
-                expr.literal("")
-            ))
+            reconcileOutput(c.steps.tryApply.status, c.steps.tryApply.outputs.currentConfigChecksum, c.steps.retryLoop.status, "currentConfigChecksum"))
     )
 
     .addTemplate("reconcileSnapshotMigrationResource", t => t
@@ -1113,15 +1152,14 @@ export const ResourceManagement = WorkflowBuilder.create({
                 }),
                 {continueOn: {failed: true}}
             )
-            .addStep("markPending", INTERNAL, "patchSnapshotMigrationPending", c =>
+            .addStep("markPending", INTERNAL, "markPendingIfChanged", c =>
                 c.register({
+                    resourceKind: expr.literal("SnapshotMigration"),
                     resourceName: b.inputs.resourceName,
-                    phase: expr.literal("Pending"),
+                    currentConfigChecksum: c.steps.tryApply.outputs.currentConfigChecksum,
+                    configChecksum: b.inputs.configChecksum,
                 }),
-                {when: c => ({templateExp: expr.and(
-                    expr.equals(c.tryApply.status, "Succeeded"),
-                    expr.not(expr.equals(c.tryApply.outputs.currentConfigChecksum, b.inputs.configChecksum))
-                )})}
+                {when: c => ({templateExp: expr.equals(c.tryApply.status, "Succeeded")})}
             )
             .addStep("waitForFix", INTERNAL, "waitForUserApproval", c =>
                 c.register({
@@ -1156,23 +1194,13 @@ export const ResourceManagement = WorkflowBuilder.create({
             )
         )
         .addExpressionOutput("currentConfigChecksum", c =>
-            expr.ternary(
-                expr.equals(c.steps.tryApply.status, "Succeeded"),
-                c.steps.tryApply.outputs.currentConfigChecksum,
-                expr.literal("")
-            ))
+            reconcileOutput(c.steps.tryApply.status, c.steps.tryApply.outputs.currentConfigChecksum, c.steps.retryLoop.status, "currentConfigChecksum"))
         .addExpressionOutput("resourceCreationTimestamp", c =>
-            expr.ternary(
-                expr.equals(c.steps.tryApply.status, "Succeeded"),
-                c.steps.tryApply.outputs.resourceCreationTimestamp,
-                expr.literal("")
-            ))
+            reconcileOutput(c.steps.tryApply.status, c.steps.tryApply.outputs.resourceCreationTimestamp, c.steps.retryLoop.status, "resourceCreationTimestamp"))
         .addExpressionOutput("resourceUid", c =>
-            expr.ternary(
-                expr.equals(c.steps.tryApply.status, "Succeeded"),
-                c.steps.tryApply.outputs.resourceUid,
-                expr.literal("")
-            ))
+            reconcileOutput(c.steps.tryApply.status, c.steps.tryApply.outputs.resourceUid, c.steps.retryLoop.status, "resourceUid"))
+        .addExpressionOutput("rfsSessionName", c =>
+            reconcileOutput(c.steps.tryApply.status, c.steps.tryApply.outputs.rfsSessionName, c.steps.retryLoop.status, "rfsSessionName"))
     )
 
     .addTemplate("reconcileTrafficReplayResource", t => t
@@ -1202,15 +1230,14 @@ export const ResourceManagement = WorkflowBuilder.create({
                 }),
                 {continueOn: {failed: true}}
             )
-            .addStep("markPending", INTERNAL, "patchTrafficReplayPending", c =>
+            .addStep("markPending", INTERNAL, "markPendingIfChanged", c =>
                 c.register({
+                    resourceKind: expr.literal("TrafficReplay"),
                     resourceName: b.inputs.name,
-                    phase: expr.literal("Pending"),
+                    currentConfigChecksum: c.steps.tryApply.outputs.currentConfigChecksum,
+                    configChecksum: b.inputs.configChecksum,
                 }),
-                {when: c => ({templateExp: expr.and(
-                    expr.equals(c.tryApply.status, "Succeeded"),
-                    expr.not(expr.equals(c.tryApply.outputs.currentConfigChecksum, b.inputs.configChecksum))
-                )})}
+                {when: c => ({templateExp: expr.equals(c.tryApply.status, "Succeeded")})}
             )
             .addStep("waitForFix", INTERNAL, "waitForUserApproval", c =>
                 c.register({
@@ -1251,11 +1278,7 @@ export const ResourceManagement = WorkflowBuilder.create({
             )
         )
         .addExpressionOutput("currentConfigChecksum", c =>
-            expr.ternary(
-                expr.equals(c.steps.tryApply.status, "Succeeded"),
-                c.steps.tryApply.outputs.currentConfigChecksum,
-                expr.literal("")
-            ))
+            reconcileOutput(c.steps.tryApply.status, c.steps.tryApply.outputs.currentConfigChecksum, c.steps.retryLoop.status, "currentConfigChecksum"))
     )
 
     // ── Status updates ───────────────────────────────────────────────────
@@ -1285,6 +1308,24 @@ export const ResourceManagement = WorkflowBuilder.create({
         configChecksum: "",
         checksumForReplayer: ""
     }))
+    // Pins the RFS session (Deployment and coordinator) to the resource the first time its backfill starts, so a
+    // later overridden change to a field in the workload identity rolls the same fleet instead of starting a new one.
+    .addTemplate("patchSnapshotMigrationRfsSessionName", t => t
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addRequiredInput("rfsSessionName", typeToken<string>())
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "patch",
+                flags: ["--type", "merge", "--subresource=status"],
+                manifest: {
+                    apiVersion: CRD_API_VERSION,
+                    kind: "SnapshotMigration",
+                    metadata: {name: "{{inputs.parameters.resourceName}}"},
+                    status: {rfsSessionName: "{{inputs.parameters.rfsSessionName}}"}
+                }
+            }))
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+    )
     .addTemplate("patchSnapshotMigrationOutputEvaluate", t =>
         buildPatchOutputTemplate(t, "SnapshotMigration", "metadataEvaluate"))
     .addTemplate("patchSnapshotMigrationOutputMigrate", t =>

@@ -86,19 +86,21 @@ one size comparison per bulk request to that path.
 
 1. The document's JSON is cut between whole top-level fields. A field holding an object too large for
    one request is cut between that object's own fields. Field bytes are copied, never re-encoded.
-2. The first fragment is written with a bulk `create`. If the ID already exists, its position is read
-   and the fragment is written with an `index` conditional on that `if_seq_no` / `if_primary_term`,
-   so the existing document is replaced exactly once.
+2. The first fragment is written with a bulk `create`. For an ordinary `index` operation, if the ID already
+   exists, its position is read and the fragment is written with an `index` conditional on that `if_seq_no` /
+   `if_primary_term`, so the existing document is replaced exactly once. For a create-only operation (including
+   `index` with `op_type=create`), a conflict fails the document and no later fragment is sent.
 3. Each remaining fragment is a bulk `update` with a partial `doc`, which the target merges into the
-   stored document. These merges are idempotent, so a retried request changes nothing.
+   stored document. The fragments are sent sequentially, one operation per request. These merges are idempotent,
+   so a retried request changes nothing.
 
 Every request uses the ordinary bulk path: the same retries, compression, metrics and failed document
 stream. One extra `GET <index>` is made per split document.
 
 A document is sent whole, as it is without the option, and a warning is logged when:
 
-- the operation is not a plain index with an explicit ID (server-generated IDs, external versioning or
-  any other bulk option, a `_type`);
+- the operation is not a plain index or create-only write with an explicit ID (server-generated IDs,
+  external versioning or any other bulk option, a `_type`);
 - a single string, number or array is larger than one request, a field name repeats within an object,
   or a fractional number is not exactly representable as a 64-bit float (the target rewrites the
   stored `_source` on every merge and would round it);
@@ -110,6 +112,9 @@ Limitations to weigh before enabling it:
 - If the target rejects a later fragment, for example a mapping error, the document is reported once to the
   failed document stream with its whole source, and the fields already merged stay on the target
   until that document is migrated again.
+- A create-only operation that fails after its first fragment leaves that partial document in place. A later
+  create-only attempt sees the ID and fails at its first `create`; strict create semantics do not overwrite or
+  resume it.
 - The stored `_source` is the target's re-serialization of the merged document: the same fields and
   values, but not byte-for-byte the source text (`1.50` is stored as `1.5`).
 - An object the target must receive in one piece, such as one very large `geo_shape`, is still cut

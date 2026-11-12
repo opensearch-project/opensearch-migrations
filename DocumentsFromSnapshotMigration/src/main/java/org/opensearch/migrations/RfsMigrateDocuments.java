@@ -43,6 +43,9 @@ import org.opensearch.migrations.bulkload.common.ServerlessCollectionRouting;
 import org.opensearch.migrations.bulkload.common.SnapshotReadFailures;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
+import org.opensearch.migrations.bulkload.common.retry.BulkFlowHeartbeat;
+import org.opensearch.migrations.bulkload.common.retry.BulkFlowMetrics;
+import org.opensearch.migrations.bulkload.common.retry.BulkFlowStats;
 import org.opensearch.migrations.bulkload.lucene.FieldMappingContext;
 import org.opensearch.migrations.bulkload.pipeline.DocumentMigrationBootstrap;
 import org.opensearch.migrations.bulkload.pipeline.adapter.LuceneSnapshotSource;
@@ -51,11 +54,13 @@ import org.opensearch.migrations.bulkload.solr.SolrMultiCollectionSource;
 import org.opensearch.migrations.bulkload.solr.SolrShardPartition;
 import org.opensearch.migrations.bulkload.tracing.IWorkCoordinationContexts;
 import org.opensearch.migrations.bulkload.tracing.RfsContexts;
+import org.opensearch.migrations.bulkload.tracing.WorkerPhase;
 import org.opensearch.migrations.bulkload.workcoordination.CoordinateWorkHttpClient;
 import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator.WorkItemAndDuration.WorkItem;
 import org.opensearch.migrations.bulkload.workcoordination.LeaseExpireTrigger;
 import org.opensearch.migrations.bulkload.workcoordination.OpenSearchWorkCoordinator;
+import org.opensearch.migrations.bulkload.workcoordination.RetryJitter;
 import org.opensearch.migrations.bulkload.workcoordination.ScopedWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.WorkCoordinatorFactory;
 import org.opensearch.migrations.bulkload.workcoordination.WorkItemTimeProvider;
@@ -97,6 +102,9 @@ import software.amazon.awssdk.services.s3.S3AsyncClient;
 
 @Slf4j
 public class RfsMigrateDocuments {
+    // Keeps the worker-phase gauge registered for the life of the process.
+    @SuppressWarnings("unused")
+    private static AutoCloseable workerPhaseGauge;
     public static final int PROCESS_TIMED_OUT_EXIT_CODE = 2;
     public static final int NO_WORK_LEFT_EXIT_CODE = 3;
     public static final int NO_WORK_AVAILABLE_EXIT_CODE = 4;
@@ -236,6 +244,24 @@ public class RfsMigrateDocuments {
                 "attempt the migration, but with double the amount of time than the last time.  Default: PT10M")
         public Duration initialLeaseDuration = Duration.ofMinutes(10);
 
+        @Parameter(required = false,
+            names = { "--max-lease-duration", "--maxLeaseDuration" },
+            converter = DurationConverter.class,
+            description = "Optional. Upper bound on a shard's lease. The lease doubles each time a shard is picked " +
+                "up again after its lease expired; once the doubled lease would reach this value it stays at this " +
+                "value. Must be at least --initial-lease-duration. Default: P1D")
+        public Duration maxLeaseDuration = Duration.ofDays(1);
+
+        @Parameter(required = false,
+            names = { "--bulk-response-timeout", "--bulkResponseTimeout" },
+            converter = DurationConverter.class,
+            description = "Optional. How long each bulk request waits for its response once sent, before it is " +
+                "retried as a request that got no response. The target keeps working on a bulk it has received, so " +
+                "this should outlast the slowest bulk the target completes. Just over the 300 s idle timeout common " +
+                "to load balancers in front of a cluster, so behind one a stuck request gets a 504 first. " +
+                "Default: PT310S")
+        public Duration bulkResponseTimeout = Duration.ofSeconds(310);
+
         @Parameter(
             required = false,
             names = { "--otel-trace-collector-endpoint", "--otelTraceCollectorEndpoint" },
@@ -267,17 +293,30 @@ public class RfsMigrateDocuments {
         @Parameter(required = false,
             names = { "--split-large-documents" },
             description = "Optional. Send a document that exceeds --documents-size-per-bulk-request as several bulk " +
-                "requests instead of one oversized request: the first replaces the target document and each later " +
-                "one merges more of its fields with a partial update. Uses no script. Applies to OpenSearch targets " +
-                "and to plain index operations with an explicit ID, on indices that store the complete _source and " +
+                "requests instead of one oversized request: a first create establishes the document and each later " +
+                "request merges more fields with a partial update. Existing IDs are replaced for index operations " +
+                "but fail create-only operations. Uses no script. Applies to OpenSearch targets and to plain index " +
+                "or create-only operations with an explicit ID, on indices that store the complete _source and " +
                 "apply no ingest pipeline; any other oversized document is sent whole as before. Partial documents " +
                 "are visible on the target until the last request. Disabled by default.")
         boolean splitLargeDocuments;
 
         @Parameter(required = false,
+            names = { "--max-document-size-bytes", "--maxDocumentSizeBytes" },
+            description = "Optional. Documents bigger than this many bytes are not sent to the target; they are " +
+                "recorded in the failed document stream as document_too_large and the migration moves past them. " +
+                "The limit applies to each document body after transformation, or to the original document body " +
+                "when no transform is configured. It excludes bulk action metadata and NDJSON separators, so leave " +
+                "room for that overhead under the target's request limit. Default: 0 (no limit)")
+        long maxDocumentSizeBytes = 0;
+
+        @Parameter(required = false,
             names = {"--max-connections", "--maxConnections" },
-            description = "Optional.  The maximum number of connections to simultaneously " +
-                "used to communicate to the target, default " + DEFAULT_BATCH_CONCURRENCY)
+            description = "Optional. M, the most bulk requests in flight to the target at once (and so the most " +
+                "connections used for them). The limit L starts at 1; each success while L is in use adds 1 (1/L " +
+                "above the threshold), each throttle multiplies it by a random 0.5-0.7, and it stays within [1/32, M], " +
+                "pacing requests below 1. " +
+                "Default: 10")
         int maxConnections = DEFAULT_BATCH_CONCURRENCY;
 
         @Parameter(required = false,
@@ -359,15 +398,23 @@ public class RfsMigrateDocuments {
     }
 
     /**
-     * Configuration for the durable failed document stream. The S3 bucket is the on/off switch: no bucket,
-     * no stream. There is no enable flag and no default bucket.
+     * Configuration for the durable failed document stream. Exactly one of the S3 bucket (stream on) or
+     * {@code --disable-failed-document-stream} (stream off) is required, so terminal failures are never dropped
+     * without the operator having chosen that.
      */
     public static class FailedDocumentStreamArgs {
         @Parameter(required = false,
             names = { "--failed-document-stream-s3-bucket" },
-            description = "S3 bucket for durable failed document stream records, and the switch that enables the " +
-                "stream. When unset, terminal failures are not recorded.")
+            description = "S3 bucket for durable failed document stream records. Either this or " +
+                "--disable-failed-document-stream is required.")
         public String failedDocumentStreamS3Bucket = null;
+
+        @Parameter(required = false,
+            names = { "--disable-failed-document-stream" },
+            description = "Run without a failed document stream: documents that can't be written are logged and " +
+                "counted but not recorded, and retry exhaustion fails the work item. Either this or " +
+                "--failed-document-stream-s3-bucket is required.")
+        public boolean disableFailedDocumentStream = false;
 
         @Parameter(required = false,
             names = { "--failed-document-stream-s3-prefix" },
@@ -512,6 +559,21 @@ public class RfsMigrateDocuments {
             throw new ParameterException(e.getMessage(), e);
         }
 
+        validateSourceArgs(args);
+        if (args.maxLeaseDuration.compareTo(args.initialLeaseDuration) < 0) {
+            throw new ParameterException("--max-lease-duration (" + args.maxLeaseDuration
+                + ") must be at least --initial-lease-duration (" + args.initialLeaseDuration + ").");
+        }
+        if (args.bulkResponseTimeout.isZero() || args.bulkResponseTimeout.isNegative()) {
+            throw new ParameterException("--bulk-response-timeout must be positive.");
+        }
+        if (args.maxDocumentSizeBytes < 0) {
+            throw new ParameterException("--max-document-size-bytes must be 0 (no limit) or positive.");
+        }
+        validateFailedDocumentStreamArgs(args.failedDocumentStreamArgs);
+    }
+
+    private static void validateSourceArgs(Args args) {
         // Solr backup path
         if (args.sourceVersion != null && args.sourceVersion.getFlavor() == Flavor.SOLR) {
             if (args.repoUri == null) {
@@ -678,6 +740,13 @@ public class RfsMigrateDocuments {
         var resolvedSessionId = resolveSessionId(arguments, workerId);
         var failedDocumentStreamSink = buildFailedDocumentStreamSink(arguments, workerId, resolvedSessionId);
         targetClient.setFailedDocumentStreamContext(failedDocumentStreamSink, resolvedSessionId, workerId);
+        targetClient.setMaxDocumentSizeBytes(arguments.maxDocumentSizeBytes);
+        targetClient.setBulkResponseTimeout(arguments.bulkResponseTimeout);
+        // Held for the life of the process: the meter keeps only a weak reference to the callback.
+        workerPhaseGauge = context.makeWorkerPhaseGauge();
+        targetClient.setBulkFlowMetrics(BulkFlowMetrics.both(
+            context.makeBulkFlowInstruments(targetClient.getBulkRetryBudget(), targetClient.getBulkInFlightLimit()),
+            new BulkFlowHeartbeat(targetClient.getBulkRetryBudget(), targetClient.getBulkInFlightLimit())));
         logFailedDocumentStreamStatus(failedDocumentStreamSink, resolvedSessionId);
 
         var collectionRoutedTarget = buildCollectionRoutedTarget(arguments, targetClientFactory);
@@ -709,7 +778,8 @@ public class RfsMigrateDocuments {
         }
 
         var coordinatorInfo = resolveCoordinatorConnection(arguments, targetConnectionContext, targetVersion);
-        runMigration(workerId, arguments, coordinatorInfo, context, sourceFactory, failedDocumentStreamSink);
+        runMigration(workerId, arguments, coordinatorInfo, context, sourceFactory, failedDocumentStreamSink,
+            targetClient::getBulkFlowSummary);
     }
 
     /** Returns null unless the target is collection-routed. */
@@ -783,7 +853,8 @@ public class RfsMigrateDocuments {
         CoordinatorInfo coordinatorInfo,
         RootDocumentMigrationContext context,
         MigrationSourceFactory sourceFactory,
-        FailedDocumentStreamSink failedDocumentStreamSink
+        FailedDocumentStreamSink failedDocumentStreamSink,
+        Supplier<BulkFlowStats.Summary> bulkFlowSummary
     ) throws Exception {
         var workItemRef = new AtomicReference<IWorkCoordinator.WorkItemAndDuration>();
         var progressCursor = new AtomicReference<WorkItemCursor>();
@@ -791,11 +862,11 @@ public class RfsMigrateDocuments {
         var workItemTimeProvider = new WorkItemTimeProvider();
         var completionRetryConfig = buildCompletionRetryConfig(arguments);
         var coordinatorFactory = new WorkCoordinatorFactory(
-            coordinatorInfo.version(), arguments.indexNameSuffix, completionRetryConfig);
+            coordinatorInfo.version(), arguments.indexNameSuffix, completionRetryConfig, arguments.maxLeaseDuration);
         var cleanShutdownCompleted = new AtomicBoolean(false);
         var metricsReporter = committedMetricsReporter(arguments.snapshotName,
             arguments.experimental.previousSnapshotName, arguments.experimental.experimentalDeltaMode,
-            workItemTimeProvider::freezeDurationMillis);
+            workItemTimeProvider::freezeDurationMillis, bulkFlowSummary);
 
         try (var workCoordinator = coordinatorFactory.get(
                  new CoordinateWorkHttpClient(coordinatorInfo.connectionContext()),
@@ -811,6 +882,7 @@ public class RfsMigrateDocuments {
                         progressCursor,
                         workItemTimeProvider,
                         arguments.initialLeaseDuration,
+                        arguments.maxLeaseDuration,
                         () -> Optional.ofNullable(cancellationRunnableRef.get()).ifPresent(Runnable::run),
                         cleanShutdownCompleted,
                         context.getWorkCoordinationContext()::createSuccessorWorkItemsContext,
@@ -823,6 +895,7 @@ public class RfsMigrateDocuments {
                 try {
                     Optional.ofNullable(cancellationRunnableRef.get()).ifPresent(Runnable::run);
                     executeCleanShutdownProcess(workItemRef, progressCursor, workCoordinator, cleanShutdownCompleted,
+                            workItemTimeProvider, arguments.initialLeaseDuration, arguments.maxLeaseDuration,
                             context.getWorkCoordinationContext()::createSuccessorWorkItemsContext,
                             context.getWorkCoordinationContext()::createReleaseWorkItemContext,
                             failedDocumentStreamSink, metricsReporter);
@@ -833,6 +906,7 @@ public class RfsMigrateDocuments {
                 } catch (Exception e) {
                     log.atError().setMessage("Could not complete clean exit process: {}").addArgument(e).log();
                 } finally {
+                    WorkerPhase.enter(WorkerPhase.Phase.EXITED);
                     // Close the failed document stream sink so any buffered records get flushed to S3 before
                     // the JVM exits. Safe to call even if completeWorkItem was never reached.
                     if (failedDocumentStreamSink != null) {
@@ -848,10 +922,12 @@ public class RfsMigrateDocuments {
 
             MDC.put(LOGGING_MDC_WORKER_ID, workerId);
 
+            WorkerPhase.enter(WorkerPhase.Phase.ACQUIRING_WORK);
             var status = sourceFactory.buildAndRun(
                 workCoordinator, processManager, progressCursor, cancellationRunnableRef, workItemTimeProvider,
                 metricsReporter);
             cleanShutdownCompleted.set(true);
+            WorkerPhase.enter(WorkerPhase.Phase.EXITED);
             // Close the failed document stream sink on the normal (WORK_COMPLETED) path too. This flushes
             // any buffered records and shuts down the sink's worker thread. The shutdown hook also closes
             // it, but only fires on JVM termination signals; the WORK_COMPLETED path returns from main()
@@ -870,6 +946,7 @@ public class RfsMigrateDocuments {
             }
         } catch (NoWorkLeftException e) {
             log.atInfo().setMessage("No work left to acquire. Exiting with exit code " + NO_WORK_LEFT_EXIT_CODE).log();
+            WorkerPhase.enter(WorkerPhase.Phase.EXITED);
             cleanShutdownCompleted.set(true);
             System.exit(NO_WORK_LEFT_EXIT_CODE);
         } catch (Exception e) {
@@ -1034,6 +1111,15 @@ public class RfsMigrateDocuments {
     static BiFunction<WorkItem, WorkItemCursor, Map<String, Object>> committedMetricsReporter(
         String snapshotName, String previousSnapshotName, DeltaMode deltaMode, LongSupplier workItemDurationMillis
     ) {
+        return committedMetricsReporter(snapshotName, previousSnapshotName, deltaMode, workItemDurationMillis,
+            () -> null);
+    }
+
+    /** @param bulkFlowSummary this process's flow-control totals; a process runs one work item, so they are its */
+    static BiFunction<WorkItem, WorkItemCursor, Map<String, Object>> committedMetricsReporter(
+        String snapshotName, String previousSnapshotName, DeltaMode deltaMode, LongSupplier workItemDurationMillis,
+        Supplier<BulkFlowStats.Summary> bulkFlowSummary
+    ) {
         var mapper = ObjectMapperFactory.createDefaultMapper();
         return (workItem, cursor) -> {
             var record = WorkItemMetricsRecord.builder()
@@ -1047,8 +1133,10 @@ public class RfsMigrateDocuments {
                 .shardComplete(cursor.isShardComplete())
                 .metrics(new WorkItemMetricsRecord.Metrics(
                     cursor.getMetrics().source(), cursor.getMetrics().target(), cursor.getMetrics().requests(),
+                    cursor.getMetrics().failures(),
                     new WorkItemMetricsRecord.WorkItem(workItemDurationMillis.getAsLong()),
-                    cursor.isShardComplete() ? cursor.getSnapshotDocumentCounts() : null))
+                    cursor.isShardComplete() ? cursor.getSnapshotDocumentCounts() : null,
+                    bulkFlowSummary.get()))
                 .build();
             return mapper.convertValue(record, new TypeReference<Map<String, Object>>() {});
         };
@@ -1061,7 +1149,8 @@ public class RfsMigrateDocuments {
      * Calculates the approximate total retry window in seconds based on exponential backoff with a max delay cap.
      * This sums the backoff delays (initial * 2^n, capped at maxDelay) across all retry attempts.
      * Does not include request execution time or network latency.
-     * Logic matches the runtime retry implementation in OpenSearchWorkCoordinator.retryWithExponentialBackoff()
+     * Logic matches the runtime retry implementation in OpenSearchWorkCoordinator.retryWithExponentialBackoff(),
+     * which jitters each wait down by up to half ({@link RetryJitter}), so this is an upper bound.
      */
     static long calculateTotalRetryWindowSeconds(OpenSearchWorkCoordinator.CompletionRetryConfig config) {
         long totalMs = 0;
@@ -1114,7 +1203,22 @@ public class RfsMigrateDocuments {
     }
 
     static final String FAILED_DOCUMENT_STREAM_DISABLED_REASON =
-        "failed document stream disabled: no --failed-document-stream-s3-bucket configured";
+        "failed document stream disabled by --disable-failed-document-stream: documents that can't be written "
+            + "will not be recorded";
+
+    static final String FAILED_DOCUMENT_STREAM_REQUIRED_MESSAGE =
+        "Configure a failed document stream with --failed-document-stream-s3-bucket, or run without one by "
+            + "passing --disable-failed-document-stream. Without a stream, documents that can't be written are "
+            + "not recorded anywhere.";
+
+    static void validateFailedDocumentStreamArgs(FailedDocumentStreamArgs args) {
+        boolean hasBucket = args.failedDocumentStreamS3Bucket != null && !args.failedDocumentStreamS3Bucket.isBlank();
+        if (hasBucket == args.disableFailedDocumentStream) {
+            throw new ParameterException(hasBucket
+                ? "--failed-document-stream-s3-bucket and --disable-failed-document-stream can't both be set."
+                : FAILED_DOCUMENT_STREAM_REQUIRED_MESSAGE);
+        }
+    }
 
     static void logFailedDocumentStreamStatus(FailedDocumentStreamSink sink, String sessionId) {
         if (sink == null) {
@@ -1252,11 +1356,14 @@ public class RfsMigrateDocuments {
         return new CoordinatorInfo(targetConnectionContext, targetVersion);
     }
 
-    private static void executeCleanShutdownProcess(
+    static void executeCleanShutdownProcess(
             AtomicReference<IWorkCoordinator.WorkItemAndDuration> workItemRef,
             AtomicReference<WorkItemCursor> progressCursor,
             IWorkCoordinator coordinator,
             AtomicBoolean cleanShutdownCompleted,
+            WorkItemTimeProvider workItemTimeProvider,
+            Duration initialLeaseDuration,
+            Duration maxLeaseDuration,
             Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> contextSupplier,
             Supplier<IWorkCoordinationContexts.IReleaseWorkItemContext> releaseContextSupplier,
             FailedDocumentStreamSink failedDocumentStreamSink,
@@ -1299,8 +1406,30 @@ public class RfsMigrateDocuments {
         var failedDocumentStreamWatermark = progressCursor.get();
 
         commitProgress(coordinator, workItemAndDuration, failedDocumentStreamWatermark,
-            1, null, contextSupplier, metricsReporter);
+            getShutdownSuccessorLeaseExponent(workItemTimeProvider, initialLeaseDuration, maxLeaseDuration,
+                workItemAndDuration.getLeaseExpirationTime()),
+            null, contextSupplier, metricsReporter);
         cleanShutdownCompleted.set(true);
+    }
+
+    /**
+     * The lease exponent for a successor created at shutdown. It's sized the same way as when the lease runs out
+     * ({@link #getSuccessorNextAcquisitionLeaseExponent}): from this lease, adjusted by how much of it setting up the
+     * shard took, since the successor has to set the shard up again. A fixed exponent would shrink a lease that had
+     * grown to fit a slow shard download, so the successor's lease could expire while it is still downloading.
+     * Falls back to 1 if the lease or setup times weren't recorded.
+     */
+    static int getShutdownSuccessorLeaseExponent(WorkItemTimeProvider workItemTimeProvider,
+                                                 Duration initialLeaseDuration, Duration maxLeaseDuration,
+                                                 Instant leaseExpirationTime) {
+        if (leaseExpirationTime == null || workItemTimeProvider.getLeaseAcquisitionTimeRef().get() == null
+            || workItemTimeProvider.getDocumentMigraionStartTimeRef().get() == null) {
+            log.atWarn().setMessage("Lease or shard setup time not recorded; the successor's lease exponent will be 1")
+                .log();
+            return 1;
+        }
+        return getSuccessorNextAcquisitionLeaseExponent(workItemTimeProvider, initialLeaseDuration, maxLeaseDuration,
+            leaseExpirationTime);
     }
 
     /**
@@ -1357,6 +1486,7 @@ public class RfsMigrateDocuments {
             AtomicReference<WorkItemCursor> progressCursorRef,
             WorkItemTimeProvider workItemTimeProvider,
             Duration initialLeaseDuration,
+            Duration maxLeaseDuration,
             Runnable cancellationRunnable,
             AtomicBoolean cleanShutdownCompleted,
             Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> contextSupplier,
@@ -1390,7 +1520,7 @@ public class RfsMigrateDocuments {
                 } else {
                     log.atWarn().setMessage("Successor Work Ids: {}").addArgument(String.join(", ", successorWorkItemIds))
                             .log();
-                    var successorNextAcquisitionLeaseExponent = getSuccessorNextAcquisitionLeaseExponent(workItemTimeProvider, initialLeaseDuration, workItemAndDuration.getLeaseExpirationTime());
+                    var successorNextAcquisitionLeaseExponent = getSuccessorNextAcquisitionLeaseExponent(workItemTimeProvider, initialLeaseDuration, maxLeaseDuration, workItemAndDuration.getLeaseExpirationTime());
 
                     // Don't checkmark the work item as done until the failed document stream stuff is flushed.
                     // On flush failure, skip the mark-complete and let the lease expire so a
@@ -1444,6 +1574,7 @@ public class RfsMigrateDocuments {
         Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> contextSupplier,
         BiFunction<WorkItem, WorkItemCursor, Map<String, Object>> metricsReporter
     ) throws IOException, InterruptedException {
+        WorkerPhase.enter(WorkerPhase.Phase.COMPLETING);
         var metrics = metricsReporter.apply(work.getWorkItem(), cursor);
         var workItemId = work.getWorkItem().toString();
         if (cursor.isShardComplete()) {
@@ -1458,6 +1589,30 @@ public class RfsMigrateDocuments {
 
     public static int getSuccessorNextAcquisitionLeaseExponent(WorkItemTimeProvider workItemTimeProvider, Duration initialLeaseDuration,
                                        Instant leaseExpirationTime) {
+        return getSuccessorNextAcquisitionLeaseExponent(workItemTimeProvider, initialLeaseDuration, null,
+            leaseExpirationTime);
+    }
+
+    /**
+     * The smallest exponent whose lease, {@code initialLeaseDuration * 2^exponent}, reaches {@code maxLeaseDuration}.
+     * The coordinator caps any lease at the maximum, so a larger exponent would only record growth that can't happen.
+     */
+    static int maxUsefulLeaseExponent(Duration initialLeaseDuration, Duration maxLeaseDuration) {
+        double ratio = (double) maxLeaseDuration.toMillis() / initialLeaseDuration.toMillis();
+        return ratio <= 1 ? 0 : (int) Math.ceil(Math.log(ratio) / Math.log(2));
+    }
+
+    /** As above, but never past {@link #maxUsefulLeaseExponent} when {@code maxLeaseDuration} is non-null. */
+    public static int getSuccessorNextAcquisitionLeaseExponent(WorkItemTimeProvider workItemTimeProvider, Duration initialLeaseDuration,
+                                       Duration maxLeaseDuration, Instant leaseExpirationTime) {
+        int exponent = uncappedSuccessorNextAcquisitionLeaseExponent(workItemTimeProvider, initialLeaseDuration,
+            leaseExpirationTime);
+        return maxLeaseDuration == null ? exponent
+            : Math.min(exponent, maxUsefulLeaseExponent(initialLeaseDuration, maxLeaseDuration));
+    }
+
+    private static int uncappedSuccessorNextAcquisitionLeaseExponent(WorkItemTimeProvider workItemTimeProvider,
+                                       Duration initialLeaseDuration, Instant leaseExpirationTime) {
         if (workItemTimeProvider.getLeaseAcquisitionTimeRef().get() == null ||
             workItemTimeProvider.getDocumentMigraionStartTimeRef().get() == null) {
             throw new IllegalStateException("Unexpected state with either leaseAquisitionTime or" +
@@ -1652,12 +1807,13 @@ public class RfsMigrateDocuments {
                 );
                 return;
             } catch (IWorkCoordinator.LeaseLockHeldElsewhereException e) {
+                long sleepMillis = RetryJitter.equalJitterMillis(lockRenegotiationMillis);
                 log.atInfo().setMessage("After {} another process holds the lock for setting up the shard work items." +
                         "  Waiting {} ms before trying again.")
                     .addArgument(shardSetupAttemptNumber)
-                    .addArgument(lockRenegotiationMillis)
+                    .addArgument(sleepMillis)
                     .log();
-                Thread.sleep(lockRenegotiationMillis);
+                Thread.sleep(sleepMillis);
                 lockRenegotiationMillis *= 2;
             }
         }

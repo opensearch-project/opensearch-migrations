@@ -25,8 +25,9 @@ import reactor.core.publisher.Mono;
  * Sends one bulk index operation that is too large for a single request as several smaller requests,
  * using only bulk actions (no script, no temporary field or index):
  * <ol>
- *   <li>The first fragment replaces the document: a {@code create}, or when the ID already exists, an
- *       {@code index} conditional on the sequence number just read.</li>
+ *   <li>The first fragment is a {@code create}. For an original create-only operation, a conflict stops the
+ *       sequence. For an original index operation, a conflict replaces the document with an {@code index}
+ *       conditional on the sequence number just read.</li>
  *   <li>Every later fragment is an {@code update} whose partial {@code doc} the target merges into the
  *       stored source.</li>
  * </ol>
@@ -42,8 +43,10 @@ import reactor.core.publisher.Mono;
 final class LargeDocumentSplit {
     private static final ObjectMapper MAPPER = ObjectMapperFactory.createDefaultMapper();
     private static final String INDEX = "index";
+    private static final String CREATE = "create";
+    private static final String OP_TYPE = "op_type";
     private static final String NO_PIPELINE = "_none";
-    private static final Set<String> PLAIN_METADATA = Set.of("_index", "_id", "routing");
+    private static final Set<String> PLAIN_METADATA = Set.of("_index", "_id", "routing", OP_TYPE);
     private static final Set<String> CONFLICT = Set.of("version_conflict_engine_exception");
     private static final byte[] NO_CHANGE = "{\"doc\":{}}".getBytes(StandardCharsets.UTF_8);
     /** Room in each request for the widest action line, the {@code {"doc":…}} wrapper and both newlines. */
@@ -58,21 +61,28 @@ final class LargeDocumentSplit {
     private final ObjectNode metadata;
     private final List<byte[]> fragments;
     private final boolean fenced;
+    private final boolean createOnly;
     private final Bulk bulk;
     private final DocumentExceptionAllowlist allowlist;
     private final DocumentExceptionAllowlist conflictsAllowed;
+    private final DocumentExceptionAllowlist conflictsRejected;
 
     private LargeDocumentSplit(
-        ObjectNode metadata, List<byte[]> fragments, boolean fenced, Bulk bulk, DocumentExceptionAllowlist allowlist
+        ObjectNode metadata, List<byte[]> fragments, boolean fenced, boolean createOnly,
+        Bulk bulk, DocumentExceptionAllowlist allowlist
     ) {
         this.metadata = metadata;
         this.fragments = fragments;
         this.fenced = fenced;
+        this.createOnly = createOnly;
         this.bulk = bulk;
         this.allowlist = allowlist;
         var allowed = new HashSet<>(allowlist.getAllowedExceptionTypes());
         allowed.addAll(CONFLICT);
         this.conflictsAllowed = new DocumentExceptionAllowlist(allowed);
+        var rejected = new HashSet<>(allowlist.getAllowedExceptionTypes());
+        rejected.removeAll(CONFLICT);
+        this.conflictsRejected = new DocumentExceptionAllowlist(rejected);
     }
 
     /**
@@ -88,14 +98,29 @@ final class LargeDocumentSplit {
     ) {
         ObjectNode metadata;
         List<byte[]> fragments;
+        boolean createOnly;
         try {
             var action = MAPPER.readTree(whole.action());
-            var names = new HashSet<String>();
-            action.path(INDEX).fieldNames().forEachRemaining(names::add);
-            if (!names.contains("_id") || !PLAIN_METADATA.containsAll(names)) {
-                return declined(whole, "it is not an index operation with an explicit ID and no other options");
+            if (!action.isObject() || action.size() != 1 || !(action.has(INDEX) || action.has(CREATE))) {
+                return declined(whole, "it is not an index or create operation");
             }
-            metadata = (ObjectNode) action.get(INDEX);
+            var actionType = action.has(CREATE) ? CREATE : INDEX;
+            if (!(action.get(actionType) instanceof ObjectNode actionMetadata)) {
+                return declined(whole, "its action metadata is not an object");
+            }
+            var names = new HashSet<String>();
+            actionMetadata.fieldNames().forEachRemaining(names::add);
+            if (!names.contains("_id") || !PLAIN_METADATA.containsAll(names)) {
+                return declined(whole, "it lacks an explicit ID or has unsupported action options");
+            }
+            var opType = actionMetadata.path(OP_TYPE).asText(INDEX);
+            if (!(INDEX.equals(opType) || CREATE.equals(opType))) {
+                return declined(whole, "its op_type is neither index nor create");
+            }
+            createOnly = CREATE.equals(actionType) || CREATE.equals(opType);
+            metadata = actionMetadata.deepCopy();
+            // The outer bulk action carries this semantic for fragments; retaining op_type there is redundant.
+            metadata.remove(OP_TYPE);
             long room = maxRequestBytes - whole.action().length - REQUEST_OVERHEAD;
             fragments = JsonObjectSplitter.split(whole.body(), (int) Math.max(0, Math.min(room, Integer.MAX_VALUE)));
         } catch (IOException e) {
@@ -110,11 +135,11 @@ final class LargeDocumentSplit {
                 }
                 log.atInfo().setMessage("Sending {} ({} bytes) as {} bulk requests")
                     .addArgument(metadata).addArgument(whole.body().length).addArgument(fragments.size()).log();
-                return new LargeDocumentSplit(metadata, fragments, fenced, bulk, allowlist).write();
+                return new LargeDocumentSplit(metadata, fragments, fenced, createOnly, bulk, allowlist).write();
             })
             // One document was written, whatever number of requests carried it.
             .map(last -> new BulkResponse(last.statusCode, last.statusText, last.headers, last.body,
-                new MigrationMetrics.Operations(1, 0, whole.body().length), last.requests));
+                new MigrationMetrics.Operations(1, 0, whole.body().length), last.requests, last.failures));
     }
 
     private static Mono<BulkResponse> declined(EncodedOperation whole, String reason) {
@@ -161,8 +186,9 @@ final class LargeDocumentSplit {
     private Mono<BulkResponse> write() {
         // A conflicting concurrent write to the same document should not fail a merge that can simply be redone.
         var merge = metadata.deepCopy().put("retry_on_conflict", CONFLICT_RETRIES);
-        return send("create", metadata, fragments.get(0), conflictsAllowed)
-            .flatMap(created -> status(created) == 409 ? replace(created, CONFLICT_RETRIES) : Mono.just(created))
+        return send(CREATE, metadata, fragments.get(0), createOnly ? conflictsRejected : conflictsAllowed)
+            .flatMap(created -> status(created) == 409 && !createOnly
+                ? replace(created, CONFLICT_RETRIES) : Mono.just(created))
             .flatMap(replaced -> !succeeded(replaced) ? Mono.just(replaced)
                 : Flux.fromIterable(fragments.subList(1, fragments.size()))
                     .concatMap(fragment -> send("update", merge, asPartialDocument(fragment), allowlist), 1)
@@ -208,7 +234,7 @@ final class LargeDocumentSplit {
 
     private static BulkResponse plus(BulkResponse previous, BulkResponse next) {
         return new BulkResponse(next.statusCode, next.statusText, next.headers, next.body,
-            next.target, previous.requests.plus(next.requests));
+            next.target, previous.requests.plus(next.requests), previous.failures.plus(next.failures));
     }
 
     /** The single item of a one-operation bulk response. */

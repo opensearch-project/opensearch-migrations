@@ -10,6 +10,8 @@ import org.opensearch.migrations.VersionMatchers;
 import org.opensearch.migrations.bulkload.common.http.CompressionMode;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.common.http.HttpResponse;
+import org.opensearch.migrations.bulkload.common.retry.AdaptiveLimit;
+import org.opensearch.migrations.bulkload.common.retry.RetryBudget;
 import org.opensearch.migrations.bulkload.version_es_5_6.OpenSearchClient_ES_5_6;
 import org.opensearch.migrations.bulkload.version_es_6_8.OpenSearchClient_ES_6_8;
 import org.opensearch.migrations.bulkload.version_os_2_11.OpenSearchClient_OS_2_11;
@@ -18,6 +20,7 @@ import org.opensearch.migrations.reindexer.FailedRequestsLogger;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
+import reactor.core.Exceptions;
 import reactor.core.publisher.Mono;
 import reactor.util.retry.Retry;
 
@@ -26,10 +29,18 @@ import reactor.util.retry.Retry;
 @Slf4j
 public class OpenSearchClientFactory {
     private static final ObjectMapper objectMapper = ObjectMapperFactory.createDefaultMapper();
-    private static final Retry RETRY_WHEN_NOT_4XX_STRATEGY = Retry.max(1)
-        .filter(throwable -> !(throwable instanceof OpenSearchClient.UnexpectedStatusCode &&
-            ((OpenSearchClient.UnexpectedStatusCode) throwable).response.statusCode >= 400 &&
-            ((OpenSearchClient.UnexpectedStatusCode) throwable).response.statusCode < 500));
+    private static final int MAX_COMPRESSION_CHECK_RETRIES = 2;
+    // Same shape as version detection: an immediate retry after a 429 almost always gets another 429.
+    private static final Retry COMPRESSION_CHECK_RETRY = Retry.backoff(MAX_COMPRESSION_CHECK_RETRIES, Duration.ofSeconds(1))
+        .maxBackoff(Duration.ofSeconds(5))
+        .filter(HttpRetryClassifier::isRetryable)
+        .doBeforeRetry(retrySignal -> log.atWarn()
+            .setCause(retrySignal.failure())
+            .setMessage("Checking whether the target supports compression failed ({}); retrying attempt {} of {}")
+            .addArgument(HttpRetryClassifier.describe(retrySignal.failure()))
+            .addArgument(retrySignal.totalRetries() + 2)
+            .addArgument(MAX_COMPRESSION_CHECK_RETRIES + 1)
+            .log());
 
     static final int COLLECTION_TYPE_PROBE_ATTEMPTS = 3;
 
@@ -39,6 +50,11 @@ public class OpenSearchClientFactory {
     private Version version;
     private CompressionMode compressionMode;
     RestClient client;
+    // One per process per target, shared by every client this factory makes: used only for bulk writes, so a
+    // throttled target can't starve work coordination or metadata requests of retries.
+    private final RetryBudget bulkRetryBudget = new RetryBudget();
+    // Same scope; bounded by maxConnections. Null without a connection limit (metadata migration and tools).
+    private final AdaptiveLimit bulkInFlightLimit;
 
     public OpenSearchClientFactory(ConnectionContext connectionContext) {
         this(connectionContext, 0);
@@ -51,6 +67,7 @@ public class OpenSearchClientFactory {
         this.connectionContext = connectionContext;
         this.maxConnections = maxConnections;
         this.client = new RestClient(connectionContext, maxConnections);
+        this.bulkInFlightLimit = maxConnections > 0 ? new AdaptiveLimit(maxConnections) : null;
     }
 
     public OpenSearchClient determineVersionAndCreate() {
@@ -86,11 +103,14 @@ public class OpenSearchClientFactory {
         }
         var clientClass = getOpenSearchClientClass(version);
         try {
-            return clientClass.getConstructor(RestClient.class, FailedRequestsLogger.class, Version.class,
+            var created = clientClass.getConstructor(RestClient.class, FailedRequestsLogger.class, Version.class,
                     CompressionMode.class, int.class, long.class)
                 .newInstance(restClient == null ? client : restClient,
                     failedRequestsLogger == null ? new FailedRequestsLogger() : failedRequestsLogger,
                     version, compressionMode, maxDocsPerBulkRequest, maxBytesPerBulkRequest);
+            created.setBulkRetryBudget(bulkRetryBudget);
+            created.setBulkInFlightLimit(bulkInFlightLimit);
+            return created;
         } catch (NoSuchMethodException | InstantiationException | IllegalAccessException | InvocationTargetException e) {
             throw new ClientInstantiationException("Failed to instantiate OpenSearchClient", e);
         }
@@ -111,12 +131,17 @@ public class OpenSearchClientFactory {
         log.atInfo().setMessage("Checking compression on cluster").log();
         return client.getAsync("_cluster/settings?include_defaults=true", null)
             .flatMap(this::checkCompressionFromResponse)
-            .doOnError(e -> log.atWarn()
-                .setMessage("Check cluster compression failed")
-                .setCause(e)
-                .log())
-            .retryWhen(RETRY_WHEN_NOT_4XX_STRATEGY)
-            .onErrorReturn(false)
+            .retryWhen(COMPRESSION_CHECK_RETRY)
+            .onErrorResume(e -> {
+                var cause = Exceptions.isRetryExhausted(e) && e.getCause() != null ? e.getCause() : e;
+                log.atWarn()
+                    .setCause(cause)
+                    .setMessage("Couldn't tell whether the target supports compression ({}); sending requests "
+                        + "uncompressed")
+                    .addArgument(HttpRetryClassifier.describe(cause))
+                    .log();
+                return Mono.just(false);
+            })
             .doOnNext(hasCompressionEnabled -> log.atInfo()
                 .setMessage("After querying target, compression={}")
                 .addArgument(hasCompressionEnabled).log())
