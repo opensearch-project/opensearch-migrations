@@ -761,9 +761,9 @@ public abstract class OpenSearchClient {
         BulkResponse resp,
         DocumentExceptionAllowlist allowlist
     ) {
-        ItemPartition partition = BulkResponseParser.partitionItems(resp.body, allowlist);
+        ItemPartition partition = BulkResponseParser.partitionItems(resp.statusCode, resp.body, allowlist);
         if (partition == null) {
-            // Can't parse response - assume all failed, retry all
+            // No per-item result: retry all pending documents.
             return 0;
         }
 
@@ -836,7 +836,7 @@ public abstract class OpenSearchClient {
         HttpResponse lastResponse = opFailed != null ? opFailed.response : null;
         List<ItemFailure> retryableFailures = List.of();
         if (lastResponse != null && lastResponse.body != null) {
-            ItemPartition partition = BulkResponseParser.partitionItems(lastResponse.body, allowlist);
+            ItemPartition partition = BulkResponseParser.partitionItems(lastResponse.statusCode, lastResponse.body, allowlist);
             if (partition != null) {
                 retryableFailures = partition.getRetryableFailures();
             }
