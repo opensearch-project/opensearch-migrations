@@ -177,6 +177,28 @@ public class SnapshotExtractor {
     public Flux<LuceneDocumentChange> readDocuments(ShardEntry shard, Path workDir, int startDocIdx,
                                                      FieldMappingContext mappingContext, boolean useRecoverySource,
                                                      Consumer<SnapshotDocumentCounts> snapshotCountsSink) {
+        return readDocuments(
+            shard,
+            workDir,
+            startDocIdx,
+            mappingContext,
+            useRecoverySource,
+            snapshotCountsSink,
+            Math.max(1, Runtime.getRuntime().availableProcessors()),
+            null
+        );
+    }
+
+    public Flux<LuceneDocumentChange> readDocuments(
+        ShardEntry shard,
+        Path workDir,
+        int startDocIdx,
+        FieldMappingContext mappingContext,
+        boolean useRecoverySource,
+        Consumer<SnapshotDocumentCounts> snapshotCountsSink,
+        int readParallelism,
+        LuceneReader.DocumentReadAdmission readAdmission
+    ) {
         var repoAccessor = new SourceRepoAccessor(sourceRepo);
         var unpackerFactory = new SnapshotShardUnpacker.Factory(repoAccessor, workDir);
         var readerFactory = new LuceneIndexReader.Factory(snapshotReader);
@@ -195,7 +217,7 @@ public class SnapshotExtractor {
         LuceneIndexReader indexReader = readerFactory.getReader(shardPath);
         return LuceneReader.streamDocumentChanges(indexReader, shard.metadata().getSegmentFileName(), startDocIdx,
             mappingContext, useRecoverySource, snapshotCountsSink == null ? null : nestedPathField(shard),
-            snapshotCountsSink);
+            snapshotCountsSink, readParallelism, readAdmission);
     }
 
     private String nestedPathField(ShardEntry shard) {
@@ -240,6 +262,28 @@ public class SnapshotExtractor {
         Supplier<IRfsContexts.IDeltaStreamContext> deltaContextFactory,
         Consumer<SnapshotDocumentCounts> snapshotCounts
     ) {
+        return readDeltaDocuments(
+            currentShard,
+            previousShard,
+            deltaMode,
+            workDir,
+            deltaContextFactory,
+            snapshotCounts,
+            Math.max(1, Runtime.getRuntime().availableProcessors()),
+            null
+        );
+    }
+
+    public Flux<LuceneDocumentChange> readDeltaDocuments(
+        ShardEntry currentShard,
+        ShardEntry previousShard,
+        DeltaMode deltaMode,
+        Path workDir,
+        Supplier<IRfsContexts.IDeltaStreamContext> deltaContextFactory,
+        Consumer<SnapshotDocumentCounts> snapshotCounts,
+        int readParallelism,
+        LuceneReader.DocumentReadAdmission readAdmission
+    ) {
         var repoAccessor = new SourceRepoAccessor(sourceRepo);
         var unpackerFactory = new SnapshotShardUnpacker.Factory(repoAccessor, workDir);
         var readerFactory = new LuceneIndexReader.Factory(snapshotReader);
@@ -278,7 +322,7 @@ public class SnapshotExtractor {
                 snapshotCounts.accept(LuceneReader.countSnapshotDocuments(currentReader, nestedPathField(currentShard)));
             }
             deltaResult = DeltaLuceneReader.readDeltaDocsByLeavesFromStartingPosition(
-                previousReader, currentReader, 0, deltaContext);
+                previousReader, currentReader, 0, deltaContext, readParallelism, readAdmission);
         } catch (RuntimeException | Error e) {
             LuceneDirectoryReader.getCleanupRunnable(previousReader, currentReader).run();
             throw e;

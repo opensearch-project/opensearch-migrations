@@ -21,8 +21,73 @@ import reactor.core.publisher.Sinks;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class DocumentMigrationPipelineMemoryTest {
+
+    @Test
+    void derivedCapacityCanFillEveryRequestWhileReadersRemainActive() {
+        int maxDocumentBytes = 6;
+        int maxDocsPerBatch = 3;
+        int maxBytesPerBatch = 3;
+        int maxConnections = 2;
+        int readParallelism = Math.min(maxConnections, Runtime.getRuntime().availableProcessors());
+        long capacity = org.opensearch.migrations.bulkload.common.RfsMemorySizing.sourcePermitBytes(
+            maxDocumentBytes,
+            maxDocsPerBatch,
+            maxBytesPerBatch,
+            maxConnections,
+            Runtime.getRuntime().availableProcessors()
+        );
+        var limiter = new WeightedByteLimiter(capacity);
+        var partition = new EsShardPartition("snapshot", "index", 0);
+        var source = preAdmittedSource(partition, 12);
+        var requestCompletions = new CopyOnWriteArrayList<Sinks.One<BatchResult>>();
+        var fullRequestsStarted = new CountDownLatch(maxConnections);
+        DocumentSink sink = new DocumentSink() {
+            @Override
+            public Mono<Void> createCollection(CollectionMetadata metadata) {
+                return Mono.empty();
+            }
+
+            @Override
+            public Mono<BatchResult> writeBatch(String collectionName, List<Document> batch) {
+                assertEquals(maxDocsPerBatch, batch.size());
+                var completion = Sinks.<BatchResult>one();
+                requestCompletions.add(completion);
+                fullRequestsStarted.countDown();
+                return completion.asMono();
+            }
+        };
+        var pipeline = new DocumentMigrationPipeline(
+            source,
+            sink,
+            maxDocsPerBatch,
+            maxBytesPerBatch,
+            1,
+            maxConnections,
+            PipelineMetrics.NONE,
+            maxDocumentBytes,
+            limiter
+        );
+
+        var result = pipeline.migratePartition(partition, "index", 0).collectList().toFuture();
+        awaitRequests(fullRequestsStarted, 0);
+        assertEquals(maxConnections, requestCompletions.size());
+        assertTrue(limiter.maxUsedBytes() <= capacity);
+        assertEquals(
+            readParallelism * (long) maxDocumentBytes + maxConnections * (long) maxBytesPerBatch,
+            capacity
+        );
+
+        while (!result.isDone()) {
+            List.copyOf(requestCompletions).forEach(completion ->
+                completion.tryEmitValue(new BatchResult(maxDocsPerBatch, maxBytesPerBatch)));
+            Thread.yield();
+        }
+        assertEquals(4, result.orTimeout(2, TimeUnit.SECONDS).join().size());
+        assertEquals(0, limiter.usedBytes());
+    }
 
     @Test
     void sourcePermitIsHeldUntilItsRequestCompletes() {
@@ -105,6 +170,53 @@ class DocumentMigrationPipelineMemoryTest {
                 long startingDocOffset
             ) {
                 return Flux.fromIterable(documents);
+            }
+        };
+    }
+
+    private static DocumentSource preAdmittedSource(EsShardPartition partition, int documentCount) {
+        return new DocumentSource() {
+            @Override
+            public List<String> listCollections() {
+                return List.of("index");
+            }
+
+            @Override
+            public List<org.opensearch.migrations.bulkload.pipeline.model.Partition> listPartitions(
+                String collectionName
+            ) {
+                return List.of(partition);
+            }
+
+            @Override
+            public CollectionMetadata readCollectionMetadata(String collectionName) {
+                return new CollectionMetadata(collectionName, 1, Map.of());
+            }
+
+            @Override
+            public Flux<Document> readDocuments(
+                org.opensearch.migrations.bulkload.pipeline.model.Partition ignored,
+                long startingDocOffset
+            ) {
+                throw new AssertionError("memory-aware read path was not used");
+            }
+
+            @Override
+            public Flux<Document> readDocuments(
+                org.opensearch.migrations.bulkload.pipeline.model.Partition ignored,
+                long startingDocOffset,
+                SourceDocumentMemoryTracker memoryTracker
+            ) {
+                return Flux.range(Math.toIntExact(startingDocOffset), documentCount)
+                    .flatMapSequential(
+                        index -> memoryTracker.materialize(
+                            () -> document(Integer.toString(index), 1),
+                            Document::sourceLength,
+                            Document::id
+                        ),
+                        memoryTracker.readParallelism(),
+                        1
+                    );
             }
         };
     }

@@ -98,6 +98,24 @@ public class DeltaLuceneReader {
         int startDocId,
         IRfsContexts.IDeltaStreamContext deltaContext
     ) {
+        return readDeltaDocsByLeavesFromStartingPosition(
+            previousReader,
+            currentReader,
+            startDocId,
+            deltaContext,
+            Math.max(1, Runtime.getRuntime().availableProcessors()),
+            null
+        );
+    }
+
+    public static DeltaResult readDeltaDocsByLeavesFromStartingPosition(
+        LuceneDirectoryReader previousReader,
+        LuceneDirectoryReader currentReader,
+        int startDocId,
+        IRfsContexts.IDeltaStreamContext deltaContext,
+        int readParallelism,
+        LuceneReader.DocumentReadAdmission readAdmission
+    ) {
         log.atInfo()
             .setMessage("Starting delta backfill from position {}")
             .addArgument(startDocId)
@@ -162,7 +180,7 @@ public class DeltaLuceneReader {
                     startDocId,
                     Path.of(c.getReader().getSegmentName()),
                     DocumentChangeType.INDEX,
-                    null, false)
+                    null, false, readParallelism, readAdmission)
             ).subscribeOn(Schedulers.boundedElastic());
 
         var deletionsStream = Flux.fromIterable(removes)
@@ -171,7 +189,7 @@ public class DeltaLuceneReader {
                     startDocId,
                     Path.of(c.getReader().getSegmentName()),
                     DocumentChangeType.DELETE,
-                    null, false)
+                    null, false, readParallelism, readAdmission)
             ).subscribeOn(Schedulers.boundedElastic());
 
         return new DeltaResult(additionsStream, deletionsStream);

@@ -22,3 +22,27 @@ dependencies {
     testRuntimeOnly libs.log4j.slf4j2.impl
     testRuntimeOnly libs.log4j.core
 }
+
+tasks.named('test') {
+    useJUnitPlatform {
+        excludeTags 'rfsMemoryStressTest'
+    }
+}
+
+tasks.register('rfsMemoryStressTest', Test) {
+    group = 'verification'
+    description = 'Runs the isolated child-JVM soak test for RFS source-memory admission.'
+    useJUnitPlatform {
+        includeTags 'rfsMemoryStressTest'
+    }
+    maxParallelForks = 1
+    outputs.upToDateWhen { false }
+    def durationOverride = System.getProperty('rfs.sourceMemoryStress.seconds')
+    if (durationOverride != null) {
+        systemProperty 'rfs.sourceMemoryStress.seconds', durationOverride
+    }
+    testLogging {
+        events 'passed', 'skipped', 'failed'
+        showStandardStreams = true
+    }
+}

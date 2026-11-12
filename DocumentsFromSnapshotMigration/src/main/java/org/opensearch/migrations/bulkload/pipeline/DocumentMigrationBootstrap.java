@@ -118,7 +118,13 @@ public class DocumentMigrationBootstrap {
                 .addArgument(maxSourceDocumentSizeBytes)
                 .addArgument(maxSourceDocumentSizeBytes == 0
                     ? 0
-                    : RfsMemorySizing.sourcePermitBytes(maxSourceDocumentSizeBytes))
+                    : RfsMemorySizing.sourcePermitBytes(
+                        maxSourceDocumentSizeBytes,
+                        maxDocsPerBatch,
+                        maxBytesPerBatch,
+                        batchConcurrency,
+                        processors
+                    ))
                 .addArgument(maxTransformOutputBytesPerInvocation)
                 .addArgument(RfsMemorySizing.transformParallelism(batchConcurrency, processors))
                 .addArgument(transformMemoryLimiter == null ? 0 : transformMemoryLimiter.capacity())
@@ -198,7 +204,13 @@ public class DocumentMigrationBootstrap {
 
         var sourceMemoryLimiter = maxSourceDocumentSizeBytes == 0
             ? null
-            : new WeightedByteLimiter(RfsMemorySizing.sourcePermitBytes(maxSourceDocumentSizeBytes));
+            : new WeightedByteLimiter(RfsMemorySizing.sourcePermitBytes(
+                maxSourceDocumentSizeBytes,
+                maxDocsPerBatch,
+                maxBytesPerBatch,
+                batchConcurrency,
+                Runtime.getRuntime().availableProcessors()
+            ));
         var pipeline = new DocumentMigrationPipeline(
             pipelineConfig.source(), pipelineConfig.sink(),
             pipelineConfig.maxDocsPerBatch(), pipelineConfig.maxBytesPerBatch(),

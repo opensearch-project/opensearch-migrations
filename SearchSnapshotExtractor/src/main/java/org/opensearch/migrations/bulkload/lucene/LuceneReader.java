@@ -13,7 +13,6 @@ import java.util.stream.IntStream;
 
 import org.opensearch.migrations.bulkload.common.DocumentChangeType;
 import org.opensearch.migrations.bulkload.common.LuceneDocumentChange;
-import org.opensearch.migrations.bulkload.common.RfsMemorySizing;
 import org.opensearch.migrations.bulkload.common.SnapshotDocumentCounts;
 import org.opensearch.migrations.bulkload.common.SourceFormat;
 
@@ -27,15 +26,21 @@ import reactor.core.scheduler.Schedulers;
 @Slf4j
 public class LuceneReader {
 
-    /** Dedicated scheduler for Lucene I/O — more threads than boundedElastic on small pods. */
+    private static final int DEFAULT_READ_PARALLELISM =
+        Math.max(1, Runtime.getRuntime().availableProcessors());
+    private static final int LUCENE_IO_THREADS = Math.max(2, DEFAULT_READ_PARALLELISM);
+
+    /** Dedicated scheduler for Lucene I/O, processor-bounded with a two-thread test/I/O floor. */
     private static final Scheduler LUCENE_IO_SCHEDULER = Schedulers.newBoundedElastic(
-        RfsMemorySizing.SOURCE_READ_PARALLELISM, Integer.MAX_VALUE, "lucene-io", 60, true
+        LUCENE_IO_THREADS, Integer.MAX_VALUE, "lucene-io", 60, true
     );
 
-    /** Per-segment read concurrency for the bounded-elastic flatMap. */
-    private static final int SEGMENT_READ_CONCURRENCY = RfsMemorySizing.SOURCE_READ_PARALLELISM;
-
     private LuceneReader() {}
+
+    @FunctionalInterface
+    public interface DocumentReadAdmission {
+        Mono<LuceneDocumentChange> materialize(Mono<LuceneDocumentChange> documentReader);
+    }
 
     /**
      * Stream document changes from a Lucene index via the given reader.
@@ -63,13 +68,35 @@ public class LuceneReader {
      *                         open, before any documents are emitted. May be null.
      */
     public static Flux<LuceneDocumentChange> streamDocumentChanges(LuceneIndexReader indexReader, String segmentsFileName, int startDocIdx, FieldMappingContext mappingContext, boolean useRecoverySource, String nestedPathField, Consumer<SnapshotDocumentCounts> snapshotCountsSink) {
+        return streamDocumentChanges(indexReader, segmentsFileName, startDocIdx, mappingContext, useRecoverySource,
+            nestedPathField, snapshotCountsSink, DEFAULT_READ_PARALLELISM, null);
+    }
+
+    public static Flux<LuceneDocumentChange> streamDocumentChanges(
+        LuceneIndexReader indexReader,
+        String segmentsFileName,
+        int startDocIdx,
+        FieldMappingContext mappingContext,
+        boolean useRecoverySource,
+        String nestedPathField,
+        Consumer<SnapshotDocumentCounts> snapshotCountsSink,
+        int readParallelism,
+        DocumentReadAdmission readAdmission
+    ) {
         return Flux.using(
             () -> indexReader.getReader(segmentsFileName),
             reader -> {
                 if (snapshotCountsSink != null) {
                     snapshotCountsSink.accept(countSnapshotDocuments(reader, nestedPathField));
                 }
-                return readDocsByLeavesFromStartingPosition(reader, startDocIdx, mappingContext, useRecoverySource);
+                return readDocsByLeavesFromStartingPosition(
+                    reader,
+                    startDocIdx,
+                    mappingContext,
+                    useRecoverySource,
+                    readParallelism,
+                    readAdmission
+                );
             },
             reader -> {
                 try {
@@ -88,6 +115,30 @@ public class LuceneReader {
        to keep the source feeding batches fast enough.
      */
     public static Flux<LuceneDocumentChange> readDocsByLeavesFromStartingPosition(LuceneDirectoryReader reader, int startDocId, FieldMappingContext mappingContext, boolean useRecoverySource) {
+        return readDocsByLeavesFromStartingPosition(
+            reader,
+            startDocId,
+            mappingContext,
+            useRecoverySource,
+            DEFAULT_READ_PARALLELISM,
+            null
+        );
+    }
+
+    public static Flux<LuceneDocumentChange> readDocsByLeavesFromStartingPosition(
+        LuceneDirectoryReader reader,
+        int startDocId,
+        FieldMappingContext mappingContext,
+        boolean useRecoverySource,
+        int readParallelism,
+        DocumentReadAdmission readAdmission
+    ) {
+        if (readParallelism < 1 || readParallelism > LUCENE_IO_THREADS) {
+            throw new IllegalArgumentException(
+                "readParallelism must be between 1 and the Lucene I/O thread count "
+                    + LUCENE_IO_THREADS + ", got " + readParallelism
+            );
+        }
         log.atInfo().setMessage("{} documents in {} leaves found in the current Lucene index")
             .addArgument(reader::maxDoc)
             .addArgument(() -> reader.leaves().size())
@@ -99,7 +150,9 @@ public class LuceneReader {
                     reader.getIndexDirectoryPath(),
                     DocumentChangeType.INDEX,
                     mappingContext,
-                    useRecoverySource)
+                    useRecoverySource,
+                    readParallelism,
+                    readAdmission)
             )
             .subscribeOn(LUCENE_IO_SCHEDULER);
     }
@@ -171,13 +224,36 @@ public class LuceneReader {
     public static Flux<LuceneDocumentChange> readDocsFromSegment(ReaderAndBase readerAndBase, int docStartingId,
                                                 Path indexDirectoryPath, DocumentChangeType operation,
                                                 FieldMappingContext mappingContext, boolean useRecoverySource) {
+        return readDocsFromSegment(
+            readerAndBase,
+            docStartingId,
+            indexDirectoryPath,
+            operation,
+            mappingContext,
+            useRecoverySource,
+            DEFAULT_READ_PARALLELISM,
+            null
+        );
+    }
+
+    public static Flux<LuceneDocumentChange> readDocsFromSegment(
+        ReaderAndBase readerAndBase,
+        int docStartingId,
+        Path indexDirectoryPath,
+        DocumentChangeType operation,
+        FieldMappingContext mappingContext,
+        boolean useRecoverySource,
+        int readParallelism,
+        DocumentReadAdmission readAdmission
+    ) {
         return Flux.defer(() -> readDocsFromSegmentSubscription(readerAndBase, docStartingId,
-            indexDirectoryPath, operation, mappingContext, useRecoverySource));
+            indexDirectoryPath, operation, mappingContext, useRecoverySource, readParallelism, readAdmission));
     }
 
     private static Flux<LuceneDocumentChange> readDocsFromSegmentSubscription(ReaderAndBase readerAndBase,
             int docStartingId, Path indexDirectoryPath, DocumentChangeType operation,
-            FieldMappingContext mappingContext, boolean useRecoverySource) {
+            FieldMappingContext mappingContext, boolean useRecoverySource, int readParallelism,
+            DocumentReadAdmission readAdmission) {
         var segmentReader = readerAndBase.getReader();
         var liveDocs = readerAndBase.getLiveDocs();
 
@@ -212,24 +288,30 @@ public class LuceneReader {
         // returning null, silently dropping documents. Serialize the inner pipeline when
         // sourceless to honor the cursor's monotonic-docId contract. For stored-source
         // (non-sourceless) reads the cursor is unused, so we keep the parallel fast path.
-        int innerConcurrency = (mappingContext != null) ? 1 : SEGMENT_READ_CONCURRENCY;
+        int innerConcurrency = (mappingContext != null) ? 1 : readParallelism;
         var session = new SegmentReadSession(segmentReader);
         return Flux.fromStream(idxStream.boxed())
             .flatMapSequential(docIdx -> Mono.defer(() -> {
-                    try {
-                        LuceneDocumentChange document = LuceneReader.getDocument(segmentReader, docIdx, true, segmentDocBase,
-                            getSegmentReaderDebugInfo, indexDirectoryPath, operation, mappingContext, termIndex,
-                            useRecoverySource, session.forCurrentThread());
-                        return Mono.justOrEmpty(document);
-                    } catch (Exception e) {
-                        log.atError().setMessage("Error reading document from reader {} with index: {}")
-                            .addArgument(getSegmentReaderDebugInfo)
-                            .addArgument(docIdx)
-                            .setCause(e)
-                            .log();
-                        return Mono.error(new RuntimeException("Error reading document from reader with index " + docIdx
-                            + " from segment " + getSegmentReaderDebugInfo.get(), e));
-                    }
+                    Supplier<LuceneDocumentChange> reader = () -> {
+                        try {
+                            return LuceneReader.getDocument(segmentReader, docIdx, true, segmentDocBase,
+                                getSegmentReaderDebugInfo, indexDirectoryPath, operation, mappingContext, termIndex,
+                                useRecoverySource, session.forCurrentThread());
+                        } catch (Exception e) {
+                            log.atError().setMessage("Error reading document from reader {} with index: {}")
+                                .addArgument(getSegmentReaderDebugInfo)
+                                .addArgument(docIdx)
+                                .setCause(e)
+                                .log();
+                            throw new RuntimeException(
+                                "Error reading document from reader with index " + docIdx
+                                    + " from segment " + getSegmentReaderDebugInfo.get(),
+                                e
+                            );
+                        }
+                    };
+                    var documentReader = Mono.fromSupplier(reader).subscribeOn(LUCENE_IO_SCHEDULER);
+                    return readAdmission == null ? documentReader : readAdmission.materialize(documentReader);
                 }).subscribeOn(LUCENE_IO_SCHEDULER), innerConcurrency, 1)
             .doFinally(sig -> {
                 session.close();

@@ -4,6 +4,7 @@ import java.util.List;
 import java.util.Optional;
 
 import org.opensearch.migrations.bulkload.common.SnapshotDocumentCounts;
+import org.opensearch.migrations.bulkload.pipeline.SourceDocumentMemoryTracker;
 import org.opensearch.migrations.bulkload.pipeline.model.CollectionMetadata;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
 import org.opensearch.migrations.bulkload.pipeline.model.Partition;
@@ -42,6 +43,20 @@ public interface DocumentSource extends AutoCloseable {
      * @return a cold Flux of documents
      */
     Flux<Document> readDocuments(Partition partition, long startingDocOffset);
+
+    /**
+     * Stream documents with source-memory admission enabled.
+     *
+     * <p>Sources that can reserve before materialization should override this method.
+     * The default bounds downstream retention after the source emits each document.
+     */
+    default Flux<Document> readDocuments(
+        Partition partition,
+        long startingDocOffset,
+        SourceDocumentMemoryTracker memoryTracker
+    ) {
+        return readDocuments(partition, startingDocOffset).concatMap(memoryTracker::admit, 1);
+    }
 
     /** Whole-partition snapshot counts, independent of resume position; empty until available. */
     default Optional<SnapshotDocumentCounts> snapshotDocumentCounts(Partition partition) {

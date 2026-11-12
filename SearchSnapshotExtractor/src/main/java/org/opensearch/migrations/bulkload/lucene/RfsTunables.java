@@ -10,23 +10,6 @@ public final class RfsTunables {
 
     private RfsTunables() {}
 
-    // --- Reader parallelism ---
-
-    /**
-     * Per-segment reader parallelism — number of independent LeafReader views that
-     * process a segment's docId space concurrently via round-robin striping.
-     *
-     * <p>System property: {@code -Drfs.reader.parallelism=<int>}
-     * <p>Env var fallback: {@code RFS_READER_PARALLELISM}
-     * <p>Default: availableProcessors - 1 (min 1).
-     *
-     * <p>Higher values saturate CPU on reconstruction-heavy segments (sourceless fields
-     * with doc_values/points/terms recovery). Diminishing returns past the point where
-     * the bulk-loader write pipeline or the SegmentTermIndex monitor become the bottleneck.
-     */
-    public static final String READER_PARALLELISM_PROP = "rfs.reader.parallelism";
-    public static final String READER_PARALLELISM_ENV = "RFS_READER_PARALLELISM";
-
     // --- Position-gap stopword filler ---
 
     /**

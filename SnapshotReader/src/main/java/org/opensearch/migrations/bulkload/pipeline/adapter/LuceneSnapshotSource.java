@@ -11,8 +11,11 @@ import java.util.function.Supplier;
 
 import org.opensearch.migrations.bulkload.SnapshotExtractor;
 import org.opensearch.migrations.bulkload.common.DeltaMode;
+import org.opensearch.migrations.bulkload.common.LuceneDocumentChange;
 import org.opensearch.migrations.bulkload.common.SnapshotDocumentCounts;
 import org.opensearch.migrations.bulkload.lucene.FieldMappingContext;
+import org.opensearch.migrations.bulkload.lucene.LuceneReader;
+import org.opensearch.migrations.bulkload.pipeline.SourceDocumentMemoryTracker;
 import org.opensearch.migrations.bulkload.pipeline.model.CollectionMetadata;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
 import org.opensearch.migrations.bulkload.pipeline.model.Partition;
@@ -202,6 +205,23 @@ public class LuceneSnapshotSource implements DocumentSource {
 
     @Override
     public Flux<Document> readDocuments(Partition partition, long startingPosition) {
+        return readDocumentsInternal(partition, startingPosition, null);
+    }
+
+    @Override
+    public Flux<Document> readDocuments(
+        Partition partition,
+        long startingPosition,
+        SourceDocumentMemoryTracker memoryTracker
+    ) {
+        return readDocumentsInternal(partition, startingPosition, memoryTracker);
+    }
+
+    private Flux<Document> readDocumentsInternal(
+        Partition partition,
+        long startingPosition,
+        SourceDocumentMemoryTracker memoryTracker
+    ) {
         var esPartition = (EsShardPartition) partition;
         var entry = resolveShardEntry(esPartition, shardEntryCache);
         if (entry == null) {
@@ -223,36 +243,108 @@ public class LuceneSnapshotSource implements DocumentSource {
                 if (deltaMode == DeltaMode.DELETES_ONLY) {
                     return Flux.empty();
                 }
-                return readRegularDocuments(entry, partition, startingPosition);
+                return readRegularDocuments(entry, partition, startingPosition, memoryTracker);
             }
             log.info("Reading delta documents from {} (mode={}, position={})", partition, deltaMode, startingPosition);
             // Delta doc numbers can overlap across snapshots; resume by stream ordinal.
-            return extractor.readDeltaDocuments(entry, previousEntry, deltaMode, workDir, deltaContextFactory,
+            var changes = (memoryTracker == null
+                ? extractor.readDeltaDocuments(
+                    entry,
+                    previousEntry,
+                    deltaMode,
+                    workDir,
+                    deltaContextFactory,
                     current -> snapshotCounts.put(partition, current))
+                : extractor.readDeltaDocuments(
+                    entry,
+                    previousEntry,
+                    deltaMode,
+                    workDir,
+                    deltaContextFactory,
+                    current -> snapshotCounts.put(partition, current),
+                    memoryTracker.readParallelism(),
+                    readAdmission(memoryTracker)))
                 .index()
-                .skip(startingPosition)
-                .map(indexed -> {
-                    var doc = luceneAdapter.fromLucene(indexed.getT2());
-                    var metadata = new HashMap<>(doc.sourceMetadata());
-                    metadata.put(Document.SOURCE_META_POSITION, indexed.getT1());
-                    return new Document(doc.id(), doc.source(), doc.operation(), doc.hints(), metadata);
+                .concatMap(indexed -> {
+                    if (indexed.getT1() < startingPosition) {
+                        if (memoryTracker != null) {
+                            memoryTracker.release(indexed.getT2());
+                        }
+                        return Flux.empty();
+                    }
+                    var doc = mapLucene(indexed.getT2(), memoryTracker, luceneDoc -> {
+                        var mapped = luceneAdapter.fromLucene(luceneDoc);
+                        var metadata = new HashMap<>(mapped.sourceMetadata());
+                        metadata.put(Document.SOURCE_META_POSITION, indexed.getT1());
+                        return new Document(
+                            mapped.id(),
+                            mapped.source(),
+                            mapped.operation(),
+                            mapped.hints(),
+                            metadata
+                        );
+                    });
+                    return Flux.just(doc);
                 });
+            return changes;
         }
 
-        return readRegularDocuments(entry, partition, startingPosition);
+        return readRegularDocuments(entry, partition, startingPosition, memoryTracker);
     }
 
     private Flux<Document> readRegularDocuments(
-        SnapshotExtractor.ShardEntry entry, Partition partition, long startingPosition
+        SnapshotExtractor.ShardEntry entry,
+        Partition partition,
+        long startingPosition,
+        SourceDocumentMemoryTracker memoryTracker
     ) {
         log.info("Reading documents from {} starting at Lucene docId {}", partition, startingPosition);
         var esPartition = (EsShardPartition) partition;
         FieldMappingContext mappingContext = sourcelessMappingContextProvider != null
             ? sourcelessMappingContextProvider.apply(esPartition.indexName())
             : null;
-        return extractor.readDocuments(entry, workDir, Math.toIntExact(startingPosition), mappingContext, useRecoverySource,
+        var changes = memoryTracker == null
+            ? extractor.readDocuments(
+                entry,
+                workDir,
+                Math.toIntExact(startingPosition),
+                mappingContext,
+                useRecoverySource,
                 count -> snapshotCounts.put(partition, count))
-            .map(luceneAdapter::fromLucene);
+            : extractor.readDocuments(
+                entry,
+                workDir,
+                Math.toIntExact(startingPosition),
+                mappingContext,
+                useRecoverySource,
+                count -> snapshotCounts.put(partition, count),
+                memoryTracker.readParallelism(),
+                readAdmission(memoryTracker));
+        return changes
+            .map(change -> mapLucene(change, memoryTracker, luceneAdapter::fromLucene));
+    }
+
+    private static LuceneReader.DocumentReadAdmission readAdmission(
+        SourceDocumentMemoryTracker memoryTracker
+    ) {
+        if (memoryTracker == null) {
+            return null;
+        }
+        return documentReader -> memoryTracker.materialize(
+            documentReader,
+            change -> change.getSource() == null ? 0 : change.getSource().length,
+            LuceneDocumentChange::getId
+        );
+    }
+
+    private static Document mapLucene(
+        LuceneDocumentChange change,
+        SourceDocumentMemoryTracker memoryTracker,
+        Function<LuceneDocumentChange, Document> mapper
+    ) {
+        return memoryTracker == null
+            ? mapper.apply(change)
+            : memoryTracker.mapTracked(change, mapper);
     }
 
     private SnapshotExtractor.ShardEntry resolveShardEntry(

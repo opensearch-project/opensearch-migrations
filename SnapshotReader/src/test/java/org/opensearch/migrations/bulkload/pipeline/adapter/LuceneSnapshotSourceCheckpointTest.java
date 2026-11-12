@@ -10,13 +10,17 @@ import org.opensearch.migrations.bulkload.common.DeltaMode;
 import org.opensearch.migrations.bulkload.common.DocumentChangeType;
 import org.opensearch.migrations.bulkload.common.LuceneDocumentChange;
 import org.opensearch.migrations.bulkload.common.SnapshotDocumentCounts;
+import org.opensearch.migrations.bulkload.lucene.LuceneReader;
 import org.opensearch.migrations.bulkload.models.ShardMetadata;
+import org.opensearch.migrations.bulkload.pipeline.SourceDocumentMemoryTracker;
+import org.opensearch.migrations.bulkload.pipeline.WeightedByteLimiter;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -26,6 +30,86 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 class LuceneSnapshotSourceCheckpointTest {
+    @Test
+    void transfersPreReadPermitThroughTheLuceneAdapter() {
+        var extractor = mock(SnapshotExtractor.class);
+        var current = new SnapshotExtractor.ShardEntry("current", "idx", "id", 0, mock(ShardMetadata.class));
+        var change = new LuceneDocumentChange(
+            0,
+            "doc",
+            null,
+            new byte[] {1, 2, 3},
+            null,
+            DocumentChangeType.INDEX
+        );
+        when(extractor.listShards("current", "idx")).thenReturn(List.of(current));
+        when(extractor.readDocuments(
+            eq(current),
+            any(),
+            eq(0),
+            any(),
+            eq(false),
+            any(),
+            eq(1),
+            any()
+        )).thenAnswer(call -> call.<LuceneReader.DocumentReadAdmission>getArgument(7)
+            .materialize(Mono.just(change))
+            .flux());
+        var limiter = new WeightedByteLimiter(20);
+        var memoryTracker = new SourceDocumentMemoryTracker(10, 1, limiter);
+
+        try (var source = LuceneSnapshotSource.builder(extractor, "current", Path.of("/unused")).build()) {
+            var partition = source.listPartitions("idx").get(0);
+            var document = source.readDocuments(partition, 0, memoryTracker).single().block();
+
+            assertEquals(3, limiter.usedBytes());
+            memoryTracker.release(document);
+            assertEquals(0, limiter.usedBytes());
+        }
+    }
+
+    @Test
+    void releasesPreReadPermitsForDeltaDocumentsSkippedDuringResume() {
+        var extractor = mock(SnapshotExtractor.class);
+        var current = new SnapshotExtractor.ShardEntry("current", "idx", "id", 0, mock(ShardMetadata.class));
+        var previous = new SnapshotExtractor.ShardEntry("previous", "idx", "id", 0, mock(ShardMetadata.class));
+        var changes = List.of(
+            new LuceneDocumentChange(8, "old-0", null, new byte[] {1}, null, DocumentChangeType.DELETE),
+            new LuceneDocumentChange(9, "old-1", null, new byte[] {1}, null, DocumentChangeType.DELETE),
+            new LuceneDocumentChange(2, "resume", null, new byte[] {1}, null, DocumentChangeType.INDEX)
+        );
+        when(extractor.listShards("current", "idx")).thenReturn(List.of(current));
+        when(extractor.listShards("previous", "idx")).thenReturn(List.of(previous));
+        when(extractor.readDeltaDocuments(
+            eq(current),
+            eq(previous),
+            any(),
+            any(),
+            any(),
+            any(),
+            eq(1),
+            any()
+        )).thenAnswer(call -> {
+            var admission = call.<LuceneReader.DocumentReadAdmission>getArgument(7);
+            return Flux.concat(changes.stream()
+                .map(change -> admission.materialize(Mono.just(change)))
+                .toList());
+        });
+        var limiter = new WeightedByteLimiter(20);
+        var memoryTracker = new SourceDocumentMemoryTracker(10, 1, limiter);
+
+        try (var source = LuceneSnapshotSource.builder(extractor, "current", Path.of("/unused"))
+            .delta("previous", DeltaMode.UPDATES_AND_DELETES, () -> null).build()) {
+            var partition = source.listPartitions("idx").get(0);
+            var document = source.readDocuments(partition, 2, memoryTracker).single().block();
+
+            assertEquals("resume", document.id());
+            assertEquals(1, limiter.usedBytes());
+            memoryTracker.release(document);
+            assertEquals(0, limiter.usedBytes());
+        }
+    }
+
     @ParameterizedTest
     @CsvSource({"false, 0", "false, 14", "true, 0", "true, 14"})
     void reportsSnapshotCountAfterResumedReadIncludingNewDeltaShards(boolean delta, long liveCount) {

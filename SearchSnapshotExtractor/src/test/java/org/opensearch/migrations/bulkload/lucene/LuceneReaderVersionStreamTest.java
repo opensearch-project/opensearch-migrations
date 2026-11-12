@@ -20,6 +20,7 @@ import org.opensearch.migrations.bulkload.common.LuceneDocumentChange;
 
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Sinks;
 import reactor.core.scheduler.Schedulers;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -40,15 +41,46 @@ class LuceneReaderVersionStreamTest {
     private static final Path INDEX = Path.of("test-index");
 
     @Test
+    void admissionCompletesBeforeStoredSourceIsMaterialized() throws Exception {
+        var reader = reader(1);
+        var storedDocument = document("d0");
+        when(reader.document(0)).thenReturn(storedDocument);
+        var admissionStarted = new CountDownLatch(1);
+        var permit = Sinks.<Void>one();
+
+        var result = LuceneReader.readDocsFromSegment(
+                new ReaderAndBase(reader, 0, null),
+                0,
+                INDEX,
+                DocumentChangeType.DELETE,
+                null,
+                false,
+                1,
+                documentReader -> {
+                    admissionStarted.countDown();
+                    return permit.asMono().then(documentReader);
+                })
+            .next()
+            .toFuture();
+
+        assertTrue(admissionStarted.await(5, TimeUnit.SECONDS));
+        verify(reader, never()).document(0);
+        permit.tryEmitEmpty();
+
+        assertEquals("d0", result.get(5, TimeUnit.SECONDS).id);
+        verify(reader).document(0);
+    }
+
+    @Test
     void versionsStayOrderedWhenStoredFieldsCompleteOutOfOrder() throws Exception {
         int documentCount = 257;
         var reader = reader(documentCount);
-        var initialBatchStarted = new CountDownLatch(100);
+        var initialBatchStarted = new CountDownLatch(2);
         var completionOrder = new CopyOnWriteArrayList<Integer>();
         var documents = IntStream.range(0, documentCount).mapToObj(i -> document("d" + i)).toList();
         when(reader.document(anyInt())).thenAnswer(invocation -> {
             int docId = invocation.getArgument(0);
-            if (docId < 100) {
+            if (docId < 2) {
                 initialBatchStarted.countDown();
             }
             if (docId == 0) {
@@ -62,7 +94,7 @@ class LuceneReaderVersionStreamTest {
             .toArray(Long[]::new);
         var visits = cursors(reader, versions);
 
-        var result = stream(reader, 100, 100, DocumentChangeType.INDEX).collectList().block(TIMEOUT);
+        var result = stream(reader, 100, 100, DocumentChangeType.INDEX, 2).collectList().block(TIMEOUT);
 
         assertEquals(IntStream.range(100, 100 + documentCount).boxed().toList(),
             result.stream().map(doc -> doc.luceneDocNumber).toList());
@@ -268,7 +300,12 @@ class LuceneReaderVersionStreamTest {
 
     private static Flux<LuceneDocumentChange> stream(
             LuceneLeafReader reader, int base, int start, DocumentChangeType operation) {
+        return stream(reader, base, start, operation, Math.max(1, Runtime.getRuntime().availableProcessors()));
+    }
+
+    private static Flux<LuceneDocumentChange> stream(
+            LuceneLeafReader reader, int base, int start, DocumentChangeType operation, int readParallelism) {
         return LuceneReader.readDocsFromSegment(new ReaderAndBase(reader, base, null), start,
-            INDEX, operation, null, false);
+            INDEX, operation, null, false, readParallelism, null);
     }
 }

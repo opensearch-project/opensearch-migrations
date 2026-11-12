@@ -17,6 +17,7 @@ public final class WeightedByteLimiter {
     private final long capacity;
     private final ArrayDeque<Waiter> waiters = new ArrayDeque<>();
     private long available;
+    private long maxUsed;
 
     public WeightedByteLimiter(long capacity) {
         if (capacity < 1) {
@@ -28,6 +29,14 @@ public final class WeightedByteLimiter {
 
     public long capacity() {
         return capacity;
+    }
+
+    public synchronized long usedBytes() {
+        return capacity - available;
+    }
+
+    public synchronized long maxUsedBytes() {
+        return maxUsed;
     }
 
     public Mono<Permit> acquire(long bytes) {
@@ -48,6 +57,7 @@ public final class WeightedByteLimiter {
             synchronized (this) {
                 if (waiters.isEmpty() && available >= bytes) {
                     available -= bytes;
+                    recordUsed();
                     permit = new Permit(this, bytes);
                 } else {
                     waiter = new Waiter(bytes, sink);
@@ -114,10 +124,15 @@ public final class WeightedByteLimiter {
                 }
                 waiters.removeFirst();
                 available -= waiter.bytes;
+                recordUsed();
                 permit = new Permit(this, waiter.bytes);
             }
             waiter.sink.success(permit);
         }
+    }
+
+    private void recordUsed() {
+        maxUsed = Math.max(maxUsed, capacity - available);
     }
 
     private record Waiter(long bytes, MonoSink<Permit> sink) {}

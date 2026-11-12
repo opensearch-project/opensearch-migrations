@@ -313,8 +313,9 @@ public class RfsMigrateDocuments {
         @Parameter(required = false,
             names = { "--max-source-document-size-bytes", "--maxSourceDocumentSizeBytes" },
             description = "Optional. Declares the largest serialized source document body. RFS uses this value to "
-                + "bound source documents retained from Lucene through target completion. A source document above "
-                + "the declaration fails the shard. Default: 0 (memory admission disabled)")
+                + "reserve before each Lucene read and retain enough source bytes for every target connection to "
+                + "fill a bulk request. A source document above the declaration fails the shard. "
+                + "Default: 0 (memory admission disabled)")
         long maxSourceDocumentSizeBytes = 0;
 
         @Parameter(required = false,
@@ -740,9 +741,8 @@ public class RfsMigrateDocuments {
 
         // Forward the position-gap stopword to the reconstruction layer via system property —
         // LuceneLeafReader.joinWithOffsets reads it from RfsTunables.positionGapStopword().
-        // Done here (rather than threaded through DocumentMigrationBootstrap) to match the
-        // existing tunables pattern for rfs.reader.parallelism, keeping the streaming-postings
-        // hot path free of per-call config plumbing.
+        // Done here rather than threaded through DocumentMigrationBootstrap, keeping the
+        // streaming-postings hot path free of per-call config plumbing.
         if (arguments.experimental.positionGapStopword != null
                 && !arguments.experimental.positionGapStopword.isBlank()) {
             System.setProperty(
@@ -1157,6 +1157,8 @@ public class RfsMigrateDocuments {
             requiredHeapBytes = org.opensearch.migrations.bulkload.common.RfsMemorySizing.requiredHeapBytes(
                 arguments.maxSourceDocumentSizeBytes,
                 arguments.maxTransformOutputBytesPerInvocation,
+                arguments.numDocsPerBulkRequest,
+                arguments.numBytesPerBulkRequest,
                 arguments.maxConnections,
                 Runtime.getRuntime().availableProcessors()
             );
