@@ -311,6 +311,24 @@ public class RfsMigrateDocuments {
         long maxDocumentSizeBytes = 0;
 
         @Parameter(required = false,
+            names = { "--max-source-document-size-bytes", "--maxSourceDocumentSizeBytes" },
+            description = "Optional. Declares the largest serialized source document body. RFS uses this value to "
+                + "bound source documents retained from Lucene through target completion. A source document above "
+                + "the declaration fails the shard. Default: 0 (memory admission disabled)")
+        long maxSourceDocumentSizeBytes = 0;
+
+        @Parameter(required = false,
+            names = {
+                "--max-transform-output-bytes-per-invocation",
+                "--maxTransformOutputBytesPerInvocation"
+            },
+            description = "Optional. Declares the largest total serialized bulk output returned by one batch-level "
+                + "document-transform invocation. RFS reserves this amount before invoking the transformer, shrinks "
+                + "the reservation to the exact encoded output, and holds it through target completion. Output above "
+                + "the declaration fails the shard. Default: 0 (transform memory admission disabled)")
+        long maxTransformOutputBytesPerInvocation = 0;
+
+        @Parameter(required = false,
             names = {"--max-connections", "--maxConnections" },
             description = "Optional. M, the most bulk requests in flight to the target at once (and so the most " +
                 "connections used for them). The limit L starts at 1; each success while L is in use adds 1 (1/L " +
@@ -570,6 +588,19 @@ public class RfsMigrateDocuments {
         if (args.maxDocumentSizeBytes < 0) {
             throw new ParameterException("--max-document-size-bytes must be 0 (no limit) or positive.");
         }
+        if (args.maxSourceDocumentSizeBytes < 0) {
+            throw new ParameterException("--max-source-document-size-bytes must be 0 (disabled) or positive.");
+        }
+        if (args.maxTransformOutputBytesPerInvocation < 0) {
+            throw new ParameterException(
+                "--max-transform-output-bytes-per-invocation must be 0 (disabled) or positive."
+            );
+        }
+        if (args.maxTransformOutputBytesPerInvocation > 0 && args.maxSourceDocumentSizeBytes == 0) {
+            throw new ParameterException(
+                "--max-transform-output-bytes-per-invocation requires --max-source-document-size-bytes."
+            );
+        }
         validateFailedDocumentStreamArgs(args.failedDocumentStreamArgs);
     }
 
@@ -764,6 +795,7 @@ public class RfsMigrateDocuments {
         Supplier<IJsonTransformer> docTransformerSupplier = docTransformerConfig == null
             ? null
             : () -> transformationLoader.getTransformerFactoryLoader(docTransformerConfig);
+        validateMemorySizing(arguments, docTransformerConfig);
 
         boolean emitDocType = resolveEmitDocType(
             arguments.emitDocType, arguments.sourceVersion, docTransformerConfig);
@@ -1093,6 +1125,8 @@ public class RfsMigrateDocuments {
             .maxDocsPerBatch(arguments.numDocsPerBulkRequest)
             .maxBytesPerBatch(arguments.numBytesPerBulkRequest)
             .batchConcurrency(arguments.maxConnections)
+            .maxSourceDocumentSizeBytes(arguments.maxSourceDocumentSizeBytes)
+            .maxTransformOutputBytesPerInvocation(arguments.maxTransformOutputBytesPerInvocation)
             .transformerSupplier(docTransformerSupplier)
             .allowServerGeneratedIds(useServerGeneratedIds)
             .collectionRoutedTarget(collectionRoutedTarget)
@@ -1106,6 +1140,41 @@ public class RfsMigrateDocuments {
             .build();
 
         return runner.migrateOneShard(context::createReindexContext);
+    }
+
+    private static void validateMemorySizing(Args arguments, String docTransformerConfig) {
+        if (arguments.maxTransformOutputBytesPerInvocation > 0 && docTransformerConfig == null) {
+            throw new ParameterException(
+                "--max-transform-output-bytes-per-invocation requires a document transformer."
+            );
+        }
+        if (arguments.maxSourceDocumentSizeBytes == 0
+            && arguments.maxTransformOutputBytesPerInvocation == 0) {
+            return;
+        }
+        long requiredHeapBytes;
+        try {
+            requiredHeapBytes = org.opensearch.migrations.bulkload.common.RfsMemorySizing.requiredHeapBytes(
+                arguments.maxSourceDocumentSizeBytes,
+                arguments.maxTransformOutputBytesPerInvocation,
+                arguments.maxConnections,
+                Runtime.getRuntime().availableProcessors()
+            );
+        } catch (ArithmeticException e) {
+            throw new ParameterException("RFS memory sizing values overflow a 64-bit byte count.", e);
+        }
+        long configuredHeapBytes = Runtime.getRuntime().maxMemory();
+        if (configuredHeapBytes < requiredHeapBytes) {
+            throw new ParameterException(
+                "Configured JVM max heap is " + configuredHeapBytes + " bytes, but the declared source and transform "
+                    + "sizes require at least " + requiredHeapBytes + " bytes."
+            );
+        }
+        log.atInfo()
+            .setMessage("RFS heap sizing validated: configuredMaxHeapBytes={}, requiredHeapBytes={}")
+            .addArgument(configuredHeapBytes)
+            .addArgument(requiredHeapBytes)
+            .log();
     }
 
     static BiFunction<WorkItem, WorkItemCursor, Map<String, Object>> committedMetricsReporter(

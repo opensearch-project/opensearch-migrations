@@ -45,12 +45,23 @@ class JsonObjectSplitterPerformanceTest {
             List<byte[]> fragments = JsonObjectSplitter.split(document, FRAGMENT_MIB * MIB);
             double elapsedMillis = (System.nanoTime() - started) / 1_000_000.0;
             long allocatedAfter = allocatedBefore < 0 ? -1 : threads.getThreadAllocatedBytes(threadId);
+            long allocatedBytes = allocatedBefore < 0 ? -1 : allocatedAfter - allocatedBefore;
 
             assertTrue(fragments.stream().allMatch(fragment -> fragment.length <= FRAGMENT_MIB * MIB));
             assertTrue(fragments.size() >= Math.ceil(document.length / (double) (FRAGMENT_MIB * MIB)));
+            if (allocatedBytes >= 0) {
+                assertTrue(
+                    Math.addExact(document.length, allocatedBytes)
+                        <= Math.multiplyExact(
+                            (long) document.length,
+                            RfsMemorySizing.SERIALIZED_BYTES_HEAP_EXPANSION_FACTOR
+                        ),
+                    "splitter input plus allocations exceeded the configured serialized-byte heap factor"
+                );
+            }
             System.out.printf(Locale.ROOT, "%d,%d,%d,%.3f,%d%n",
                 documentMiB, document.length, fragments.size(), elapsedMillis,
-                allocatedBefore < 0 ? -1 : allocatedAfter - allocatedBefore);
+                allocatedBytes);
         }
     }
 }

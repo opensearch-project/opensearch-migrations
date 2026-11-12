@@ -71,6 +71,8 @@ public class DocumentMigrationPipeline {
     private final int requestConcurrencyPerGroup;
     private final int batchGroupConcurrency;
     private final PipelineMetrics pipelineMetrics;
+    private final long maxSourceDocumentSizeBytes;
+    private final WeightedByteLimiter sourceMemoryLimiter;
 
     // Observable state — polled by PipelineProgressMonitor
     private final AtomicLong totalDocs = new AtomicLong();
@@ -82,7 +84,7 @@ public class DocumentMigrationPipeline {
      * Create a pipeline with sequential partition processing and default batch concurrency.
      */
     public DocumentMigrationPipeline(DocumentSource source, DocumentSink sink, int maxDocsPerBatch, long maxBytesPerBatch) {
-        this(source, sink, maxDocsPerBatch, maxBytesPerBatch, 1, 10, PipelineMetrics.NONE);
+        this(source, sink, maxDocsPerBatch, maxBytesPerBatch, 1, 10, PipelineMetrics.NONE, 0, null);
     }
 
     /**
@@ -110,7 +112,9 @@ public class DocumentMigrationPipeline {
             maxBytesPerBatch,
             partitionConcurrency,
             batchConcurrency,
-            PipelineMetrics.NONE
+            PipelineMetrics.NONE,
+            0,
+            null
         );
     }
 
@@ -126,9 +130,49 @@ public class DocumentMigrationPipeline {
         int batchConcurrency,
         PipelineMetrics pipelineMetrics
     ) {
+        this(
+            source,
+            sink,
+            maxDocsPerBatch,
+            maxBytesPerBatch,
+            partitionConcurrency,
+            batchConcurrency,
+            pipelineMetrics,
+            0,
+            null
+        );
+    }
+
+    /**
+     * Create a pipeline with source-document memory admission.
+     *
+     * @param maxSourceDocumentSizeBytes declared maximum serialized source document size
+     * @param sourceMemoryLimiter        process-wide serialized-byte limiter, or null to disable admission
+     */
+    public DocumentMigrationPipeline(
+        DocumentSource source,
+        DocumentSink sink,
+        int maxDocsPerBatch,
+        long maxBytesPerBatch,
+        int partitionConcurrency,
+        int batchConcurrency,
+        PipelineMetrics pipelineMetrics,
+        long maxSourceDocumentSizeBytes,
+        WeightedByteLimiter sourceMemoryLimiter
+    ) {
         this.source = Objects.requireNonNull(source, "source must not be null");
         this.sink = Objects.requireNonNull(sink, "sink must not be null");
         this.pipelineMetrics = Objects.requireNonNull(pipelineMetrics, "pipelineMetrics must not be null");
+        if (maxSourceDocumentSizeBytes < 0) {
+            throw new IllegalArgumentException(
+                "maxSourceDocumentSizeBytes must be >= 0, got " + maxSourceDocumentSizeBytes
+            );
+        }
+        if ((maxSourceDocumentSizeBytes == 0) != (sourceMemoryLimiter == null)) {
+            throw new IllegalArgumentException(
+                "maxSourceDocumentSizeBytes and sourceMemoryLimiter must either both be configured or both disabled"
+            );
+        }
         if (maxDocsPerBatch < 1) {
             throw new IllegalArgumentException("maxDocsPerBatch must be >= 1, got " + maxDocsPerBatch);
         }
@@ -164,6 +208,8 @@ public class DocumentMigrationPipeline {
         this.requestConcurrencyPerGroup = Math.min(this.batchConcurrency, sourceBatchGroupSize);
         this.batchGroupConcurrency =
             (this.batchConcurrency + requestConcurrencyPerGroup - 1) / requestConcurrencyPerGroup;
+        this.maxSourceDocumentSizeBytes = maxSourceDocumentSizeBytes;
+        this.sourceMemoryLimiter = sourceMemoryLimiter;
         pipelineMetrics.onConfigured(
             maxDocsPerBatch,
             maxBytesPerBatch,
@@ -204,10 +250,16 @@ public class DocumentMigrationPipeline {
     public Flux<ProgressCursor> migratePartition(Partition partition, String collectionName, long startingPosition) {
         return Flux.defer(() -> {
             currentPartition.set(partition);
+            var sourceDocumentPermits = sourceMemoryLimiter == null
+                ? null
+                : new SourceDocumentPermits(maxSourceDocumentSizeBytes, sourceMemoryLimiter);
             var documents = source.readDocuments(partition, startingPosition)
                 .subscribeOn(Schedulers.boundedElastic());
+            if (sourceDocumentPermits != null) {
+                documents = documents.concatMap(sourceDocumentPermits::admit, 1);
+            }
             var completedBatches = writePhases(documents)
-                .concatMap(phase -> migratePhase(phase, collectionName), 1);
+                .concatMap(phase -> migratePhase(phase, collectionName, sourceDocumentPermits), 1);
             return completedBatches
                 // Advance checkpoints in emission order; writes may complete out of order.
                 .scan(new ProgressCursor(partition, startingPosition, 0, 0, MigrationMetrics.ZERO), (previous, batch) -> {
@@ -229,21 +281,32 @@ public class DocumentMigrationPipeline {
                 })
                 .skip(1)
                 .onErrorMap(e -> !(e instanceof PipelineException),
-                    e -> new PipelineException("Failed migrating partition " + partition, e));
+                    e -> new PipelineException("Failed migrating partition " + partition, e))
+                .doFinally(signal -> {
+                    if (sourceDocumentPermits != null) {
+                        sourceDocumentPermits.releaseAll();
+                    }
+                });
         });
     }
 
-    private Flux<CompletedBatch> migratePhase(Flux<Document> documents, String collectionName) {
+    private Flux<CompletedBatch> migratePhase(
+        Flux<Document> documents,
+        String collectionName,
+        SourceDocumentPermits sourceDocumentPermits
+    ) {
         if (groupedSink == null) {
-            return migrateDocumentBatches(documents, collectionName);
+            return migrateDocumentBatches(documents, collectionName, sourceDocumentPermits);
         }
         return groupedSink.supportsPersistentPreparationLanes()
-            ? migratePersistentLaneBatches(groupedSink, documents, collectionName)
-            : migratePreparedBatches(groupedSink, documents, collectionName);
+            ? migratePersistentLaneBatches(groupedSink, documents, collectionName, sourceDocumentPermits)
+            : migratePreparedBatches(groupedSink, documents, collectionName, sourceDocumentPermits);
     }
 
     private Flux<CompletedBatch> migrateDocumentBatches(
-        Flux<Document> documents, String collectionName
+        Flux<Document> documents,
+        String collectionName,
+        SourceDocumentPermits sourceDocumentPermits
     ) {
         return documents
             .bufferUntil(new BatchSizePredicate<>(maxDocsPerBatch, maxBytesPerBatch, Document::sourceLength), true)
@@ -253,7 +316,10 @@ public class DocumentMigrationPipeline {
                 var sourceMetrics = MigrationMetrics.Operations.fromDocuments(sourceBatch);
                 return Mono.defer(() -> sink.writeBatch(collectionName, sourceBatch))
                     .map(result -> new CompletedBatch(lastPosition, sourceMetrics, result))
-                    .doFinally(s -> activeBatches.decrementAndGet());
+                    .doFinally(s -> {
+                        activeBatches.decrementAndGet();
+                        releaseSourceDocuments(sourceDocumentPermits, sourceBatch);
+                    });
             }, batchConcurrency, 1);
     }
 
@@ -264,7 +330,8 @@ public class DocumentMigrationPipeline {
     private <P> Flux<CompletedBatch> migratePreparedBatches(
         GroupedDocumentSink<P> preparedSink,
         Flux<Document> documents,
-        String collectionName
+        String collectionName,
+        SourceDocumentPermits sourceDocumentPermits
     ) {
         return prepareAndPackBatches(preparedSink, documents, collectionName)
             .buffer(sourceBatchGroupSize)
@@ -298,7 +365,10 @@ public class DocumentMigrationPipeline {
                             nanosToMillis(System.nanoTime() - startedNanos),
                             signal == reactor.core.publisher.SignalType.ON_COMPLETE
                         ));
-                }).doFinally(signal -> activeBatches.decrementAndGet());
+                }).doFinally(signal -> {
+                    activeBatches.decrementAndGet();
+                    releasePreparedSourceDocuments(sourceDocumentPermits, sourceBatches);
+                });
             }, batchGroupConcurrency, 1);
     }
 
@@ -376,7 +446,8 @@ public class DocumentMigrationPipeline {
     private <P> Flux<CompletedBatch> migratePersistentLaneBatches(
         GroupedDocumentSink<P> preparedSink,
         Flux<Document> documents,
-        String collectionName
+        String collectionName,
+        SourceDocumentPermits sourceDocumentPermits
     ) {
         return Flux.defer(() -> {
             int laneCount = preparationConcurrency;
@@ -403,7 +474,8 @@ public class DocumentMigrationPipeline {
                         lane,
                         collectionName,
                         laneSchedulers.get(lane.key()),
-                        requestGate
+                        requestGate,
+                        sourceDocumentPermits
                     ),
                     laneCount,
                     1
@@ -434,7 +506,8 @@ public class DocumentMigrationPipeline {
         Flux<LaneSourceChunk> sourceChunks,
         String collectionName,
         Scheduler laneScheduler,
-        RequestConcurrencyGate requestGate
+        RequestConcurrencyGate requestGate,
+        SourceDocumentPermits sourceDocumentPermits
     ) {
         return Flux.defer(() -> {
             var packer = new LanePreparedBatchPacker<P>(maxDocsPerBatch, maxBytesPerBatch);
@@ -452,7 +525,12 @@ public class DocumentMigrationPipeline {
                     1
                 )
                 .flatMap(
-                    permittedBatch -> writeLaneRequest(preparedSink, collectionName, permittedBatch.batch())
+                    permittedBatch -> writeLaneRequest(
+                        preparedSink,
+                        collectionName,
+                        permittedBatch.batch(),
+                        sourceDocumentPermits
+                    )
                         .doFinally(signal -> permittedBatch.permit().release()),
                     batchConcurrency,
                     1
@@ -513,7 +591,8 @@ public class DocumentMigrationPipeline {
     private <P> Mono<List<CompletedBatch>> writeLaneRequest(
         GroupedDocumentSink<P> preparedSink,
         String collectionName,
-        LanePackedBatch<P> packedBatch
+        LanePackedBatch<P> packedBatch,
+        SourceDocumentPermits sourceDocumentPermits
     ) {
         activeBatches.incrementAndGet();
         var sourceBatch = packedBatch.documents().stream()
@@ -542,7 +621,33 @@ public class DocumentMigrationPipeline {
                     nanosToMillis(System.nanoTime() - startedNanos),
                     signal == reactor.core.publisher.SignalType.ON_COMPLETE
                 ));
-        }).doFinally(signal -> activeBatches.decrementAndGet());
+        }).doFinally(signal -> {
+            activeBatches.decrementAndGet();
+            releasePreparedSourceDocuments(sourceDocumentPermits, List.of(sourceBatch));
+        });
+    }
+
+    private static void releaseSourceDocuments(
+        SourceDocumentPermits sourceDocumentPermits,
+        List<Document> documents
+    ) {
+        if (sourceDocumentPermits != null) {
+            sourceDocumentPermits.release(documents);
+        }
+    }
+
+    private static void releasePreparedSourceDocuments(
+        SourceDocumentPermits sourceDocumentPermits,
+        List<? extends List<? extends GroupedDocumentSink.PreparedDocument<?>>> batches
+    ) {
+        if (sourceDocumentPermits == null) {
+            return;
+        }
+        for (var batch : batches) {
+            sourceDocumentPermits.release(batch.stream()
+                .map(GroupedDocumentSink.PreparedDocument::document)
+                .toList());
+        }
     }
 
     private static <P> List<CompletedBatch> completeLaneDocuments(
@@ -885,6 +990,60 @@ public class DocumentMigrationPipeline {
         CompletionReorderBuffer buffer,
         List<CompletedBatch> ready
     ) {}
+
+    private static final class SourceDocumentPermits {
+        private final long maxDocumentBytes;
+        private final WeightedByteLimiter limiter;
+        private final IdentityHashMap<Document, WeightedByteLimiter.Permit> permits = new IdentityHashMap<>();
+
+        private SourceDocumentPermits(long maxDocumentBytes, WeightedByteLimiter limiter) {
+            this.maxDocumentBytes = maxDocumentBytes;
+            this.limiter = limiter;
+        }
+
+        private Mono<Document> admit(Document document) {
+            long bytes = document.sourceLength();
+            if (bytes > maxDocumentBytes) {
+                return Mono.error(new IllegalArgumentException(
+                    "Source document '" + document.id() + "' is " + bytes
+                        + " serialized bytes, over maxSourceDocumentSizeBytes " + maxDocumentBytes
+                ));
+            }
+            return limiter.acquire(bytes).map(permit -> {
+                synchronized (permits) {
+                    var previous = permits.put(document, permit);
+                    if (previous != null) {
+                        permit.release();
+                        throw new IllegalStateException(
+                            "Source emitted the same document object more than once before completion"
+                        );
+                    }
+                }
+                return document;
+            });
+        }
+
+        private void release(List<Document> documents) {
+            for (var document : documents) {
+                WeightedByteLimiter.Permit permit;
+                synchronized (permits) {
+                    permit = permits.remove(document);
+                }
+                if (permit != null) {
+                    permit.release();
+                }
+            }
+        }
+
+        private void releaseAll() {
+            List<WeightedByteLimiter.Permit> remaining;
+            synchronized (permits) {
+                remaining = List.copyOf(permits.values());
+                permits.clear();
+            }
+            remaining.forEach(WeightedByteLimiter.Permit::release);
+        }
+    }
 
     /**
      * A fixed asynchronous concurrency gate shared by every persistent lane. It queues only lane-local subscription

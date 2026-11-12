@@ -18,6 +18,7 @@ import org.opensearch.migrations.bulkload.common.SourceFormat;
 import org.opensearch.migrations.bulkload.common.bulk.BulkNdjson;
 import org.opensearch.migrations.bulkload.common.bulk.BulkOperationConverter;
 import org.opensearch.migrations.bulkload.common.bulk.BulkOperationSpec;
+import org.opensearch.migrations.bulkload.pipeline.WeightedByteLimiter;
 import org.opensearch.migrations.bulkload.pipeline.model.BatchResult;
 import org.opensearch.migrations.bulkload.pipeline.model.CollectionMetadata;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
@@ -58,6 +59,8 @@ public class OpenSearchDocumentSink implements GroupedDocumentSink<BulkNdjson.En
     private final Supplier<IRfsContexts.IRequestContext> requestContextSupplier;
     private boolean closed;
     private final CollectionRoutedTarget collectionRoutedTarget;
+    private final long maxTransformOutputBytesPerInvocation;
+    private final WeightedByteLimiter transformMemoryLimiter;
 
     public OpenSearchDocumentSink(
         OpenSearchClient client,
@@ -66,7 +69,7 @@ public class OpenSearchDocumentSink implements GroupedDocumentSink<BulkNdjson.En
         DocumentExceptionAllowlist allowlist,
         Supplier<IRfsContexts.IRequestContext> requestContextSupplier
     ) {
-        this(client, transformerSupplier, allowServerGeneratedIds, allowlist, requestContextSupplier, null);
+        this(client, transformerSupplier, allowServerGeneratedIds, allowlist, requestContextSupplier, null, 0, null);
     }
 
     /**
@@ -81,9 +84,48 @@ public class OpenSearchDocumentSink implements GroupedDocumentSink<BulkNdjson.En
         Supplier<IRfsContexts.IRequestContext> requestContextSupplier,
         CollectionRoutedTarget collectionRoutedTarget
     ) {
+        this(
+            client,
+            transformerSupplier,
+            allowServerGeneratedIds,
+            allowlist,
+            requestContextSupplier,
+            collectionRoutedTarget,
+            0,
+            null
+        );
+    }
+
+    public OpenSearchDocumentSink(
+        OpenSearchClient client,
+        Supplier<IJsonTransformer> transformerSupplier,
+        boolean allowServerGeneratedIds,
+        DocumentExceptionAllowlist allowlist,
+        Supplier<IRfsContexts.IRequestContext> requestContextSupplier,
+        CollectionRoutedTarget collectionRoutedTarget,
+        long maxTransformOutputBytesPerInvocation,
+        WeightedByteLimiter transformMemoryLimiter
+    ) {
         this.collectionRoutedTarget = collectionRoutedTarget;
         this.client = client;
         this.transformerSupplier = transformerSupplier;
+        if (maxTransformOutputBytesPerInvocation < 0) {
+            throw new IllegalArgumentException(
+                "maxTransformOutputBytesPerInvocation must be >= 0, got "
+                    + maxTransformOutputBytesPerInvocation
+            );
+        }
+        if ((maxTransformOutputBytesPerInvocation == 0) != (transformMemoryLimiter == null)) {
+            throw new IllegalArgumentException(
+                "maxTransformOutputBytesPerInvocation and transformMemoryLimiter must either both be configured "
+                    + "or both disabled"
+            );
+        }
+        if (transformerSupplier == null && transformMemoryLimiter != null) {
+            throw new IllegalArgumentException(
+                "maxTransformOutputBytesPerInvocation requires a document transformer"
+            );
+        }
         if (transformerSupplier == null) {
             this.transformationMode = TransformationMode.RAW;
         } else {
@@ -95,6 +137,8 @@ public class OpenSearchDocumentSink implements GroupedDocumentSink<BulkNdjson.En
         this.allowServerGeneratedIds = allowServerGeneratedIds;
         this.allowlist = allowlist != null ? allowlist : DocumentExceptionAllowlist.empty();
         this.requestContextSupplier = requestContextSupplier;
+        this.maxTransformOutputBytesPerInvocation = maxTransformOutputBytesPerInvocation;
+        this.transformMemoryLimiter = transformMemoryLimiter;
     }
 
     @Override
@@ -214,14 +258,24 @@ public class OpenSearchDocumentSink implements GroupedDocumentSink<BulkNdjson.En
             bulkMono = sendRaw(targetClient, collectionName, documents, requestContext,
                 useServerGeneratedIds, splitRequestConcurrency, invalidDocuments);
         } else {
-            bulkMono = Flux.fromIterable(sourceBatches)
-                .flatMapSequential(batch -> Mono.fromCallable(
-                    () -> transformBatch(targetClient, collectionName, batch, invalidDocuments, requestContext))
-                    .subscribeOn(Schedulers.parallel()), splitRequestConcurrency, 1)
-                .collectList()
-                .map(transformedBatches -> transformedBatches.stream().flatMap(List::stream).toList())
-                .flatMap(operations -> sendTransformed(targetClient, collectionName, operations,
-                    requestContext, useServerGeneratedIds, splitRequestConcurrency));
+            bulkMono = transformMemoryLimiter == null
+                ? Flux.fromIterable(sourceBatches)
+                    .flatMapSequential(batch -> Mono.fromCallable(
+                        () -> transformBatch(targetClient, collectionName, batch, invalidDocuments, requestContext))
+                        .subscribeOn(Schedulers.parallel()), splitRequestConcurrency, 1)
+                    .collectList()
+                    .map(transformedBatches -> transformedBatches.stream().flatMap(List::stream).toList())
+                    .flatMap(operations -> sendTransformed(targetClient, collectionName, operations,
+                        requestContext, useServerGeneratedIds, splitRequestConcurrency))
+                : transformAndSendWithMemoryPermits(
+                    targetClient,
+                    collectionName,
+                    sourceBatches,
+                    invalidDocuments,
+                    requestContext,
+                    useServerGeneratedIds,
+                    splitRequestConcurrency
+                );
         }
 
         return bulkMono.map(response -> new BatchResult(docsInBatch, bytesInBatch, response.target,
@@ -274,6 +328,63 @@ public class OpenSearchDocumentSink implements GroupedDocumentSink<BulkNdjson.En
                 allowlist,
                 splitRequestConcurrency
             );
+    }
+
+    private Mono<OpenSearchClient.BulkResponse> transformAndSendWithMemoryPermits(
+        OpenSearchClient targetClient,
+        String collectionName,
+        List<List<PreparedDocument<BulkNdjson.EncodedOperation>>> sourceBatches,
+        AtomicLong invalidDocuments,
+        IRfsContexts.IRequestContext requestContext,
+        boolean useServerGeneratedIds,
+        int splitRequestConcurrency
+    ) {
+        return Flux.fromIterable(sourceBatches)
+            .flatMapSequential(batch -> transformMemoryLimiter.acquire(maxTransformOutputBytesPerInvocation)
+                .flatMap(permit -> {
+                    return Mono.fromCallable(() -> {
+                        var transformed = transformBatch(
+                            targetClient, collectionName, batch, invalidDocuments, requestContext);
+                        var prepared = new ArrayList<OpenSearchClient.PreparedTransformedDocument>(transformed.size());
+                        long encodedBytes = 0;
+                        for (var operation : transformed) {
+                            var item = targetClient.prepareTransformedDocument(
+                                collectionName, operation, requestContext, useServerGeneratedIds);
+                            if (item == null) {
+                                invalidDocuments.incrementAndGet();
+                                continue;
+                            }
+                            prepared.add(item);
+                            encodedBytes = Math.addExact(encodedBytes, item.prepared().size());
+                        }
+                        if (encodedBytes > maxTransformOutputBytesPerInvocation) {
+                            throw new IllegalArgumentException(
+                                "Transformer output for one source batch is " + encodedBytes
+                                    + " serialized bytes, over maxTransformOutputBytesPerInvocation "
+                                    + maxTransformOutputBytesPerInvocation
+                            );
+                        }
+                        permit.shrinkTo(encodedBytes);
+                        return prepared;
+                    })
+                        .subscribeOn(Schedulers.parallel())
+                        // Keep each transform invocation and all fragments derived from it in lock-step.
+                        .flatMap(prepared -> targetClient.sendBulkRequestPreparedTransformed(
+                            collectionName,
+                            prepared,
+                            requestContext,
+                            allowlist,
+                            1
+                        ))
+                        .doFinally(signal -> permit.release());
+                }),
+                splitRequestConcurrency,
+                1
+            )
+            .reduce(OpenSearchClient::combineBulkResponses)
+            .defaultIfEmpty(new OpenSearchClient.BulkResponse(
+                200, "OK", Map.of(), "{\"errors\":false,\"items\":[]}"
+            ));
     }
 
     private boolean usesRawFastPath() {
@@ -453,4 +564,5 @@ public class OpenSearchDocumentSink implements GroupedDocumentSink<BulkNdjson.En
         List<BulkOperationTransformer> nativeTransformers,
         TransformationMode mode
     ) {}
+
 }

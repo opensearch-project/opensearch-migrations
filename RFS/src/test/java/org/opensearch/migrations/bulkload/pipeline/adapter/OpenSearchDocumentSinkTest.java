@@ -9,8 +9,11 @@ import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
 import org.opensearch.migrations.bulkload.common.LuceneDocumentChange;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.common.ServerlessCollectionRouting;
+import org.opensearch.migrations.bulkload.common.bulk.BulkNdjson;
 import org.opensearch.migrations.bulkload.common.bulk.BulkOperationSpec;
 import org.opensearch.migrations.bulkload.common.bulk.IndexOp;
+import org.opensearch.migrations.bulkload.common.bulk.operations.IndexOperationMeta;
+import org.opensearch.migrations.bulkload.pipeline.WeightedByteLimiter;
 import org.opensearch.migrations.bulkload.pipeline.model.CollectionMetadata;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
 import org.opensearch.migrations.bulkload.transformers.BulkOperationTransformer;
@@ -30,6 +33,7 @@ import reactor.core.publisher.Mono;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
@@ -40,6 +44,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -176,6 +181,90 @@ class OpenSearchDocumentSinkTest {
 
         verify(client).sendBulkRequest(eq("idx"), anyList(), isNull(), eq(false), any());
         verify(client, never()).sendBulkRequestRaw(anyString(), anyList(), any(), anyBoolean(), any());
+    }
+
+    @Test
+    void writeBatch_withMemoryLimiterPreparesOnceAndUsesExactEncodedSize() {
+        when(client.prepareTransformedDocument(anyString(), any(), any(), anyBoolean()))
+            .thenReturn(new OpenSearchClient.PreparedTransformedDocument(
+                transformedOperation(),
+                new BulkNdjson.EncodedOperation(new byte[4], new byte[5], true)
+            ));
+        when(client.sendBulkRequestPreparedTransformed(anyString(), anyList(), any(), any(), eq(1)))
+            .thenReturn(OK);
+        IJsonTransformer identity = input -> input;
+        var sink = new OpenSearchDocumentSink(
+            client,
+            () -> identity,
+            false,
+            DocumentExceptionAllowlist.empty(),
+            null,
+            null,
+            16,
+            new WeightedByteLimiter(16)
+        );
+
+        sink.writeBatch("idx", List.of(doc("d1", "{\"a\":1}"))).block();
+
+        verify(client).sendBulkRequestPreparedTransformed(eq("idx"), anyList(), isNull(), any(), eq(1));
+        verify(client, never()).sendBulkRequest(anyString(), anyList(), any(), anyBoolean(), any());
+    }
+
+    @Test
+    void writeBatch_rejectsTransformOutputAboveItsDeclaration() {
+        when(client.prepareTransformedDocument(anyString(), any(), any(), anyBoolean()))
+            .thenReturn(new OpenSearchClient.PreparedTransformedDocument(
+                transformedOperation(),
+                new BulkNdjson.EncodedOperation(new byte[8], new byte[8], true)
+            ));
+        IJsonTransformer identity = input -> input;
+        var sink = new OpenSearchDocumentSink(
+            client,
+            () -> identity,
+            false,
+            DocumentExceptionAllowlist.empty(),
+            null,
+            null,
+            16,
+            new WeightedByteLimiter(16)
+        );
+
+        var error = assertThrows(RuntimeException.class,
+            () -> sink.writeBatch("idx", List.of(doc("d1", "{\"a\":1}"))).block());
+
+        assertTrue(rootMessage(error).contains("over maxTransformOutputBytesPerInvocation"));
+        verify(client, never()).sendBulkRequestPreparedTransformed(anyString(), anyList(), any(), any(), anyInt());
+    }
+
+    @Test
+    void writeBatchGroup_releasesTransformPermitAfterEachSourceBatch() {
+        when(client.prepareTransformedDocument(anyString(), any(), any(), anyBoolean()))
+            .thenReturn(new OpenSearchClient.PreparedTransformedDocument(
+                transformedOperation(),
+                new BulkNdjson.EncodedOperation(new byte[4], new byte[5], true)
+            ));
+        when(client.sendBulkRequestPreparedTransformed(anyString(), anyList(), any(), any(), eq(1)))
+            .thenReturn(OK);
+        IJsonTransformer identity = input -> input;
+        var sink = new OpenSearchDocumentSink(
+            client,
+            () -> identity,
+            false,
+            DocumentExceptionAllowlist.empty(),
+            null,
+            null,
+            16,
+            new WeightedByteLimiter(16)
+        );
+
+        sink.writeBatchGroup(
+            "idx",
+            List.of(List.of(doc("d1", "{\"a\":1}")), List.of(doc("d2", "{\"b\":2}"))),
+            2
+        ).block(java.time.Duration.ofSeconds(2));
+
+        verify(client, times(2))
+            .sendBulkRequestPreparedTransformed(eq("idx"), anyList(), isNull(), any(), eq(1));
     }
 
     @Test
@@ -331,6 +420,21 @@ class OpenSearchDocumentSinkTest {
         var collectionClient = mock(OpenSearchClient.class);
         when(client.forCollection(collection)).thenReturn(collectionClient);
         return collectionClient;
+    }
+
+    private static String rootMessage(Throwable throwable) {
+        var current = throwable;
+        while (current.getCause() != null) {
+            current = current.getCause();
+        }
+        return String.valueOf(current.getMessage());
+    }
+
+    private static BulkOperationSpec transformedOperation() {
+        return IndexOp.builder()
+            .operation(IndexOperationMeta.builder().index("idx").id("d1").build())
+            .document(Map.of("a", 1))
+            .build();
     }
 
     private static final byte[] UNCONVERTIBLE = {0x01, 0x02, 0x03, (byte) 0xFF};

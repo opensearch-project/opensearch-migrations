@@ -13,6 +13,7 @@ import java.util.stream.IntStream;
 
 import org.opensearch.migrations.bulkload.common.DocumentChangeType;
 import org.opensearch.migrations.bulkload.common.LuceneDocumentChange;
+import org.opensearch.migrations.bulkload.common.RfsMemorySizing;
 import org.opensearch.migrations.bulkload.common.SnapshotDocumentCounts;
 import org.opensearch.migrations.bulkload.common.SourceFormat;
 
@@ -28,11 +29,11 @@ public class LuceneReader {
 
     /** Dedicated scheduler for Lucene I/O — more threads than boundedElastic on small pods. */
     private static final Scheduler LUCENE_IO_SCHEDULER = Schedulers.newBoundedElastic(
-        100, Integer.MAX_VALUE, "lucene-io", 60, true
+        RfsMemorySizing.SOURCE_READ_PARALLELISM, Integer.MAX_VALUE, "lucene-io", 60, true
     );
 
     /** Per-segment read concurrency for the bounded-elastic flatMap. */
-    private static final int SEGMENT_READ_CONCURRENCY = 100;
+    private static final int SEGMENT_READ_CONCURRENCY = RfsMemorySizing.SOURCE_READ_PARALLELISM;
 
     private LuceneReader() {}
 

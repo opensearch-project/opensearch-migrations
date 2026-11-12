@@ -144,6 +144,8 @@ migration workflow; "On a running migration" is how a change is treated there
 | `--documents-size-per-bulk-request` | `documentsSizePerBulkRequest` | 10 MiB | Largest bulk body, in bytes of NDJSON before compression | Safe |
 | `--documents-per-bulk-request` | `documentsPerBulkRequest` | no limit | Most documents in one bulk request | Safe |
 | `--max-document-size-bytes` | `maxDocumentSizeBytes` | 0 (no limit) | Document bodies bigger than this after transformation (or without a transform) are recorded in the failed document stream and not sent; action metadata and NDJSON separators are excluded | Impossible (changes which documents migrate) |
+| `--max-source-document-size-bytes` | `maxSourceDocumentSizeBytes` | 0 (disabled) | Declares the largest serialized source body; enables a byte-weighted permit pool held from source admission through target completion | Gated |
+| `--max-transform-output-bytes-per-invocation` | `maxTransformOutputBytesPerInvocation` | 0 (disabled) | Declares the largest total serialized output of one batch-level transform invocation; RFS reserves it before transformation and holds the exact encoded size through that invocation's target completion | Gated |
 | `--bulk-response-timeout` | `bulkResponseTimeout` | `PT310S` | How long one attempt waits for its response | Safe |
 | `--initial-lease-duration`, `--max-lease-duration` | `initialLeaseDuration`, `maxLeaseDuration` | `PT10M`, `P1D` | How long a worker owns a work item before it checkpoints and hands it off | Safe |
 | `--disable-compression` | | false | Whether bulk bodies are gzipped (when the target supports it) | |

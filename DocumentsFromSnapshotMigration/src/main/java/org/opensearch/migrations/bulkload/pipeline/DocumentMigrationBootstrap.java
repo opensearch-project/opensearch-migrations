@@ -16,6 +16,7 @@ import org.opensearch.migrations.bulkload.common.CollectionRoutedTarget;
 import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.common.RfsException;
+import org.opensearch.migrations.bulkload.common.RfsMemorySizing;
 import org.opensearch.migrations.bulkload.pipeline.adapter.OpenSearchDocumentSink;
 import org.opensearch.migrations.bulkload.pipeline.model.MigrationMetrics;
 import org.opensearch.migrations.bulkload.pipeline.source.DocumentSource;
@@ -47,6 +48,10 @@ public class DocumentMigrationBootstrap {
     private final int maxDocsPerBatch;
     private final long maxBytesPerBatch;
     private final int batchConcurrency;
+    @Builder.Default
+    private final long maxSourceDocumentSizeBytes = 0;
+    @Builder.Default
+    private final long maxTransformOutputBytesPerInvocation = 0;
 
     @Builder.Default
     private final Supplier<IJsonTransformer> transformerSupplier = null;
@@ -88,14 +93,37 @@ public class DocumentMigrationBootstrap {
         }
         var source = documentSource;
         var contextRef = new AtomicReference<IDocumentMigrationContexts.IDocumentReindexContext>();
+        int processors = Runtime.getRuntime().availableProcessors();
+        var transformMemoryLimiter = maxTransformOutputBytesPerInvocation == 0
+            ? null
+            : new WeightedByteLimiter(RfsMemorySizing.transformPermitBytes(
+                maxTransformOutputBytesPerInvocation,
+                batchConcurrency,
+                processors
+            ));
         var sink = new OpenSearchDocumentSink(
             targetClient, transformerSupplier, allowServerGeneratedIds, allowlist,
             () -> {
                 var ctx = contextRef.get();
                 return ctx != null ? ctx.createBulkRequest() : null;
             },
-            collectionRoutedTarget
+            collectionRoutedTarget,
+            maxTransformOutputBytesPerInvocation,
+            transformMemoryLimiter
         );
+        if (maxSourceDocumentSizeBytes > 0 || transformMemoryLimiter != null) {
+            log.atInfo()
+                .setMessage("RFS serialized-byte memory limits: maxSourceDocumentBytes={}, sourcePermitBytes={}, "
+                    + "maxTransformOutputBytesPerInvocation={}, transformParallelism={}, transformPermitBytes={}")
+                .addArgument(maxSourceDocumentSizeBytes)
+                .addArgument(maxSourceDocumentSizeBytes == 0
+                    ? 0
+                    : RfsMemorySizing.sourcePermitBytes(maxSourceDocumentSizeBytes))
+                .addArgument(maxTransformOutputBytesPerInvocation)
+                .addArgument(RfsMemorySizing.transformParallelism(batchConcurrency, processors))
+                .addArgument(transformMemoryLimiter == null ? 0 : transformMemoryLimiter.capacity())
+                .log();
+        }
         try {
             var pipelineConfig = new PipelineConfig(source, sink, maxDocsPerBatch, maxBytesPerBatch, batchConcurrency);
             Supplier<IDocumentMigrationContexts.IDocumentReindexContext> wrappedContextSupplier = () -> {
@@ -168,10 +196,14 @@ public class DocumentMigrationBootstrap {
         long startingOffset = wi.getStartingDocId() != null && wi.getStartingDocId() >= 0
             ? wi.getStartingDocId() : 0;
 
+        var sourceMemoryLimiter = maxSourceDocumentSizeBytes == 0
+            ? null
+            : new WeightedByteLimiter(RfsMemorySizing.sourcePermitBytes(maxSourceDocumentSizeBytes));
         var pipeline = new DocumentMigrationPipeline(
             pipelineConfig.source(), pipelineConfig.sink(),
             pipelineConfig.maxDocsPerBatch(), pipelineConfig.maxBytesPerBatch(),
-            1, pipelineConfig.batchConcurrency(), context.getPipelineMetrics()
+            1, pipelineConfig.batchConcurrency(), context.getPipelineMetrics(),
+            maxSourceDocumentSizeBytes, sourceMemoryLimiter
         );
         var progressMonitor = new PipelineProgressMonitor(pipeline);
         progressMonitor.start();

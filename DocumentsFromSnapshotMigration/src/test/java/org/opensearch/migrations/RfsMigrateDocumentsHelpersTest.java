@@ -366,6 +366,31 @@ class RfsMigrateDocumentsHelpersTest {
     }
 
     @Test
+    void documentMemoryLimitsAreReadFromInlineJson() {
+        var args = new RfsMigrateDocuments.Args();
+        JsonCommandLineParser.newBuilder().addObject(args).build()
+            .parse(new String[]{"---INLINE-JSON", """
+                {
+                  "maxSourceDocumentSizeBytes": 1234,
+                  "maxTransformOutputBytesPerInvocation": 5678
+                }
+                """});
+
+        assertThat(args.maxSourceDocumentSizeBytes, equalTo(1234L));
+        assertThat(args.maxTransformOutputBytesPerInvocation, equalTo(5678L));
+    }
+
+    @Test
+    void validateArgsRequiresSourceLimitForTransformOutputLimit() {
+        var args = validEsArgs();
+        args.maxTransformOutputBytesPerInvocation = 100;
+
+        var thrown = assertThrows(ParameterException.class, () -> RfsMigrateDocuments.validateArgs(args));
+
+        assertThat(thrown.getMessage(), org.hamcrest.Matchers.containsString("--max-source-document-size-bytes"));
+    }
+
+    @Test
     void validateArgs_requiresAFailedDocumentStreamOrAnExplicitOptOut() {
         var args = validEsArgs();
         args.failedDocumentStreamArgs.disableFailedDocumentStream = false;

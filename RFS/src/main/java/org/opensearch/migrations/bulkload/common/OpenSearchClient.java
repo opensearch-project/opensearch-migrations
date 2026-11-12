@@ -749,6 +749,62 @@ public abstract class OpenSearchClient {
         }, TRANSFORMED_PATH, context, allowlist, splitRequestConcurrency);
     }
 
+    /** A transformed operation encoded once while its exact output-memory permit is being sized. */
+    public record PreparedTransformedDocument(BulkOperationSpec operation, BulkNdjson.EncodedOperation prepared) {
+        public PreparedTransformedDocument {
+            Objects.requireNonNull(operation);
+            Objects.requireNonNull(prepared);
+        }
+    }
+
+    /**
+     * Encode one transformed operation for exact output sizing and later sending.
+     *
+     * @return the prepared operation, or null when this document has an invalid source
+     */
+    public PreparedTransformedDocument prepareTransformedDocument(
+        String indexName,
+        BulkOperationSpec operation,
+        IRfsContexts.IRequestContext context,
+        boolean allowServerGeneratedIds
+    ) {
+        try {
+            var encoded = BulkNdjson.encode(
+                allowServerGeneratedIds ? stripDocumentId(operation) : operation,
+                OBJECT_MAPPER
+            );
+            return new PreparedTransformedDocument(operation, encoded);
+        } catch (InvalidDocumentSourceException e) {
+            reportInvalidDocumentSource(
+                indexName,
+                operation.getOperation().getId(),
+                operation.getRawDocument(),
+                e,
+                context
+            );
+            return null;
+        }
+    }
+
+    /** Send transformed operations retained from exact output-memory sizing. */
+    public Mono<BulkResponse> sendBulkRequestPreparedTransformed(
+        String indexName,
+        List<PreparedTransformedDocument> docs,
+        IRfsContexts.IRequestContext context,
+        DocumentExceptionAllowlist allowlist,
+        int splitRequestConcurrency
+    ) {
+        return sendBulkRequests(
+            indexName,
+            docs,
+            prepared -> new PreparedOperation(prepared::operation, prepared.prepared()),
+            TRANSFORMED_PATH,
+            context,
+            allowlist,
+            splitRequestConcurrency
+        );
+    }
+
     /** Send raw source bytes without a byte[]→Map→byte[] round-trip. */
     public Mono<BulkResponse> sendBulkRequestRaw(String indexName, List<Document> docs,
                                                   IRfsContexts.IRequestContext context,
@@ -914,7 +970,7 @@ public abstract class OpenSearchClient {
                     splitRequestConcurrency,
                     1
                 )
-                .reduce(OpenSearchClient::combine)
+                .reduce(OpenSearchClient::combineBulkResponses)
                 .defaultIfEmpty(new BulkResponse(200, "OK", Map.of(), "{\"errors\":false,\"items\":[]}"))
                 .map(response -> response.plusFailures(failuresOf(
                     FailureClass.NON_RETRYABLE, tooLarge[0] + invalidSources[0])));
@@ -1524,13 +1580,14 @@ public abstract class OpenSearchClient {
             Duration.ofNanos(totals.durationNanos).toMillis());
         return Flux.fromIterable(halves)
             .concatMap(half -> executeBulkWithRetry(indexName, half, context, allowlist), 1)
-            .reduce(OpenSearchClient::combine)
+            .reduce(OpenSearchClient::combineBulkResponses)
             .map(combined -> new BulkResponse(combined.statusCode, combined.statusText, combined.headers,
                 combined.body, combined.target, beforeSplit.plus(combined.requests),
                 totals.failures.plus(combined.failures)));
     }
 
-    private static BulkResponse combine(BulkResponse previous, BulkResponse next) {
+    /** Combine the metrics from bulk responses while retaining the final response's HTTP details. */
+    public static BulkResponse combineBulkResponses(BulkResponse previous, BulkResponse next) {
         return new BulkResponse(next.statusCode, next.statusText, next.headers, next.body,
             previous.target.plus(next.target), previous.requests.plus(next.requests),
             previous.failures.plus(next.failures));
