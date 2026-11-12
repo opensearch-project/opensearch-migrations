@@ -3,6 +3,10 @@ function main(context) {
   const sampleModulo = Number.isFinite(configuredModulo) && configuredModulo > 0
     ? configuredModulo
     : 1;
+  const configuredRemainder = Number(context.get("sampleRemainder"));
+  const sampleRemainder = Number.isFinite(configuredRemainder)
+    ? ((Math.floor(configuredRemainder) % sampleModulo) + sampleModulo) % sampleModulo
+    : 0;
   const selectedIdValues = context.get("selectedIds");
   const selectedIds = new Set(
     selectedIdValues == null ? [] : Array.from(selectedIdValues, value => String(value))
@@ -92,7 +96,7 @@ function main(context) {
       const alreadyExpanded = existingPayload != null
         && Number(existingPayload.target_bytes) > 0;
       const selectedById = targetBytes > 0 && (
-        selectedIds.size > 0 ? selectedIds.has(id) : idHash % sampleModulo === 0
+        selectedIds.size > 0 ? selectedIds.has(id) : idHash % sampleModulo === sampleRemainder
       );
       const selected = selectedById && expandedDocuments < maxExpandedPerInvocation;
       if (!alreadyExpanded) {

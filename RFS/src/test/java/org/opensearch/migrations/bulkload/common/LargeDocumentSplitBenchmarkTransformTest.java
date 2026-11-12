@@ -76,6 +76,38 @@ class LargeDocumentSplitBenchmarkTransformTest {
     }
 
     @Test
+    void sampleRemainderSelectsDisjointCohorts() throws Exception {
+        var selectedIdsByRemainder = new ArrayList<List<String>>();
+        for (int remainder = 0; remainder < 2; remainder++) {
+            var operations = IntStream.range(0, 32)
+                .mapToObj(i -> BulkOperationConverter.fromRawDocument(
+                    new Document("document-" + i, SOURCE, Document.Operation.UPSERT, Map.of(), Map.of()),
+                    "products"
+                ))
+                .toList();
+            try (var transformer = transformer(Map.of(
+                "sampleModulo", 2,
+                "sampleRemainder", remainder,
+                "targetBytes", 64 * 1024
+            ))) {
+                @SuppressWarnings("unchecked")
+                var transformed = (List<Map<String, Object>>) transformer.transformJson(
+                    operations.stream().map(op -> op.toTransformerMap(MAPPER)).toList());
+                var selectedIds = transformed.stream()
+                    .map(operation -> MAPPER.convertValue(operation, IndexOp.class))
+                    .filter(operation -> MAPPER.valueToTree(operation.getDocument())
+                        .path("benchmark_payload").path("target_bytes").asInt() > 0)
+                    .map(operation -> operation.getOperation().getId())
+                    .toList();
+                selectedIdsByRemainder.add(selectedIds);
+            }
+        }
+
+        assertEquals(32, selectedIdsByRemainder.get(0).size() + selectedIdsByRemainder.get(1).size());
+        assertTrue(selectedIdsByRemainder.get(0).stream().noneMatch(selectedIdsByRemainder.get(1)::contains));
+    }
+
+    @Test
     void exactIdSelectionBuildsTenConsecutivePayloadsAndNoOthers() throws Exception {
         var selectedIds = IntStream.range(0, 10)
             .mapToObj(i -> "document-" + String.format("%03d", i))
@@ -172,6 +204,7 @@ class LargeDocumentSplitBenchmarkTransformTest {
         }
         var bindings = new LinkedHashMap<String, Object>();
         bindings.put("sampleModulo", 2);
+        bindings.put("sampleRemainder", 0);
         bindings.put("targetBytes", 2 * 1024 * 1024);
         bindings.put("valueBytes", 1024);
         bindings.put("containerCount", 16);
