@@ -88,7 +88,7 @@ jobs:
       # Set up Kind cluster for workflow integration tests (only for console_link project)
       - name: Set up Kind cluster
         if: matrix.py-project == 'migrationConsole/lib/console_link'
-        uses: helm/kind-action@1544676c07bb3570fcb70166beaa07c4528fd4aa # v1.15.1
+        uses: helm/kind-action@ea822c7bf1874f08e5a491df991c228edffc3376 # v1.15.2
         with:
           cluster_name: console-link-test
 
@@ -185,7 +185,7 @@ jobs:
           df -h
       - name: Restore or initialize Gradle test Docker cache
         id: docker-cache
-        uses: AndreKurait/docker-cache@7a3887908bdb97935395833df69b060cfcca0f7f # 0.7.0
+        uses: AndreKurait/docker-cache@e1eb0120c0c16b3f1c6ff1c0ef4ebc9f67f8dc6a # 0.7.1
         with:
           key: gradle-test-docker-${{ runner.os }}-${{ matrix.name }}-${{ hashFiles(matrix.image_list) }}
       - name: Pull images for Gradle tests
@@ -214,12 +214,12 @@ jobs:
           sudo docker system prune -af
           df -h
       - name: Restore Gradle test infrastructure Docker cache
-        uses: AndreKurait/docker-cache@7a3887908bdb97935395833df69b060cfcca0f7f # 0.7.0
+        uses: AndreKurait/docker-cache@e1eb0120c0c16b3f1c6ff1c0ef4ebc9f67f8dc6a # 0.7.1
         with:
           key: gradle-test-docker-${{ runner.os }}-infrastructure-${{ hashFiles('.github/gradle-test-images/infrastructure.txt') }}
           read-only: true
       - name: Restore Gradle test search Docker cache
-        uses: AndreKurait/docker-cache@7a3887908bdb97935395833df69b060cfcca0f7f # 0.7.0
+        uses: AndreKurait/docker-cache@e1eb0120c0c16b3f1c6ff1c0ef4ebc9f67f8dc6a # 0.7.1
         with:
           key: gradle-test-docker-${{ runner.os }}-search-${{ hashFiles('.github/gradle-test-images/search.txt') }}
           read-only: true
@@ -324,7 +324,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Set up kind cluster
-        uses: helm/kind-action@1544676c07bb3570fcb70166beaa07c4528fd4aa # v1.15.1
+        uses: helm/kind-action@ea822c7bf1874f08e5a491df991c228edffc3376 # v1.15.2
         with:
           version: v0.31.0
           cluster_name: mountable-transforms
@@ -404,11 +404,11 @@ jobs:
         - language: python
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-    - uses: github/codeql-action/init@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4
+    - uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4
       with:
         languages: ${{ matrix.language }}
         build-mode: none
-    - uses: github/codeql-action/analyze@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4
+    - uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4
       with:
         category: "/language:${{matrix.language}}"
 
