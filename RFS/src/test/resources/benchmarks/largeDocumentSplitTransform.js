@@ -1,5 +1,12 @@
 function main(context) {
-  const sampleModulo = Number(context.get("sampleModulo"));
+  const configuredModulo = Number(context.get("sampleModulo"));
+  const sampleModulo = Number.isFinite(configuredModulo) && configuredModulo > 0
+    ? configuredModulo
+    : 1;
+  const selectedIdValues = context.get("selectedIds");
+  const selectedIds = new Set(
+    selectedIdValues == null ? [] : Array.from(selectedIdValues, value => String(value))
+  );
   const targetBytes = Number(context.get("targetBytes"));
   const valueBytes = Number(context.get("valueBytes"));
   const containerCount = Number(context.get("containerCount"));
@@ -70,11 +77,18 @@ function main(context) {
     delete document.operation.if_seq_no;
     delete document.operation.if_primary_term;
 
-    const selected = targetBytes > 0 && idHash % sampleModulo === 0;
-    document.document.benchmark_payload = makePayload(
-      selected ? idHash : -1,
-      selected ? targetBytes : 0
+    const existingPayload = document.document.benchmark_payload;
+    const alreadyExpanded = existingPayload != null
+      && Number(existingPayload.target_bytes) > 0;
+    const selected = targetBytes > 0 && (
+      selectedIds.size > 0 ? selectedIds.has(id) : idHash % sampleModulo === 0
     );
+    if (!alreadyExpanded) {
+      document.document.benchmark_payload = makePayload(
+        selected ? idHash : -1,
+        selected ? targetBytes : 0
+      );
+    }
     return document;
   });
 }

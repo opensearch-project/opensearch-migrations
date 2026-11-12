@@ -21,6 +21,30 @@ pool, and target shape as the earlier quick benchmarks. Each run used 24 RFS wor
 3.3 vCPU, 7,000 MiB memory, 100 GiB ephemeral storage, 60 configured target connections,
 20,000 documents per bulk request, and a 100 MiB request-size limit.
 
+## Snapshot reconstitution correctness matrix
+
+Keep the storage-heavy snapshot tests small and separate from the no-storage throughput
+run. Both correctness cases use exactly ten approximately 390 MiB documents and verify the
+fully reconstituted JSON after the first migration, snapshot that target, then migrate the
+new snapshot with the same transform. The transform preserves any existing expanded
+payload rather than expanding it again.
+
+1. **Consecutive, serial:** insert the ten selected IDs first and follow them with ordinary
+   documents. Use one shard, one RFS worker, one admitted source read, one transform
+   invocation, and one target connection. This is the deterministic worst case for permit
+   release, fragment sequencing, and checkpoint progress across back-to-back large
+   documents.
+2. **Interspersed, concurrent:** place the same number of selected IDs at fixed intervals
+   among ordinary documents and use the representative worker and connection settings.
+   This checks that ordinary batches continue to fill while large documents compete for
+   source, transform, and target-request capacity.
+
+Use an explicit selected-ID list for the consecutive case so the run contains exactly ten
+large documents. The interspersed case may use either fixed IDs or the deterministic ID
+hash/modulo selector, but the fixture must assert that exactly ten documents were selected.
+On the second migration, assert that all ten documents arrived from the snapshot already
+expanded and were passed through rather than rebuilt.
+
 ## Splitter microbenchmark
 
 Run the opt-in JUnit matrix:
