@@ -2456,6 +2456,20 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       ],
                       "changeRestriction": "impossible"
                     },
+                    "maxSourceDocumentSizeBytes": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 9007199254740991,
+                      "description": "Largest serialized source document body RFS may read. Enables byte-weighted source admission and automatic JVM/container memory sizing. A source document above the declaration fails its shard. Unset leaves source memory admission and automatic heap sizing disabled.",
+                      "changeRestriction": "gated"
+                    },
+                    "maxTransformOutputBytesPerInvocation": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 9007199254740991,
+                      "description": "Largest total serialized bulk output returned by one batch-level document-transform invocation. RFS reserves this many bytes before running the transform, then holds the exact encoded output through that invocation's target completion. Required with maxSourceDocumentSizeBytes when a transformer is configured.",
+                      "changeRestriction": "gated"
+                    },
                     "initialLeaseDuration": {
                       "type": "string",
                       "pattern": "^[-+]?P(?:(\\\\d+)D)?(?:T(?:(\\\\d+)H)?(?:(\\\\d+)M)?(?:(\\\\d+(?:\\\\.\\\\d+)?)S)?)?$",
@@ -5059,7 +5073,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "jvmArgs": {
                         "type": "string",
                         "default": "",
-                        "description": "Additional JVM arguments passed via JDK_JAVA_OPTIONS (e.g. '-Xmx4g -XX:+UseG1GC'). If setting -Xmx, ensure the heap size is smaller than the container's memory limit in resources to account for off-heap memory usage."
+                        "description": "Additional JVM arguments passed via JDK_JAVA_OPTIONS (e.g. '-Xmx4g -XX:+UseG1GC'). If setting -Xmx, ensure the heap size is smaller than the container's memory limit in resources to account for off-heap memory usage. When maxSourceDocumentSizeBytes is set, the workflow replaces any -Xmx value with the calculated RFS heap ceiling."
                       },
                       "loggingConfigurationOverrideConfigMap": {
                         "type": "string",
@@ -5593,6 +5607,20 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "replayer"
                         ],
                         "changeRestriction": "impossible"
+                      },
+                      "maxSourceDocumentSizeBytes": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 9007199254740991,
+                        "description": "Largest serialized source document body RFS may read. Enables byte-weighted source admission and automatic JVM/container memory sizing. A source document above the declaration fails its shard. Unset leaves source memory admission and automatic heap sizing disabled.",
+                        "changeRestriction": "gated"
+                      },
+                      "maxTransformOutputBytesPerInvocation": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 9007199254740991,
+                        "description": "Largest total serialized bulk output returned by one batch-level document-transform invocation. RFS reserves this many bytes before running the transform, then holds the exact encoded output through that invocation's target completion. Required with maxSourceDocumentSizeBytes when a transformer is configured.",
+                        "changeRestriction": "gated"
                       },
                       "initialLeaseDuration": {
                         "type": "string",

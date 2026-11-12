@@ -72,6 +72,56 @@ function validateMinPodReplicas(
     }
 }
 
+function hasDocumentTransformer(data: {
+    documentTransforms?: unknown,
+    docTransformerConfig?: string,
+    docTransformerConfigBase64?: string,
+    docTransformerConfigFile?: string,
+}) {
+    return data.documentTransforms !== undefined
+        || [data.docTransformerConfig, data.docTransformerConfigBase64, data.docTransformerConfigFile]
+            .some(value => value !== undefined && value.trim().length > 0);
+}
+
+function validateRfsMemoryDeclarations(
+    ctx: z.RefinementCtx,
+    data: {
+        documentTransforms?: unknown,
+        docTransformerConfig?: string,
+        docTransformerConfigBase64?: string,
+        docTransformerConfigFile?: string,
+        maxSourceDocumentSizeBytes?: number,
+        maxTransformOutputBytesPerInvocation?: number,
+    }
+) {
+    const transformerConfigured = hasDocumentTransformer(data);
+    if (data.maxTransformOutputBytesPerInvocation !== undefined
+        && data.maxSourceDocumentSizeBytes === undefined) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "maxTransformOutputBytesPerInvocation requires maxSourceDocumentSizeBytes.",
+            path: ["maxTransformOutputBytesPerInvocation"],
+        });
+    }
+    if (data.maxTransformOutputBytesPerInvocation !== undefined && !transformerConfigured) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "maxTransformOutputBytesPerInvocation requires a document transformer.",
+            path: ["maxTransformOutputBytesPerInvocation"],
+        });
+    }
+    if (data.maxSourceDocumentSizeBytes !== undefined
+        && transformerConfigured
+        && data.maxTransformOutputBytesPerInvocation === undefined) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "A document transformer requires maxTransformOutputBytesPerInvocation when "
+                + "maxSourceDocumentSizeBytes enables automatic RFS memory sizing.",
+            path: ["maxTransformOutputBytesPerInvocation"],
+        });
+    }
+}
+
 export const LOG_LEVEL = z.enum(["off", "fatal", "error", "warn", "info", "debug", "trace", "all"]);
 
 const ROOT_LOG_LEVEL_DESC = "Level for the root logger (MIGRATIONS_ROOT_LOG_LEVEL), which covers everything without " +
@@ -1140,7 +1190,8 @@ export const USER_RFS_WORKFLOW_OPTIONS = withScalableServiceValidation(z.object(
             " throughput scales linearly up to the total number of source shards."
     ).shape,
     jvmArgs: z.string().default("").optional()
-        .describe(JVM_ARGS_DESC),
+        .describe(JVM_ARGS_DESC + " When maxSourceDocumentSizeBytes is set, the workflow replaces any -Xmx value "
+            + "with the calculated RFS heap ceiling."),
     loggingConfigurationOverrideConfigMap: z.string().default("").optional()
         .describe(LOGGING_CONFIG_OVERRIDE_DESC),
     logLevels: z.object({
@@ -1222,6 +1273,17 @@ export const USER_RFS_PROCESS_OPTIONS = withOtelExportOptions(z.object({
             "under the target's request limit. Unset means no limit.")
         .checksumFor('replayer')
         .changeRestriction('impossible'),
+    maxSourceDocumentSizeBytes: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER).optional()
+        .describe("Largest serialized source document body RFS may read. Enables byte-weighted source admission and "
+            + "automatic JVM/container memory sizing. A source document above the declaration fails its shard. "
+            + "Unset leaves source memory admission and automatic heap sizing disabled.")
+        .changeRestriction('gated'),
+    maxTransformOutputBytesPerInvocation: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER).optional()
+        .describe("Largest total serialized bulk output returned by one batch-level document-transform invocation. "
+            + "RFS reserves this many bytes before running the transform, then holds the exact encoded output through "
+            + "that invocation's target completion. Required with maxSourceDocumentSizeBytes when a transformer is "
+            + "configured.")
+        .changeRestriction('gated'),
     initialLeaseDuration: z.string()
         .regex(ISO_DURATION_PATTERN)
         .default("PT1H").optional()
@@ -1368,6 +1430,7 @@ export const USER_RFS_OPTIONS = withOtelExportOptions(z.object({
             "docTransformerConfigBase64",
             "docTransformerConfigFile"
         ]);
+        validateRfsMemoryDeclarations(ctx, data);
     }))
     .transform((data) => {
         const requestEphemeral = data.resources?.requests?.["ephemeral-storage"];
@@ -1397,7 +1460,7 @@ export const USER_RFS_OPTIONS = withOtelExportOptions(z.object({
         // ensure limits >= requests; if user set a higher limit, keep it
         const limBytes = Math.max(userLimitsEphemeralStorageBytes ?? 0, reqBytes);
 
-        return deepmerge(
+        const resolved = deepmerge(
             data,
             {
                 resources: {
@@ -1406,6 +1469,65 @@ export const USER_RFS_OPTIONS = withOtelExportOptions(z.object({
                 },
             },
         );
+
+        if (data.maxSourceDocumentSizeBytes === undefined) {
+            return resolved;
+        }
+
+        const mib = 1024 * 1024;
+        const sourceReadParallelism = 100;
+        const serializedBytesHeapExpansionFactor = 8;
+        const baseHeapBytes = 5_600 * mib;
+        const maxConnections = Math.max(1, Math.floor(data.maxConnections ?? 10));
+        const cpuLimit = data.resources?.limits?.cpu ?? DEFAULT_RESOURCES.RFS.limits.cpu;
+        const availableProcessors = Math.max(1, Math.ceil(parseK8sQuantity(cpuLimit)));
+        const transformParallelism = Math.min(maxConnections, availableProcessors);
+        const sourcePermitBytes = data.maxSourceDocumentSizeBytes * sourceReadParallelism;
+        const transformPermitBytes =
+            (data.maxTransformOutputBytesPerInvocation ?? 0) * transformParallelism;
+        const requiredHeapBytes = baseHeapBytes
+            + serializedBytesHeapExpansionFactor * (sourcePermitBytes + transformPermitBytes);
+        if (!Number.isSafeInteger(requiredHeapBytes)) {
+            throw new Error("RFS memory sizing values exceed JavaScript's safe integer byte range.");
+        }
+
+        const heapMi = Math.ceil(requiredHeapBytes / mib);
+        const minimumContainerMi = Math.ceil(heapMi / 0.8);
+        const minimumContainerBytes = minimumContainerMi * mib;
+        const requestMemory = data.resources?.requests?.memory ?? DEFAULT_RESOURCES.RFS.requests.memory;
+        const limitMemory = data.resources?.limits?.memory ?? DEFAULT_RESOURCES.RFS.limits.memory;
+        const requestBytes = parseK8sQuantity(requestMemory);
+        const limitBytes = parseK8sQuantity(limitMemory);
+        const resolvedRequestMemory = requestBytes >= minimumContainerBytes
+            ? requestMemory
+            : `${minimumContainerMi}Mi`;
+        const resolvedRequestBytes = Math.max(requestBytes, minimumContainerBytes);
+        const resolvedLimitMemory = limitBytes >= resolvedRequestBytes
+            ? limitMemory
+            : resolvedRequestMemory;
+        const jvmArgsWithoutMaxHeap = (data.jvmArgs ?? "")
+            .replace(/(^|\s)-Xmx\S+/g, " ")
+            .replace(/\s+/g, " ")
+            .trim();
+        const jvmArgs = [jvmArgsWithoutMaxHeap, `-Xmx${heapMi}m`]
+            .filter(value => value.length > 0)
+            .join(" ");
+
+        return {
+            ...resolved,
+            jvmArgs,
+            resources: {
+                ...resolved.resources,
+                requests: {
+                    ...resolved.resources.requests,
+                    memory: resolvedRequestMemory,
+                },
+                limits: {
+                    ...resolved.resources.limits,
+                    memory: resolvedLimitMemory,
+                },
+            },
+        };
 });
 
 export const KAFKA_CLUSTER_CREATION_CONFIG = z.preprocess(

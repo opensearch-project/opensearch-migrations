@@ -384,7 +384,10 @@ Every field of `documentBackfillConfig` is listed here; a test in `orchestration
 | `spec.documentBackfillConfig.documentTransforms` | Impossible |  | ✅ |
 | `spec.documentBackfillConfig.documentsPerBulkRequest` | Safe | Bigger bulks don't add concurrency; the target sees the same parallelism | ❌ |
 | `spec.documentBackfillConfig.documentsSizePerBulkRequest` | Safe | Same as documentsPerBulkRequest | ❌ |
+| `spec.documentBackfillConfig.splitLargeDocuments` | Gated | Changes how oversized documents are written and exposed while incomplete | ❌ |
 | `spec.documentBackfillConfig.maxDocumentSizeBytes` | Impossible | Changes which documents migrate | ✅ |
+| `spec.documentBackfillConfig.maxSourceDocumentSizeBytes` | Gated | Changes source admission and worker memory sizing | ❌ |
+| `spec.documentBackfillConfig.maxTransformOutputBytesPerInvocation` | Gated | Changes transform admission and worker memory sizing | ❌ |
 | `spec.documentBackfillConfig.initialLeaseDuration` | Safe | Only schedules leases granted after the change | ❌ |
 | `spec.documentBackfillConfig.maxLeaseDuration` | Safe | Only caps leases granted after the change | ❌ |
 | `spec.documentBackfillConfig.bulkResponseTimeout` | Safe | Only changes how long each bulk waits for its response | ❌ |

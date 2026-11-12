@@ -485,6 +485,8 @@ function makeSnapshotMigrationManifest(
             documentBackfillFailedDocumentStreamS3Bucket: makeStringTypeProxy(expr.dig(config, ["documentBackfillConfig", "failedDocumentStreamS3Bucket"], expr.literal(""))),
             documentBackfillDisableFailedDocumentStream: makeDirectTypeProxy(expr.dig(config, ["documentBackfillConfig", "disableFailedDocumentStream"], false)),
             documentBackfillMaxDocumentSizeBytes: makeDirectTypeProxy(expr.dig(config, ["documentBackfillConfig", "maxDocumentSizeBytes"], 0)),
+            documentBackfillMaxSourceDocumentSizeBytes: makeDirectTypeProxy(expr.dig(config, ["documentBackfillConfig", "maxSourceDocumentSizeBytes"], 0)),
+            documentBackfillMaxTransformOutputBytesPerInvocation: makeDirectTypeProxy(expr.dig(config, ["documentBackfillConfig", "maxTransformOutputBytesPerInvocation"], 0)),
         },
     };
 }
