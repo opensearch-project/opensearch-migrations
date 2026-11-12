@@ -112,3 +112,31 @@ jmh {
     humanOutputFile = project.file("${project.buildDir}/reports/jmh/human.txt")
     resultsFile = project.file("${project.buildDir}/reports/jmh/results.txt")
 }
+
+// The JMH plugin compiles generated harness sources on a detached classpath that does not include
+// Error Prone. Product and hand-written benchmark sources remain checked by Error Prone.
+tasks.named('jmhCompileGeneratedClasses', JavaCompile) {
+    options.errorprone.enabled = false
+}
+
+tasks.named('jmhJar', Jar) {
+    zip64 = true
+}
+
+tasks.register('jsonSplitterPerformanceTest', Test) {
+    group = 'verification'
+    description = 'Runs the opt-in JUnit performance matrix for large JSON document slicing.'
+    useJUnitPlatform()
+    maxParallelForks = 1
+    outputs.upToDateWhen { false }
+    filter {
+        includeTestsMatching(
+                'org.opensearch.migrations.bulkload.common.JsonObjectSplitterPerformanceTest')
+    }
+    systemProperty 'rfs.jsonSplitter.performance', 'true'
+    maxHeapSize = '3g'
+    testLogging {
+        events 'passed', 'skipped', 'failed'
+        showStandardStreams = true
+    }
+}
