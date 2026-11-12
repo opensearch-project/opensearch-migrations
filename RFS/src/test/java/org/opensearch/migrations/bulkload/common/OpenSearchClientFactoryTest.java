@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import org.opensearch.migrations.Flavor;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.http.CompressionMode;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
@@ -29,15 +30,21 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import reactor.core.publisher.Mono;
 import reactor.util.retry.Retry;
 
+import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
@@ -334,5 +341,81 @@ class OpenSearchClientFactoryTest {
         verify(restClient, times(1)).getConnectionContext();
         verify(restClient, times(1)).getAsync("", null);
         verifyNoMoreInteractions(restClient);
+    }
+
+    @Test
+    void getClusterVersion_collectionRoutedTarget_skipsRootRequest() {
+        when(connectionContext.isCollectionRouted()).thenReturn(true);
+
+        var version = openSearchClientFactory.getClusterVersion();
+
+        assertEquals(Flavor.AMAZON_SERVERLESS_OPENSEARCH, version.getFlavor());
+        verifyNoInteractions(restClient);
+    }
+
+    @Test
+    void detectServerlessCollectionType_sendsCollectionHeader() {
+        when(connectionContext.isCollectionRouted()).thenReturn(true);
+        var error = "{\"error\":\"KNN features not supported on TIMESERIES collection type\"}";
+        when(restClient.putAsync(anyString(), anyString(),
+            eq(Map.of("x-amz-aoss-collection-name", List.of("logs"))), isNull()))
+            .thenReturn(Mono.just(new HttpResponse(400, "", Map.of(), error)));
+
+        assertEquals(ServerlessCollectionType.TIMESERIES, openSearchClientFactory.detectServerlessCollectionType("logs"));
+    }
+
+    @Test
+    void detectServerlessCollectionType_routedCollection_retriesUndeterminedProbe() {
+        when(connectionContext.isCollectionRouted()).thenReturn(true);
+        openSearchClientFactory.collectionTypeProbeRetryDelay = Duration.ZERO;
+        var error = "{\"error\":\"KNN features not supported on SEARCH collection type\"}";
+        when(restClient.putAsync(anyString(), anyString(), eq(Map.of("x-amz-aoss-collection-name", List.of("docs"))), isNull()))
+            .thenReturn(Mono.error(new RuntimeException("connection reset")))
+            .thenReturn(Mono.just(new HttpResponse(403, "Forbidden", Map.of(), "{\"message\":\"denied\"}")))
+            .thenReturn(Mono.just(new HttpResponse(400, "", Map.of(), error)));
+
+        assertEquals(ServerlessCollectionType.SEARCH, openSearchClientFactory.detectServerlessCollectionType("docs"));
+        verify(restClient, times(3)).putAsync(anyString(), anyString(), eq(Map.of("x-amz-aoss-collection-name", List.of("docs"))), isNull());
+    }
+
+    @Test
+    void detectServerlessCollectionType_routedCollection_failsWhenTypeStaysUndetermined() {
+        when(connectionContext.isCollectionRouted()).thenReturn(true);
+        openSearchClientFactory.collectionTypeProbeRetryDelay = Duration.ZERO;
+        when(restClient.putAsync(anyString(), anyString(), eq(Map.of("x-amz-aoss-collection-name", List.of("docs"))), isNull()))
+            .thenReturn(Mono.error(new RuntimeException("connection reset")));
+
+        var thrown = assertThrows(OpenSearchClientFactory.UndeterminedCollectionTypeException.class,
+            () -> openSearchClientFactory.detectServerlessCollectionType("docs"));
+
+        assertThat(thrown.getMessage(), containsString("'docs'"));
+        verify(restClient, times(OpenSearchClientFactory.COLLECTION_TYPE_PROBE_ATTEMPTS))
+            .putAsync(anyString(), anyString(), eq(Map.of("x-amz-aoss-collection-name", List.of("docs"))), isNull());
+    }
+
+    @Test
+    void detectServerlessCollectionType_routedCollection_interruptedRetryRestoresInterrupt() {
+        when(connectionContext.isCollectionRouted()).thenReturn(true);
+        openSearchClientFactory.collectionTypeProbeRetryDelay = Duration.ofMillis(1);
+        when(restClient.putAsync(anyString(), anyString(), eq(Map.of("x-amz-aoss-collection-name", List.of("docs"))), isNull()))
+            .thenReturn(Mono.error(new RuntimeException("connection reset")));
+
+        Thread.currentThread().interrupt();
+        try {
+            assertThrows(IllegalStateException.class, () -> openSearchClientFactory.detectServerlessCollectionType("docs"));
+            assertTrue(Thread.currentThread().isInterrupted());
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
+    @Test
+    void detectServerlessCollectionType_endpointCollection_keepsNoneWhenUndetermined() {
+        when(connectionContext.isCollectionRouted()).thenReturn(true);
+        when(restClient.putAsync(anyString(), anyString(), isNull()))
+            .thenReturn(Mono.error(new RuntimeException("connection reset")));
+
+        assertEquals(ServerlessCollectionType.NONE, openSearchClientFactory.detectServerlessCollectionType());
+        verify(restClient, times(1)).putAsync(anyString(), anyString(), isNull());
     }
 }

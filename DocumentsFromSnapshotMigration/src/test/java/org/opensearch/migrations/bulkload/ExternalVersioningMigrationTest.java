@@ -91,7 +91,7 @@ class ExternalVersioningMigrationTest {
                     var sink = new OpenSearchDocumentSink(client, () -> transformer,
                         false, DocumentExceptionAllowlist.empty(), null);
                     var pipeline = new DocumentMigrationPipeline(source, sink, 2, Long.MAX_VALUE, 1, 1);
-                    var cursors = pipeline.migrateAll().collectList().block();
+                    var cursors = pipeline.migrateCollection(INDEX).collectList().block();
                     assertNotNull(cursors);
                     assertEquals(VERSIONS.size(), cursors.stream().mapToLong(cursor -> cursor.docsInBatch()).sum());
                 }
@@ -138,7 +138,8 @@ class ExternalVersioningMigrationTest {
             }
             operations.refresh(INDEX);
             operations.createSnapshotRepository(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR, "version_repo");
-            operations.takeSnapshot("version_repo", SNAPSHOT, INDEX);
+            // Global state would add feature-state system indices, e.g. ES 7.14+'s background-filled .geoip_databases.
+            operations.takeSnapshot("version_repo", SNAPSHOT, INDEX, false);
             source.copySnapshotData(snapshotDirectory.toString());
             return documents;
         }

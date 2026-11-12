@@ -4,6 +4,10 @@
 
 cloudProvider: aws
 
+# Same image as values.yaml (identical digest) from Docker Hub instead of ECR Public, whose
+# anonymous data limit fails shared-IP pulls (e.g. GitHub Actions runners) with 429.
+otelCollectorImage: "docker.io/amazon/aws-otel-collector:v0.49.0"
+
 conditionalPackageInstalls:
   kyverno: true
   fake-gcs-server: true  # deploy fake-gcs-server; used when cloudProvider=gcp for local GCS testing
@@ -50,6 +54,12 @@ charts:
 
   opentelemetry-operator:
     waitForInstallation: false
+    values:
+      manager:
+        # See otelCollectorImage above.
+        collectorImage:
+          repository: "docker.io/amazon/aws-otel-collector"
+          tag: "v0.49.0"
 
   cert-manager:
     values:

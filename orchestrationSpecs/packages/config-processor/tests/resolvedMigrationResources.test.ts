@@ -253,6 +253,8 @@ describe("resolved migration resources", () => {
         expect(snapshotMigration.parameters.metadataMigrationOtelTraceCollectorEndpoint).toBe("");
         expect(snapshotMigration.parameters.metadataMigrationTransformerConfig).toBe("");
         expect(snapshotMigration.parameters.metadataMigrationTransformerConfigFile).toBe("");
+        expect(snapshotMigration.parameters.metadataMigrationCollectionRouting).toBe("");
+        expect(snapshotMigration.parameters.documentBackfillCollectionRouting).toBe("");
     });
 
     it("omits capture proxy workflow-only file source fields from generated custom resources", async () => {

@@ -490,7 +490,8 @@ class RegistryImageBuildUtils {
             def hostVisibleRef = ref.startsWith(intermediateRegistry.containerUrl)
                     ? "${intermediateRegistry.hostUrl}${ref.substring(intermediateRegistry.containerUrl.length())}"
                     : ref
-            [(key): [imageName: extractedImageName, repoPrefix: repoPrefix, hostVisibleRef: hostVisibleRef]]
+            [(key): [imageName: extractedImageName, imageReference: ref, repoPrefix: repoPrefix,
+                     hostVisibleRef: hostVisibleRef]]
         }
 
         // Consumer buildKit_ tasks depend directly on producer buildKit_ tasks.
@@ -524,7 +525,7 @@ class RegistryImageBuildUtils {
         // archSuffix is used to locate the correct per-architecture metadata file.
         def resolveIntermediateArgs = { String archSuffix ->
             intermediateArgProducers.collect { key, info ->
-                def producerServiceName = imageToService[info.imageName]
+                def producerServiceName = imageToService[info.imageReference] ?: imageToService[info.imageName]
                 if (!producerServiceName) {
                     throw new GradleException("No BuildKit service produces image '${info.imageName}' " +
                             "(needed by ${cfg.serviceName} build arg ${key}). Known images: ${imageToService.keySet()}")
@@ -610,9 +611,13 @@ class RegistryImageBuildUtils {
     }
 
     void applyBuildKitConfigurations(Project rootProject, List<Map> projects, Registry finalRegistry, Registry intermediateRegistry) {
-        // Build a lookup from imageName -> serviceName across all BuildKit projects,
-        // so consumers can find the correct producer metadata file by image name.
-        def imageToService = projects.collectEntries { [(it.get("imageName").toString()): it.get("serviceName").toString()] }
+        def imageToService = projects.collectEntries { cfg ->
+            def imageName = cfg.get("imageName").toString()
+            def serviceName = cfg.get("serviceName").toString()
+            [(imageName): serviceName,
+             (resolveBaseImageForContainer(intermediateRegistry, "migrations", imageName,
+                     cfg.get("imageTag", "latest").toString())): serviceName]
+        }
         def intermediateBaseImages = intermediateBaseImageNames(projects, intermediateRegistry)
         projects.each { cfg ->
             registerBuildKitTasks(rootProject, cfg, finalRegistry, intermediateRegistry, imageToService, intermediateBaseImages)
