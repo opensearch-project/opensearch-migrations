@@ -22,7 +22,8 @@ DASHBOARD_MANIFESTS = "/dashboards/dashboards.yaml"
 # A single exec argument is limited to 128 KiB (MAX_ARG_STRLEN); keep the inlined Job scripts well under it.
 MAX_SCRIPT_BYTES = 96 * 1024
 UNRESOLVED_PLACEHOLDER = re.compile(
-    r"placeholder-(?:region|stage|qualifier|account-id|cluster|namespace|warning-utilization|critical-utilization|inode-utilization)"
+    r"placeholder-(?:region|stage|qualifier|account-id|cluster|namespace"
+    r"|warning-utilization|critical-utilization|inode-utilization)"
 )
 
 # The lowest Kubernetes version the chart supports (Chart.yaml kubeVersion).

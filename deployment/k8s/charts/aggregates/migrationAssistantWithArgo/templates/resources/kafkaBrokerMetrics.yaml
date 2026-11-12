@@ -68,9 +68,9 @@ data:
         name: kafka_jvm_uptime_milliseconds
         type: GAUGE
 {{- else }}
-    # Managed Kafka always references this ConfigMap so enabling the Helm switch
-    # upgrades existing clusters without changing their workflow configuration.
-    # Empty rules keep broker JMX series disabled by default.
+    # Managed Kafka always references this ConfigMap so toggling the Helm switch
+    # reconfigures existing clusters without changing their workflow configuration.
+    # Empty rules export no broker JMX series.
     rules: []
 {{- end }}
 {{- $prometheusStackEnabled := get .Values.conditionalPackageInstalls "kube-prometheus-stack" }}
@@ -203,11 +203,15 @@ spec:
         - name: delete
           image: {{ include "migration.image" (dict "root" . "image" .Values.images.installer) }}
           command:
-            - kubectl
-            - delete
-            - podmonitor
-            - {{ $reconciler }}
-            - --namespace
-            - {{ .Release.Namespace }}
-            - --ignore-not-found
+            - /bin/bash
+            - -euc
+            - |
+              # --ignore-not-found does not cover a missing resource type; a release whose
+              # monitoring CRDs never arrived must still uninstall.
+              monitoring_resources="$(kubectl api-resources --api-group=monitoring.coreos.com -o name)"
+              if ! grep -qx podmonitors.monitoring.coreos.com <<< "${monitoring_resources}"; then
+                echo "PodMonitor API is not installed; nothing to delete"
+                exit 0
+              fi
+              kubectl delete podmonitor {{ $reconciler }} --namespace {{ .Release.Namespace }} --ignore-not-found
 {{- end }}

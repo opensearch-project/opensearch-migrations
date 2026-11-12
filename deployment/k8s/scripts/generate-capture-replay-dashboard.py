@@ -149,6 +149,7 @@ GIB = 1073741824
 # Metric math keeps a source metric's unit, so a millisecond metric divided by 1000 would still be
 # labelled as milliseconds (4,200 s drawn as "4.2s"). Axes for rescaled durations drop the unit.
 SECONDS_AXIS = {"label": "seconds", "showUnits": False}
+UTILIZATION_AXIS = {"min": 0, "max": 100, "label": "utilization %", "showUnits": False}
 
 # ----------------------------------------------------------------------------------------------
 # Widget catalogue.  Each entry builds a W; layouts below only decide placement.
@@ -447,7 +448,7 @@ def kafka_fleet_disk_utilization():
 def kafka_storage_summary():
     w = W(
         "Kafka storage utilization (fleet, capacity-weighted)",
-        yleft={"min": 0, "max": 100, "label": "utilization %", "showUnits": False},
+        yleft=UTILIZATION_AXIS,
         period=KAFKA_PVC_PERIOD,
         annotations=KAFKA_DISK_THRESHOLDS,
     )
@@ -494,7 +495,7 @@ def kafka_storage_capacity():
 def kafka_storage_inodes():
     w = W(
         "Kafka inode utilization (fleet, capacity-weighted)",
-        yleft={"min": 0, "max": 100, "label": "utilization %", "showUnits": False},
+        yleft=UTILIZATION_AXIS,
         period=KAFKA_PVC_PERIOD,
         annotations=KAFKA_INODE_THRESHOLD,
     )
@@ -641,7 +642,7 @@ def kafka_broker_jvm():
     w = W(
         "Kafka JVM heap and process CPU",
         period=KAFKA_BROKER_PERIOD,
-        yleft={"min": 0, "max": 100, "label": "utilization %", "showUnits": False},
+        yleft=UTILIZATION_AXIS,
     )
     used = kafka_broker_search("kafka_jvm_heap_used_bytes")
     capacity = kafka_broker_search("kafka_jvm_heap_max_bytes")
@@ -1009,6 +1010,44 @@ NOTE = ("**How to read this dashboard.** Rates are fleet totals per second. Gaug
         "are empty when the capture proxy is scaled to 0.")
 
 
+def layout_kafka_brokers(ws, y):
+    """Append the managed-Kafka storage and broker-internals sections; returns the next free row."""
+    ws.append(text("## Kafka broker storage", 0, y, 24))
+    y += 1
+    ws.append(text(
+        "These panels cover the complete Migration Assistant-managed Kafka cluster; no broker-volume selection "
+        "is required. Fleet disk and inode utilization are capacity-weighted five-minute views. Free space and "
+        "abnormal health retain per-volume legends to expose imbalance or a specific failing volume. Missing inode or "
+        "abnormal-health data means the kubelet/CSI driver did not publish that metric; it is not treated as "
+        "zero or healthy.",
+        0, y, 24, 2,
+    ))
+    y += 2
+    for i, b in enumerate([kafka_storage_summary, kafka_storage_free_by_pvc, kafka_storage_capacity]):
+        ws.append(b().widget(i * 8, y, 8, 7))
+    y += 7
+    for i, b in enumerate([kafka_storage_inodes, kafka_storage_health]):
+        ws.append(b().widget(i * 12, y, 12, 7))
+    y += 7
+    ws.append(text("## Kafka broker internals", 0, y, 24))
+    y += 1
+    ws.append(text(
+        "One-minute managed-broker JMX metrics exported to CloudWatch. Request/error dimensions are limited to "
+        "Produce, FetchConsumer, and FetchFollower; topic and partition labels are not exported. Kafka 4.0 "
+        "combined-role brokers report the request-handler idle fractions for both broker and controller pools, "
+        "so the saturation panel normalizes their sum by two.",
+        0, y, 24,
+    ))
+    y += 1
+    for i, b in enumerate([kafka_broker_replication, kafka_broker_controller, kafka_broker_requests]):
+        ws.append(b().widget(i * 8, y, 8, 7))
+    y += 7
+    for i, b in enumerate([kafka_broker_handlers, kafka_broker_jvm, kafka_broker_gc]):
+        ws.append(b().widget(i * 8, y, 8, 7))
+    y += 7
+    return y
+
+
 def layout_columns():
     """Stage per column (proxy | Kafka | replayer | target); each row compares one signal type across stages."""
     ws, y = [], 0
@@ -1061,39 +1100,7 @@ def layout_columns():
     for i, b in enumerate([tuple_flow, tuple_latency, tuple_errors]):
         ws.append(b().widget(i * 8, y, 8, 6))
     y += 6
-    ws.append(text("## Kafka broker storage", 0, y, 24))
-    y += 1
-    ws.append(text(
-        "These panels cover the complete Migration Assistant-managed Kafka cluster; no broker-volume selection "
-        "is required. Fleet disk and inode utilization are capacity-weighted five-minute views. Free space and "
-        "abnormal health retain per-volume legends to expose imbalance or a specific failing volume. Missing inode or "
-        "abnormal-health data means the kubelet/CSI driver did not publish that metric; it is not treated as "
-        "zero or healthy.",
-        0, y, 24, 2,
-    ))
-    y += 2
-    for i, b in enumerate([kafka_storage_summary, kafka_storage_free_by_pvc, kafka_storage_capacity]):
-        ws.append(b().widget(i * 8, y, 8, 7))
-    y += 7
-    for i, b in enumerate([kafka_storage_inodes, kafka_storage_health]):
-        ws.append(b().widget(i * 12, y, 12, 7))
-    y += 7
-    ws.append(text("## Kafka broker internals", 0, y, 24))
-    y += 1
-    ws.append(text(
-        "One-minute managed-broker JMX metrics exported to CloudWatch. Request/error dimensions are limited to "
-        "Produce, FetchConsumer, and FetchFollower; topic and partition labels are not exported. Kafka 4.0 "
-        "combined-role brokers report the request-handler idle fractions for both broker and controller pools, "
-        "so the saturation panel normalizes their sum by two.",
-        0, y, 24,
-    ))
-    y += 1
-    for i, b in enumerate([kafka_broker_replication, kafka_broker_controller, kafka_broker_requests]):
-        ws.append(b().widget(i * 8, y, 8, 7))
-    y += 7
-    for i, b in enumerate([kafka_broker_handlers, kafka_broker_jvm, kafka_broker_gc]):
-        ws.append(b().widget(i * 8, y, 8, 7))
-    y += 7
+    y = layout_kafka_brokers(ws, y)
     ws.append(text("## Source cluster and replayer internals", 0, y, 24))
     y += 1
     for i, b in enumerate([source_domain, contexts_by_activity, ops_by_type, resources_owned]):

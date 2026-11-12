@@ -84,13 +84,7 @@ class P:
         self.t.append((expr, legend, right, instant))
         return self
 
-    def build(self, x, y, w, h):
-        targets = []
-        for i, (e, lg, _, inst) in enumerate(self.t):
-            t = {"refId": chr(65 + i), "expr": e, "legendFormat": lg}
-            if inst:
-                t["instant"] = True
-            targets.append(t)
+    def _defaults(self):
         d = {}
         if self.unit:
             d["unit"] = self.unit
@@ -105,15 +99,27 @@ class P:
             }
         if self.stacked:
             d["custom"] = {"stacking": {"mode": "normal", "group": "A"}, "fillOpacity": 40}
+        return d
+
+    def _overrides(self):
         overrides = []
-        for e, lg, right, _ in self.t:
+        for _, lg, right, _ in self.t:
             if right:
                 props = [{"id": "custom.axisPlacement", "value": "right"}]
                 if self.runit:
                     props.append({"id": "unit", "value": self.runit})
                 overrides.append({"matcher": {"id": "byName", "options": lg}, "properties": props})
+        return overrides
+
+    def build(self, x, y, w, h):
+        targets = []
+        for i, (e, lg, _, inst) in enumerate(self.t):
+            t = {"refId": chr(65 + i), "expr": e, "legendFormat": lg}
+            if inst:
+                t["instant"] = True
+            targets.append(t)
         p = {"type": self.kind, "title": self.title, "description": self.desc, "datasource": DS,
-             "targets": targets, "fieldConfig": {"defaults": d, "overrides": overrides},
+             "targets": targets, "fieldConfig": {"defaults": self._defaults(), "overrides": self._overrides()},
              "gridPos": {"h": h, "w": w, "x": x, "y": y}}
         if self.kind == "stat":
             p["options"] = {"graphMode": "area", "colorMode": "none", "reduceOptions": {"calcs": ["lastNotNull"]},
@@ -488,10 +494,13 @@ def kafka_request_health():
 
 
 def kafka_request_saturation():
+    # Kafka 4.0 combined-role brokers add the broker and controller request handler idle fractions
+    # into this legacy metric; halve the sum to recover a 0..1 fraction (as the CloudWatch panel does).
     busy = ('100 * (1 - avg by (pod) '
-            '(kafka_server_request_handler_idle_ratio{namespace="$namespace"}))')
+            '(kafka_server_request_handler_idle_ratio{namespace="$namespace"}) / 2)')
     return (P("Kafka request-handler saturation",
-              "Percent busy derived from one minus the request-handler idle ratio for each broker.",
+              "Percent busy for each broker. Combined-role brokers report the sum of the broker and controller "
+              "request-handler idle fractions, so the sum is halved before it is converted to busy percent.",
               unit="percent", mx=100)
             .q(busy, "{{pod}}"))
 

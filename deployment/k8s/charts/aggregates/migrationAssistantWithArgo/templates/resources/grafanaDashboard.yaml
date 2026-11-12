@@ -3329,7 +3329,7 @@ data:
         {
           "type": "timeseries",
           "title": "Kafka request-handler saturation",
-          "description": "Percent busy derived from one minus the request-handler idle ratio for each broker.",
+          "description": "Percent busy for each broker. Combined-role brokers report the sum of the broker and controller request-handler idle fractions, so the sum is halved before it is converted to busy percent.",
           "datasource": {
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
@@ -3337,7 +3337,7 @@ data:
           "targets": [
             {
               "refId": "A",
-              "expr": "100 * (1 - avg by (pod) (kafka_server_request_handler_idle_ratio{namespace=\"$namespace\"}))",
+              "expr": "100 * (1 - avg by (pod) (kafka_server_request_handler_idle_ratio{namespace=\"$namespace\"}) / 2)",
               "legendFormat": "\u007b\u007bpod\u007d\u007d"
             }
           ],

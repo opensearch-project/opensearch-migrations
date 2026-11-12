@@ -6,6 +6,11 @@
 {{- $alertsEnabled := .Values.kafkaObservability.prometheusAlerts.enabled }}
 {{- $renderRules := and $alertmanagerEnabled $alertsEnabled }}
 {{- $name := printf "%s-kafka-storage" .Release.Name }}
+{{- $storage := .Values.kafkaObservability.storage }}
+{{- $freeBytes := include "migration.kafkaPvcMetric" (dict "root" . "metric" "kubelet_volume_stats_available_bytes") }}
+{{- $freeBytesPercent := include "migration.kafkaPvcFreePercent" (dict "root" . "free" "kubelet_volume_stats_available_bytes" "total" "kubelet_volume_stats_capacity_bytes") }}
+{{- $freeInodesPercent := include "migration.kafkaPvcFreePercent" (dict "root" . "free" "kubelet_volume_stats_inodes_free" "total" "kubelet_volume_stats_inodes") }}
+{{- $abnormalHealth := include "migration.kafkaPvcMetric" (dict "root" . "metric" "kubelet_volume_stats_health_status_abnormal") }}
 {{- if $renderRules }}
 apiVersion: v1
 kind: ConfigMap
@@ -29,81 +34,9 @@ data:
           rules:
             - alert: MigrationAssistantKafkaVolumeLowFreeSpaceWarning
               expr: |
-                (
-                  (
-                    max by (namespace, persistentvolumeclaim) (
-                      kubelet_volume_stats_available_bytes{
-                        job="kubelet",
-                        metrics_path="/metrics",
-                        namespace="{{ .Release.Namespace }}"
-                      }
-                    )
-                    and on (namespace, persistentvolumeclaim)
-                    max by (namespace, persistentvolumeclaim) (
-                      kube_persistentvolumeclaim_labels{
-                        namespace="{{ .Release.Namespace }}",
-                        label_strimzi_io_cluster!="",
-                        label_strimzi_io_pool_name!=""
-                      }
-                    )
-                  )
-                  /
-                  (
-                    max by (namespace, persistentvolumeclaim) (
-                      kubelet_volume_stats_capacity_bytes{
-                        job="kubelet",
-                        metrics_path="/metrics",
-                        namespace="{{ .Release.Namespace }}"
-                      }
-                    )
-                    and on (namespace, persistentvolumeclaim)
-                    max by (namespace, persistentvolumeclaim) (
-                      kube_persistentvolumeclaim_labels{
-                        namespace="{{ .Release.Namespace }}",
-                        label_strimzi_io_cluster!="",
-                        label_strimzi_io_pool_name!=""
-                      }
-                    )
-                  )
-                ) * 100 < {{ .Values.kafkaObservability.storage.warningFreePercent }}
+                {{ $freeBytesPercent }} < {{ $storage.warningFreePercent }}
                 and on (namespace, persistentvolumeclaim)
-                (
-                  (
-                    max by (namespace, persistentvolumeclaim) (
-                      kubelet_volume_stats_available_bytes{
-                        job="kubelet",
-                        metrics_path="/metrics",
-                        namespace="{{ .Release.Namespace }}"
-                      }
-                    )
-                    and on (namespace, persistentvolumeclaim)
-                    max by (namespace, persistentvolumeclaim) (
-                      kube_persistentvolumeclaim_labels{
-                        namespace="{{ .Release.Namespace }}",
-                        label_strimzi_io_cluster!="",
-                        label_strimzi_io_pool_name!=""
-                      }
-                    )
-                  )
-                  /
-                  (
-                    max by (namespace, persistentvolumeclaim) (
-                      kubelet_volume_stats_capacity_bytes{
-                        job="kubelet",
-                        metrics_path="/metrics",
-                        namespace="{{ .Release.Namespace }}"
-                      }
-                    )
-                    and on (namespace, persistentvolumeclaim)
-                    max by (namespace, persistentvolumeclaim) (
-                      kube_persistentvolumeclaim_labels{
-                        namespace="{{ .Release.Namespace }}",
-                        label_strimzi_io_cluster!="",
-                        label_strimzi_io_pool_name!=""
-                      }
-                    )
-                  )
-                ) * 100 >= {{ .Values.kafkaObservability.storage.criticalFreePercent }}
+                {{ $freeBytesPercent }} >= {{ $storage.criticalFreePercent }}
               for: 15m
               labels:
                 severity: warning
@@ -115,43 +48,7 @@ data:
 
             - alert: MigrationAssistantKafkaVolumeLowFreeSpaceCritical
               expr: |
-                (
-                  (
-                    max by (namespace, persistentvolumeclaim) (
-                      kubelet_volume_stats_available_bytes{
-                        job="kubelet",
-                        metrics_path="/metrics",
-                        namespace="{{ .Release.Namespace }}"
-                      }
-                    )
-                    and on (namespace, persistentvolumeclaim)
-                    max by (namespace, persistentvolumeclaim) (
-                      kube_persistentvolumeclaim_labels{
-                        namespace="{{ .Release.Namespace }}",
-                        label_strimzi_io_cluster!="",
-                        label_strimzi_io_pool_name!=""
-                      }
-                    )
-                  )
-                  /
-                  (
-                    max by (namespace, persistentvolumeclaim) (
-                      kubelet_volume_stats_capacity_bytes{
-                        job="kubelet",
-                        metrics_path="/metrics",
-                        namespace="{{ .Release.Namespace }}"
-                      }
-                    )
-                    and on (namespace, persistentvolumeclaim)
-                    max by (namespace, persistentvolumeclaim) (
-                      kube_persistentvolumeclaim_labels{
-                        namespace="{{ .Release.Namespace }}",
-                        label_strimzi_io_cluster!="",
-                        label_strimzi_io_pool_name!=""
-                      }
-                    )
-                  )
-                ) * 100 < {{ .Values.kafkaObservability.storage.criticalFreePercent }}
+                {{ $freeBytesPercent }} < {{ $storage.criticalFreePercent }}
               for: 15m
               labels:
                 severity: critical
@@ -164,24 +61,8 @@ data:
             - alert: MigrationAssistantKafkaVolumeProjectedToFill
               expr: |
                 predict_linear(
-                  (
-                    max by (namespace, persistentvolumeclaim) (
-                      kubelet_volume_stats_available_bytes{
-                        job="kubelet",
-                        metrics_path="/metrics",
-                        namespace="{{ .Release.Namespace }}"
-                      }
-                    )
-                    and on (namespace, persistentvolumeclaim)
-                    max by (namespace, persistentvolumeclaim) (
-                      kube_persistentvolumeclaim_labels{
-                        namespace="{{ .Release.Namespace }}",
-                        label_strimzi_io_cluster!="",
-                        label_strimzi_io_pool_name!=""
-                      }
-                    )
-                  )[{{ .Values.kafkaObservability.storage.forecastLookback }}:5m],
-                  {{ mul (int .Values.kafkaObservability.storage.projectedFillWarningHorizonHours) 3600 }}
+                  {{ $freeBytes }}[{{ $storage.forecastLookback }}:5m],
+                  {{ mul (int $storage.projectedFillWarningHorizonHours) 3600 }}
                 ) < 0
               for: 15m
               labels:
@@ -195,43 +76,7 @@ data:
 
             - alert: MigrationAssistantKafkaVolumeLowFreeInodes
               expr: |
-                (
-                  (
-                    max by (namespace, persistentvolumeclaim) (
-                      kubelet_volume_stats_inodes_free{
-                        job="kubelet",
-                        metrics_path="/metrics",
-                        namespace="{{ .Release.Namespace }}"
-                      }
-                    )
-                    and on (namespace, persistentvolumeclaim)
-                    max by (namespace, persistentvolumeclaim) (
-                      kube_persistentvolumeclaim_labels{
-                        namespace="{{ .Release.Namespace }}",
-                        label_strimzi_io_cluster!="",
-                        label_strimzi_io_pool_name!=""
-                      }
-                    )
-                  )
-                  /
-                  (
-                    max by (namespace, persistentvolumeclaim) (
-                      kubelet_volume_stats_inodes{
-                        job="kubelet",
-                        metrics_path="/metrics",
-                        namespace="{{ .Release.Namespace }}"
-                      }
-                    )
-                    and on (namespace, persistentvolumeclaim)
-                    max by (namespace, persistentvolumeclaim) (
-                      kube_persistentvolumeclaim_labels{
-                        namespace="{{ .Release.Namespace }}",
-                        label_strimzi_io_cluster!="",
-                        label_strimzi_io_pool_name!=""
-                      }
-                    )
-                  )
-                ) * 100 < {{ .Values.kafkaObservability.storage.inodeFreePercent }}
+                {{ $freeInodesPercent }} < {{ $storage.inodeFreePercent }}
               for: 15m
               labels:
                 severity: warning
@@ -244,23 +89,7 @@ data:
 
             - alert: MigrationAssistantKafkaVolumeHealthAbnormal
               expr: |
-                (
-                  max by (namespace, persistentvolumeclaim) (
-                    kubelet_volume_stats_health_status_abnormal{
-                      job="kubelet",
-                      metrics_path="/metrics",
-                      namespace="{{ .Release.Namespace }}"
-                    }
-                  )
-                  and on (namespace, persistentvolumeclaim)
-                  max by (namespace, persistentvolumeclaim) (
-                    kube_persistentvolumeclaim_labels{
-                      namespace="{{ .Release.Namespace }}",
-                      label_strimzi_io_cluster!="",
-                      label_strimzi_io_pool_name!=""
-                    }
-                  )
-                ) == 1
+                {{ $abnormalHealth }} == 1
               for: 5m
               labels:
                 severity: critical
@@ -342,7 +171,7 @@ data:
                 summary: "Kafka produce or fetch requests are throttled by more than one second"
 
             - alert: MigrationAssistantKafkaRequestHandlersSaturated
-              expr: 100 * (1 - avg by (namespace, pod) (kafka_server_request_handler_idle_ratio{namespace="{{ .Release.Namespace }}"})) > 80
+              expr: 100 * (1 - avg by (namespace, pod) (kafka_server_request_handler_idle_ratio{namespace="{{ .Release.Namespace }}"}) / 2) > 80
               for: 15m
               labels:
                 severity: warning
@@ -488,11 +317,15 @@ spec:
         - name: delete
           image: {{ include "migration.image" (dict "root" . "image" .Values.images.installer) }}
           command:
-            - kubectl
-            - delete
-            - prometheusrule
-            - {{ $name }}
-            - --namespace
-            - {{ .Release.Namespace }}
-            - --ignore-not-found
+            - /bin/bash
+            - -euc
+            - |
+              # --ignore-not-found does not cover a missing resource type; a release whose
+              # monitoring CRDs never arrived must still uninstall.
+              monitoring_resources="$(kubectl api-resources --api-group=monitoring.coreos.com -o name)"
+              if ! grep -qx prometheusrules.monitoring.coreos.com <<< "${monitoring_resources}"; then
+                echo "PrometheusRule API is not installed; nothing to delete"
+                exit 0
+              fi
+              kubectl delete prometheusrule {{ $name }} --namespace {{ .Release.Namespace }} --ignore-not-found
 {{- end }}

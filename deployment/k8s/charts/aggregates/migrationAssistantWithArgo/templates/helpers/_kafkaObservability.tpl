@@ -20,7 +20,29 @@ free; dashboards convert them to utilization only at presentation time.
 {{- if or (lt $inode 0) (gt $inode 100) -}}
   {{- fail "kafkaObservability.storage.inodeFreePercent must be between 0 and 100" -}}
 {{- end -}}
+{{- if not (regexMatch "^([0-9]+(ms|s|m|h|d|w|y))+$" (toString $storage.forecastLookback)) -}}
+  {{- fail "kafkaObservability.storage.forecastLookback must be a Prometheus duration such as 6h" -}}
+{{- end -}}
 {{- if lt (int $storage.projectedFillWarningHorizonHours) 1 -}}
   {{- fail "kafkaObservability.storage.projectedFillWarningHorizonHours must be at least 1" -}}
 {{- end -}}
+{{- end -}}
+
+{{/*
+One kubelet volume series per Migration Assistant-managed Kafka PVC. kubelet
+identifies a volume only by namespace/name, so the series are filtered by the
+Strimzi labels that kube-state-metrics exports for the claim.
+Arguments: root (the chart context), metric (the kubelet_volume_stats_* name).
+*/}}
+{{- define "migration.kafkaPvcMetric" -}}
+{{- $namespace := .root.Release.Namespace -}}
+(max by (namespace, persistentvolumeclaim) ({{ .metric }}{job="kubelet",metrics_path="/metrics",namespace="{{ $namespace }}"}) and on (namespace, persistentvolumeclaim) max by (namespace, persistentvolumeclaim) (kube_persistentvolumeclaim_labels{namespace="{{ $namespace }}",label_strimzi_io_cluster!="",label_strimzi_io_pool_name!=""}))
+{{- end -}}
+
+{{/*
+Percentage of capacity remaining free for each managed Kafka PVC.
+Arguments: root, free (the free-quantity metric), total (the capacity metric).
+*/}}
+{{- define "migration.kafkaPvcFreePercent" -}}
+({{ include "migration.kafkaPvcMetric" (dict "root" .root "metric" .free) }} / {{ include "migration.kafkaPvcMetric" (dict "root" .root "metric" .total) }}) * 100
 {{- end -}}

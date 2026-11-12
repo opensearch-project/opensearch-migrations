@@ -181,8 +181,9 @@ bounded metric set to CloudWatch. Grafana and CloudWatch panels cover:
 
 Kafka 4.0 combined-role brokers expose `RequestHandlerAvgIdlePercent` as the
 sum of the broker and controller request-handler pool idle fractions. The
-CloudWatch saturation panel divides that value by two before converting it to
-busy percent. This keeps the displayed value on a 0–100% scale for the
+Grafana and CloudWatch saturation panels and the
+`MigrationAssistantKafkaRequestHandlersSaturated` alert divide that value by two
+before converting it to busy percent. This keeps the displayed value on a 0–100% scale for the
 Migration Assistant-managed dual-role broker pool.
 
 Collection can be disabled explicitly:

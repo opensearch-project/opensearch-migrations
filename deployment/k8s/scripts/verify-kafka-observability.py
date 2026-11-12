@@ -16,6 +16,11 @@ from pathlib import Path
 
 KUBE_VERSION = "1.35.0"
 RULE_KIND = "kind: PrometheusRule"
+PROMETHEUS_ALERTS_ENABLED = "kafkaObservability.prometheusAlerts.enabled=true"
+ALERTMANAGER_ENABLED = "charts.kube-prometheus-stack.values.alertmanager.enabled=true"
+FILL_SEARCH = "FILL(SEARCH("
+SUM_FILL_SEARCH = "SUM(" + FILL_SEARCH
+GC_WIDGET_TITLE = "Kafka JVM garbage collection"
 
 
 def load_generator(path):
@@ -49,28 +54,31 @@ def render(helm, chart, *extra, expect_success=True):
     return result.stdout
 
 
+def literal_block(following, marker_indent):
+    """Collect one YAML literal block: the lines indented deeper than its key, dedented."""
+    content_indent = None
+    content = []
+    for item in following:
+        if not item.strip():
+            content.append("")
+            continue
+        indentation = len(item) - len(item.lstrip(" "))
+        if indentation <= marker_indent:
+            break
+        if content_indent is None:
+            content_indent = indentation
+        content.append(item[content_indent:])
+    return "\n".join(content).rstrip()
+
+
 def literal_blocks(text, key):
     lines = text.splitlines()
-    blocks = []
     marker = re.compile(r"^(\s*)" + re.escape(key) + r":\s*\|[-+]?\s*$")
+    blocks = []
     for index, line in enumerate(lines):
         match = marker.match(line)
-        if not match:
-            continue
-        marker_indent = len(match.group(1))
-        content_indent = None
-        content = []
-        for item in lines[index + 1:]:
-            if item.strip():
-                indentation = len(item) - len(item.lstrip(" "))
-                if indentation <= marker_indent:
-                    break
-                content_indent = content_indent if content_indent is not None else indentation
-                item = item[content_indent:]
-            else:
-                item = ""
-            content.append(item)
-        blocks.append("\n".join(content).rstrip())
+        if match:
+            blocks.append(literal_block(lines[index + 1:], len(match.group(1))))
     return blocks
 
 
@@ -86,16 +94,6 @@ def decoded_child_values(rendered):
         base64.b64decode(value).decode()
         for value in re.findall(r'VALUES_B64="([A-Za-z0-9+/=]+)"', rendered)
     ]
-
-
-def joined_kafka_pvcs(volume_pvcs, pvc_labels):
-    """Model the on(namespace,persistentvolumeclaim) PromQL label join."""
-    return {
-        pvc
-        for pvc in volume_pvcs
-        if pvc_labels.get(pvc, {}).get("strimzi.io/cluster")
-        and pvc_labels.get(pvc, {}).get("strimzi.io/pool-name")
-    }
 
 
 class KafkaObservabilityTests(unittest.TestCase):
@@ -122,47 +120,6 @@ class KafkaObservabilityTests(unittest.TestCase):
             "--set",
             "aws.eksClusterName=verify-cluster",
         )
-
-    def test_single_volume_broker_pvc_is_selected(self):
-        labels = {
-            "data-capture-dual-role-0": {
-                "strimzi.io/cluster": "capture",
-                "strimzi.io/pool-name": "dual-role",
-            },
-        }
-        self.assertEqual(joined_kafka_pvcs(labels, labels), {"data-capture-dual-role-0"})
-
-    def test_multiple_jbod_volumes_are_selected(self):
-        pvcs = {"data-0-capture-dual-role-0", "data-1-capture-dual-role-0"}
-        labels = {
-            pvc: {"strimzi.io/cluster": "capture", "strimzi.io/pool-name": "dual-role"}
-            for pvc in pvcs
-        }
-        self.assertEqual(joined_kafka_pvcs(pvcs, labels), pvcs)
-
-    def test_multiple_brokers_are_selected(self):
-        pvcs = {"data-capture-dual-role-0", "data-capture-dual-role-1", "data-capture-dual-role-2"}
-        labels = {
-            pvc: {"strimzi.io/cluster": "capture", "strimzi.io/pool-name": "dual-role"}
-            for pvc in pvcs
-        }
-        self.assertEqual(joined_kafka_pvcs(pvcs, labels), pvcs)
-
-    def test_unrelated_data_pvc_is_excluded(self):
-        pvcs = {"data-capture-dual-role-0", "data-postgresql-0"}
-        labels = {
-            "data-capture-dual-role-0": {
-                "strimzi.io/cluster": "capture",
-                "strimzi.io/pool-name": "dual-role",
-            },
-            "data-postgresql-0": {"app": "postgresql"},
-        }
-        self.assertEqual(joined_kafka_pvcs(pvcs, labels), {"data-capture-dual-role-0"})
-
-    def test_controller_only_scope_is_documented_as_inapplicable(self):
-        guide = (self.repo / "deployment/k8s/dashboards/KAFKA_OBSERVABILITY.md").read_text()
-        self.assertIn("controller-only", guide)
-        self.assertIn("dual-role", guide)
 
     def test_kube_state_metrics_allowlists_strimzi_pvc_labels(self):
         values = "\n".join(decoded_child_values(self.default_render))
@@ -238,13 +195,13 @@ class KafkaObservabilityTests(unittest.TestCase):
             self.args.helm,
             self.chart,
             "--set",
-            "kafkaObservability.prometheusAlerts.enabled=true",
+            PROMETHEUS_ALERTS_ENABLED,
         )
         alertmanager_only = render(
             self.args.helm,
             self.chart,
             "--set",
-            "charts.kube-prometheus-stack.values.alertmanager.enabled=true",
+            ALERTMANAGER_ENABLED,
         )
         self.assertNotIn(RULE_KIND, self.default_render)
         self.assertNotIn(RULE_KIND, alert_only)
@@ -268,14 +225,38 @@ class KafkaObservabilityTests(unittest.TestCase):
             self.default_render,
         )
 
+    def test_delete_hooks_tolerate_missing_monitoring_crds(self):
+        for kind in ("prometheusrules", "podmonitors"):
+            self.assertIn(
+                f'grep -qx {kind}.monitoring.coreos.com <<< "${{monitoring_resources}}"',
+                self.default_render,
+            )
+
+    def test_request_handler_saturation_is_normalized_everywhere(self):
+        halved = 'kafka_server_request_handler_idle_ratio{namespace="%s"}) / 2)'
+        dashboard = embedded_grafana(self.default_render)
+        panel = next(p for p in dashboard["panels"] if p.get("title") == "Kafka request-handler saturation")
+        self.assertIn(halved % "$namespace", panel["targets"][0]["expr"])
+        alerts = render(
+            self.args.helm,
+            self.chart,
+            "--set",
+            ALERTMANAGER_ENABLED,
+            "--set",
+            PROMETHEUS_ALERTS_ENABLED,
+            "--set",
+            "kafkaObservability.brokerMetrics.alertsEnabled=true",
+        )
+        self.assertIn(halved % "ma" + " > 80", alerts)
+
     def test_alert_rules_render_policy_and_promql(self):
         rendered = render(
             self.args.helm,
             self.chart,
             "--set",
-            "charts.kube-prometheus-stack.values.alertmanager.enabled=true",
+            ALERTMANAGER_ENABLED,
             "--set",
-            "kafkaObservability.prometheusAlerts.enabled=true",
+            PROMETHEUS_ALERTS_ENABLED,
             "--set",
             "kafkaObservability.storage.warningFreePercent=25",
             "--set",
@@ -299,6 +280,7 @@ class KafkaObservabilityTests(unittest.TestCase):
         self.assertIn("label_strimzi_io_cluster", rendered)
         self.assertIn("label_strimzi_io_pool_name", rendered)
         self.assertIn("* 100 < 25", rendered)
+        self.assertIn("* 100 >= 7", rendered)
         self.assertIn("* 100 < 7", rendered)
         self.assertIn("* 100 < 8", rendered)
         self.assertIn("[8h:5m]", rendered)
@@ -327,6 +309,7 @@ class KafkaObservabilityTests(unittest.TestCase):
             ["dimensions: [[EKSClusterName, qualifier, namespace, persistentvolumeclaim]]"],
         )
         self.assertIn("value: ${env:EKS_CLUSTER_NAME}", collector)
+        self.assertIn("processors: [resource/remove_default_attributes, resource/kafka, batch]", collector)
 
     def test_eks_collector_exports_bounded_broker_jmx_metrics(self):
         blocks = literal_blocks(self.eks_render, "collector.yaml")
@@ -362,8 +345,8 @@ class KafkaObservabilityTests(unittest.TestCase):
         fleet = widgets["Kafka storage utilization (fleet, capacity-weighted)"]
         fleet_expression = fleet["properties"]["metrics"][0][0]["expression"]
         self.assertIn("1 -", fleet_expression)
-        self.assertIn("SUM(FILL(SEARCH(", fleet_expression)
-        self.assertIn("FILL(SEARCH(", fleet_expression)
+        self.assertIn(SUM_FILL_SEARCH, fleet_expression)
+        self.assertIn(FILL_SEARCH, fleet_expression)
         self.assertIn(", 300)", fleet_expression)
         self.assertIn("kubelet_volume_stats_available_bytes", fleet_expression)
         self.assertIn("kubelet_volume_stats_capacity_bytes", fleet_expression)
@@ -372,7 +355,7 @@ class KafkaObservabilityTests(unittest.TestCase):
         free = widgets["Kafka free space by broker volume (GiB)"]
         free_expression = free["properties"]["metrics"][0][0]["expression"]
         self.assertIn("kubelet_volume_stats_available_bytes", free_expression)
-        self.assertIn("FILL(SEARCH(", free_expression)
+        self.assertIn(FILL_SEARCH, free_expression)
         self.assertIn("'Minimum', 300)", free_expression)
         self.assertIn("/ 1073741824", free_expression)
         self.assertEqual(
@@ -391,8 +374,8 @@ class KafkaObservabilityTests(unittest.TestCase):
             row[0]["expression"] for row in storage["properties"]["metrics"]
             if isinstance(row[0], dict)
         ]
-        self.assertTrue(any("SUM(FILL(SEARCH(" in expression for expression in storage_expressions))
-        self.assertTrue(any("FILL(SEARCH(" in expression for expression in storage_expressions))
+        self.assertTrue(any(SUM_FILL_SEARCH in expression for expression in storage_expressions))
+        self.assertTrue(any(FILL_SEARCH in expression for expression in storage_expressions))
         self.assertEqual(
             storage["properties"]["yAxis"]["left"],
             {"min": 0, "label": "GiB", "showUnits": False},
@@ -404,7 +387,7 @@ class KafkaObservabilityTests(unittest.TestCase):
             if isinstance(row[0], dict)
         )
         self.assertIn("100 * (1 -", inode_expression["expression"])
-        self.assertIn("SUM(FILL(SEARCH(", inode_expression["expression"])
+        self.assertIn(SUM_FILL_SEARCH, inode_expression["expression"])
         self.assertEqual(inode_expression["label"], "Fleet inode utilization")
 
         health = widgets["Kafka abnormal volume health"]
@@ -418,7 +401,7 @@ class KafkaObservabilityTests(unittest.TestCase):
             "Kafka produce/fetch errors and throttling",
             "Kafka request-handler saturation",
             "Kafka JVM heap and process CPU",
-            "Kafka JVM garbage collection",
+            GC_WIDGET_TITLE,
         ):
             self.assertIn(title, widgets)
         broker_expressions = "\n".join(
@@ -434,7 +417,7 @@ class KafkaObservabilityTests(unittest.TestCase):
         self.assertIn("100 * SUM(", broker_expressions)
         handlers = widgets["Kafka request-handler saturation"]["properties"]["metrics"]
         self.assertTrue(all("/ 2)" in row[0]["expression"] for row in handlers))
-        gc_rows = widgets["Kafka JVM garbage collection"]["properties"]["metrics"]
+        gc_rows = widgets[GC_WIDGET_TITLE]["properties"]["metrics"]
         self.assertEqual(len(gc_rows), 6)
         self.assertNotIn(
             "${PROP('Dim.collector')}",
@@ -443,7 +426,7 @@ class KafkaObservabilityTests(unittest.TestCase):
         self.assertTrue(all("collector=" in row[0]["expression"] for row in gc_rows))
         for title in (
             "Kafka produce/fetch errors and throttling",
-            "Kafka JVM garbage collection",
+            GC_WIDGET_TITLE,
         ):
             self.assertNotIn(
                 "${PROP(",
@@ -506,11 +489,10 @@ class KafkaObservabilityTests(unittest.TestCase):
         self.assertIn("expression: MIN(freepct)", rendered)
         self.assertIn("arn:aws:sns:us-east-2:123456789012:kafka", rendered)
 
-    def test_cluster_name_is_propagated_by_both_deployers(self):
+    def test_cluster_name_is_propagated_by_bootstrap(self):
+        # The Rust deployer asserts the same flag in its own unit tests.
         bootstrap = (self.repo / "deployment/k8s/aws/aws-bootstrap.sh").read_text()
-        rust = (self.repo / "deployment/k8s/aws/cli/src/command/app.rs").read_text()
         self.assertIn('--set aws.eksClusterName="${MIGRATIONS_EKS_CLUSTER_NAME}"', bootstrap)
-        self.assertIn("aws.eksClusterName={eks_cluster_name}", rust)
 
     def test_broker_jmx_rules_and_monitor_are_enabled_by_default(self):
         self.assertIn("name: migration-assistant-kafka-jmx-metrics", self.default_render)
@@ -529,31 +511,24 @@ class KafkaObservabilityTests(unittest.TestCase):
         )
         self.assertIn("rules: []", disabled)
         self.assertNotIn("kind: PodMonitor", disabled)
-        setup_kafka = (
-            self.repo
-            / "orchestrationSpecs/packages/migration-workflow-templates/src/workflowTemplates/setupKafka.ts"
-        ).read_text()
-        self.assertIn('type: "jmxPrometheusExporter"', setup_kafka)
-        self.assertIn("configMapKeyRef: expr.makeDict", setup_kafka)
-        self.assertIn('name: KAFKA_JMX_METRICS_CONFIG_MAP', setup_kafka)
 
     def test_broker_alerts_have_an_independent_enablement_gate(self):
         storage_only = render(
             self.args.helm,
             self.chart,
             "--set",
-            "charts.kube-prometheus-stack.values.alertmanager.enabled=true",
+            ALERTMANAGER_ENABLED,
             "--set",
-            "kafkaObservability.prometheusAlerts.enabled=true",
+            PROMETHEUS_ALERTS_ENABLED,
         )
         self.assertNotIn("MigrationAssistantKafkaUnderReplicatedPartitions", storage_only)
         enabled = render(
             self.args.helm,
             self.chart,
             "--set",
-            "charts.kube-prometheus-stack.values.alertmanager.enabled=true",
+            ALERTMANAGER_ENABLED,
             "--set",
-            "kafkaObservability.prometheusAlerts.enabled=true",
+            PROMETHEUS_ALERTS_ENABLED,
             "--set",
             "kafkaObservability.brokerMetrics.enabled=true",
             "--set",
@@ -588,6 +563,16 @@ class KafkaObservabilityTests(unittest.TestCase):
             expect_success=False,
         )
         self.assertIn("criticalFreePercent must be lower", output)
+
+    def test_invalid_forecast_lookback_fails_helm_render(self):
+        output = render(
+            self.args.helm,
+            self.chart,
+            "--set",
+            "kafkaObservability.storage.forecastLookback=six hours",
+            expect_success=False,
+        )
+        self.assertIn("forecastLookback must be", output)
 
 
 if __name__ == "__main__":

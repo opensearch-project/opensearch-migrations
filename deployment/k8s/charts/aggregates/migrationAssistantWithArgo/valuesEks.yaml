@@ -173,15 +173,7 @@ metrics:
           - key: qualifier
             value: ${env:QUALIFIER}
             action: upsert
-      resource/kafka-pvc:
-        attributes:
-          - key: EKSClusterName
-            value: ${env:EKS_CLUSTER_NAME}
-            action: upsert
-          - key: qualifier
-            value: ${env:QUALIFIER}
-            action: upsert
-      resource/kafka-broker:
+      resource/kafka:
         attributes:
           - key: EKSClusterName
             value: ${env:EKS_CLUSTER_NAME}
@@ -324,11 +316,11 @@ metrics:
           exporters: [prometheus]
         metrics/kafka-pvc-cloudwatch:
           receivers: [prometheus/kafka-pvc-cloudwatch]
-          processors: [resource/remove_default_attributes, resource/kafka-pvc, batch]
+          processors: [resource/remove_default_attributes, resource/kafka, batch]
           exporters: [awsemf/kafka-pvc]
         metrics/kafka-broker-cloudwatch:
           receivers: [prometheus/kafka-broker-cloudwatch]
-          processors: [cumulativetodelta/kafka-broker, resource/remove_default_attributes, resource/kafka-broker, batch]
+          processors: [cumulativetodelta/kafka-broker, resource/remove_default_attributes, resource/kafka, batch]
           exporters: [awsemf/kafka-broker]
 
 logs:
