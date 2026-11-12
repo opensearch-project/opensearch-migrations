@@ -446,7 +446,7 @@ def kafka_volume_inodes():
 
 def kafka_partition_health():
     return (P("Kafka partition replication health",
-              "Under-replicated and offline partitions from the opt-in managed Kafka JMX exporter.",
+              "Under-replicated and offline partitions from the managed Kafka JMX exporter.",
               unit="short")
             .q('max(kafka_server_replicamanager_under_replicated_partitions{namespace="$namespace"})',
                "Under-replicated")
@@ -505,8 +505,7 @@ def kafka_jvm_health():
           f'{{namespace="$namespace"}}[{RI}])) / 1000')
     cpu = '100 * max by (pod) (kafka_jvm_process_cpu_ratio{namespace="$namespace"})'
     return (P("Kafka JVM and process health",
-              "Heap and process CPU percentages plus garbage-collection seconds per second. Metrics are absent while "
-              "the opt-in broker JMX rules are disabled.",
+              "Heap and process CPU percentages plus garbage-collection seconds per second.",
               unit="percent", runit="s")
             .q(heap, "Heap {{pod}}")
             .q(cpu, "Process CPU {{pod}}")
@@ -869,7 +868,7 @@ def layout():
     for i, b in enumerate([kafka_volume_fill_eta, kafka_volume_inodes]):
         ps.append(b().build(i * 12, y, 12, 7))
     y += 7
-    ps.append(row("Kafka broker health (opt-in JMX)", y))
+    ps.append(row("Kafka broker health", y))
     y += 1
     for i, b in enumerate([kafka_partition_health, kafka_isr_health, kafka_controller_health]):
         ps.append(b().build(i * 8, y, 8, 7))

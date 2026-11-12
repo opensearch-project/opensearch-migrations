@@ -56,9 +56,12 @@ class W:
         self.rows.append(row + [dict({"id": i, "stat": stat, "visible": False}, **opts)])
         return i
 
-    def e(self, expr, label, visible=True, **opts):
+    def e(self, expr, label=None, visible=True, **opts):
         i = self._id("e")
-        self.rows.append([dict({"expression": expr, "label": label, "id": i, "visible": visible}, **opts)])
+        properties = {"expression": expr, "id": i, "visible": visible}
+        if label is not None:
+            properties["label"] = label
+        self.rows.append([dict(properties, **opts)])
         return i
 
     # --- semantic helpers -------------------------------------------------
@@ -460,7 +463,7 @@ def kafka_storage_free_by_pvc():
     )
     w.e(
         f"{filled_kafka_pvc_search('kubelet_volume_stats_available_bytes', 'Minimum')} / {GIB}",
-        "${PROP('Dim.persistentvolumeclaim')}",
+        None,
     )
     return w
 
@@ -509,8 +512,180 @@ def kafka_storage_health():
     )
     w.e(
         kafka_pvc_search("kubelet_volume_stats_health_status_abnormal"),
-        "${PROP('Dim.persistentvolumeclaim')}",
+        None,
     )
+    return w
+
+
+KAFKA_BROKER_PERIOD = 60
+KAFKA_BROKER_DIMENSIONS = [
+    "EKSClusterName",
+    "qualifier",
+    "namespace",
+    "kafka_cluster",
+    "pod",
+]
+
+
+def kafka_broker_search(metric, stat="Maximum", extra_dimensions=(), filters=()):
+    dimensions = ",".join([NS, *KAFKA_BROKER_DIMENSIONS, *extra_dimensions])
+    filter_text = "".join(f' {name}="{value}"' for name, value in filters)
+    selector = (
+        f'{{{dimensions}}} EKSClusterName="{EKS_CLUSTER}" '
+        f'qualifier="{Q}" namespace="{MA_NAMESPACE}"{filter_text} MetricName="{metric}"'
+    )
+    return f"SEARCH('{selector}', '{stat}', {KAFKA_BROKER_PERIOD})"
+
+
+def kafka_broker_replication():
+    w = W("Kafka replication and ISR health", period=KAFKA_BROKER_PERIOD)
+    w.e(
+        f"SUM({kafka_broker_search('kafka_server_replicamanager_under_replicated_partitions')})",
+        "Under-replicated partitions",
+    )
+    w.e(
+        f"SUM({kafka_broker_search('kafka_controller_offline_partitions_count')})",
+        "Offline partitions",
+    )
+    w.e(
+        f"SUM({kafka_broker_search('kafka_server_replicamanager_isr_expands_total', 'Sum')}) "
+        f"/ {KAFKA_BROKER_PERIOD}",
+        "ISR expands/s",
+    )
+    w.e(
+        f"SUM({kafka_broker_search('kafka_server_replicamanager_isr_shrinks_total', 'Sum')}) "
+        f"/ {KAFKA_BROKER_PERIOD}",
+        "ISR shrinks/s",
+    )
+    return w
+
+
+def kafka_broker_controller():
+    w = W(
+        "Kafka controller, quorum, and uptime",
+        period=KAFKA_BROKER_PERIOD,
+        yright={"label": "hours", "showUnits": False},
+    )
+    w.e(
+        f"SUM({kafka_broker_search('kafka_controller_active_controller_count')})",
+        "Active controllers",
+    )
+    w.e(
+        f"MIN({kafka_broker_search('kafka_server_raft_current_leader')})",
+        "Current quorum leader (minimum reported ID)",
+    )
+    w.e(
+        f"MAX({kafka_broker_search('kafka_server_raft_current_epoch')})",
+        "Current quorum epoch",
+    )
+    w.e(
+        f"MIN({kafka_broker_search('kafka_jvm_uptime_milliseconds')}) / 3600000",
+        "Youngest broker uptime",
+        yAxis="right",
+    )
+    return w
+
+
+def kafka_broker_requests():
+    w = W(
+        "Kafka produce/fetch errors and throttling",
+        period=KAFKA_BROKER_PERIOD,
+        yright={"label": "throttle ms", "showUnits": False},
+    )
+    for request, label in (
+        ("Produce", "Produce"),
+        ("FetchConsumer", "Consumer fetch"),
+        ("FetchFollower", "Follower fetch"),
+    ):
+        filters = (("request", request),)
+        errors = kafka_broker_search(
+            "kafka_network_request_errors_total",
+            "Sum",
+            ("request", "error"),
+            filters,
+        )
+        w.e(
+            f"SUM({errors}) / {KAFKA_BROKER_PERIOD}",
+            f"{label} errors/s",
+        )
+        throttle = kafka_broker_search(
+            "kafka_network_request_throttle_time_milliseconds",
+            "Maximum",
+            ("request",),
+            filters,
+        )
+        w.e(
+            f"MAX({throttle})",
+            f"{label} max throttle",
+            yAxis="right",
+        )
+    return w
+
+
+def kafka_broker_handlers():
+    w = W(
+        "Kafka request-handler saturation",
+        period=KAFKA_BROKER_PERIOD,
+        yleft={"min": 0, "max": 100, "label": "busy %", "showUnits": False},
+    )
+    idle = kafka_broker_search("kafka_server_request_handler_idle_ratio", "Average")
+    # Kafka 4.0 combined-role brokers add the broker and controller request
+    # handler idle fractions into this legacy metric. Normalize the two pools
+    # back to a 0..1 fraction before converting it to busy percent.
+    w.e(f"100 * (1 - AVG({idle}) / 2)", "Fleet average busy")
+    w.e(f"100 * (1 - MIN({idle}) / 2)", "Busiest broker")
+    return w
+
+
+def kafka_broker_jvm():
+    w = W(
+        "Kafka JVM heap and process CPU",
+        period=KAFKA_BROKER_PERIOD,
+        yleft={"min": 0, "max": 100, "label": "utilization %", "showUnits": False},
+    )
+    used = kafka_broker_search("kafka_jvm_heap_used_bytes")
+    capacity = kafka_broker_search("kafka_jvm_heap_max_bytes")
+    w.e(f"100 * SUM({used}) / SUM({capacity})", "Fleet heap utilization")
+    w.e(
+        f"100 * MAX({kafka_broker_search('kafka_jvm_process_cpu_ratio')})",
+        "Hottest broker process CPU",
+    )
+    return w
+
+
+def kafka_broker_gc():
+    w = W(
+        "Kafka JVM garbage collection",
+        period=KAFKA_BROKER_PERIOD,
+        yright={"label": "collections/s", "showUnits": False},
+    )
+    for collector, label in (
+        ("G1 Young Generation", "G1 young"),
+        ("G1 Old Generation", "G1 old"),
+        ("G1 Concurrent GC", "G1 concurrent"),
+    ):
+        filters = (("collector", collector),)
+        collection_time = kafka_broker_search(
+            "kafka_jvm_gc_collection_time_milliseconds_total",
+            "Sum",
+            ("collector",),
+            filters,
+        )
+        collections = kafka_broker_search(
+            "kafka_jvm_gc_collections_total",
+            "Sum",
+            ("collector",),
+            filters,
+        )
+        w.e(
+            f"SUM({collection_time}) / 1000 / {KAFKA_BROKER_PERIOD}",
+            f"{label} GC time (fleet seconds/s)",
+        )
+        w.e(
+            f"SUM({collections}) / {KAFKA_BROKER_PERIOD}",
+            f"{label} collections/s",
+            yAxis="right",
+        )
     return w
 
 
@@ -902,6 +1077,22 @@ def layout_columns():
     y += 7
     for i, b in enumerate([kafka_storage_inodes, kafka_storage_health]):
         ws.append(b().widget(i * 12, y, 12, 7))
+    y += 7
+    ws.append(text("## Kafka broker internals", 0, y, 24))
+    y += 1
+    ws.append(text(
+        "One-minute managed-broker JMX metrics exported to CloudWatch. Request/error dimensions are limited to "
+        "Produce, FetchConsumer, and FetchFollower; topic and partition labels are not exported. Kafka 4.0 "
+        "combined-role brokers report the request-handler idle fractions for both broker and controller pools, "
+        "so the saturation panel normalizes their sum by two.",
+        0, y, 24,
+    ))
+    y += 1
+    for i, b in enumerate([kafka_broker_replication, kafka_broker_controller, kafka_broker_requests]):
+        ws.append(b().widget(i * 8, y, 8, 7))
+    y += 7
+    for i, b in enumerate([kafka_broker_handlers, kafka_broker_jvm, kafka_broker_gc]):
+        ws.append(b().widget(i * 8, y, 8, 7))
     y += 7
     ws.append(text("## Source cluster and replayer internals", 0, y, 24))
     y += 1

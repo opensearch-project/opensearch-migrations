@@ -128,6 +128,40 @@ metrics:
                 - source_labels: [persistentvolumeclaim]
                   action: keep
                   regex: ^data(-[0-9]+)?-.+-dual-role-[0-9]+$
+      # CloudWatch scrape of the bounded managed-Kafka JMX rules. Prometheus
+      # continues to scrape the same endpoint through the broker PodMonitor.
+      prometheus/kafka-broker-cloudwatch:
+        config:
+          scrape_configs:
+            - job_name: 'kafka-broker-cloudwatch'
+              scrape_interval: 60s
+              kubernetes_sd_configs:
+                - role: pod
+              relabel_configs:
+                # Each DaemonSet collector scrapes only Kafka brokers on its
+                # own node so every endpoint is collected exactly once.
+                - source_labels: [__meta_kubernetes_pod_node_name]
+                  action: keep
+                  regex: ${K8S_NODE_NAME}
+                - source_labels: [__meta_kubernetes_namespace]
+                  action: keep
+                  regex: ^{{ .Release.Namespace }}$
+                - source_labels: [__meta_kubernetes_pod_label_strimzi_io_kind]
+                  action: keep
+                  regex: ^Kafka$
+                - source_labels: [__meta_kubernetes_pod_container_port_name]
+                  action: keep
+                  regex: ^tcp-prometheus$
+                - source_labels: [__meta_kubernetes_namespace]
+                  target_label: namespace
+                - source_labels: [__meta_kubernetes_pod_name]
+                  target_label: pod
+                - source_labels: [__meta_kubernetes_pod_label_strimzi_io_cluster]
+                  target_label: kafka_cluster
+              metric_relabel_configs:
+                - source_labels: [__name__]
+                  action: keep
+                  regex: ^kafka_(server_replicamanager_(under_replicated_partitions|isr_(expands|shrinks)_total)|controller_(offline_partitions_count|active_controller_count)|server_raft_current_(leader|epoch)|network_request_(errors_total|throttle_time_milliseconds)|server_request_handler_idle_ratio|jvm_(heap_(used|max)_bytes|gc_(collections_total|collection_time_milliseconds_total)|process_cpu_ratio|uptime_milliseconds))$
     processors:
       batch:
         timeout: 10s
@@ -140,6 +174,14 @@ metrics:
             value: ${env:QUALIFIER}
             action: upsert
       resource/kafka-pvc:
+        attributes:
+          - key: EKSClusterName
+            value: ${env:EKS_CLUSTER_NAME}
+            action: upsert
+          - key: qualifier
+            value: ${env:QUALIFIER}
+            action: upsert
+      resource/kafka-broker:
         attributes:
           - key: EKSClusterName
             value: ${env:EKS_CLUSTER_NAME}
@@ -165,6 +207,15 @@ metrics:
       cumulativetodelta/cadvisor:
         include:
           metrics: [container_cpu_usage_seconds_total]
+          match_type: strict
+      cumulativetodelta/kafka-broker:
+        include:
+          metrics:
+            - kafka_server_replicamanager_isr_expands_total
+            - kafka_server_replicamanager_isr_shrinks_total
+            - kafka_network_request_errors_total
+            - kafka_jvm_gc_collections_total
+            - kafka_jvm_gc_collection_time_milliseconds_total
           match_type: strict
       metricstransform/cadvisor:
         transforms:
@@ -225,6 +276,28 @@ metrics:
           - dimensions: [[EKSClusterName, qualifier, namespace, persistentvolumeclaim]]
             metric_name_selectors:
               - ^kubelet_volume_stats_(available_bytes|capacity_bytes|inodes|inodes_free|health_status_abnormal)$
+      awsemf/kafka-broker:
+        namespace: 'OpenSearchMigrations'
+        dimension_rollup_option: NoDimensionRollup
+        resource_to_telemetry_conversion:
+          enabled: true
+        metric_declarations:
+          - dimensions: [[EKSClusterName, qualifier, namespace, kafka_cluster, pod]]
+            metric_name_selectors:
+              - ^kafka_server_replicamanager_(under_replicated_partitions|isr_(expands|shrinks)_total)$
+              - ^kafka_controller_(offline_partitions_count|active_controller_count)$
+              - ^kafka_server_raft_current_(leader|epoch)$
+              - ^kafka_server_request_handler_idle_ratio$
+              - ^kafka_jvm_(heap_(used|max)_bytes|process_cpu_ratio|uptime_milliseconds)$
+          - dimensions: [[EKSClusterName, qualifier, namespace, kafka_cluster, pod, request, error]]
+            metric_name_selectors:
+              - ^kafka_network_request_errors_total$
+          - dimensions: [[EKSClusterName, qualifier, namespace, kafka_cluster, pod, request]]
+            metric_name_selectors:
+              - ^kafka_network_request_throttle_time_milliseconds$
+          - dimensions: [[EKSClusterName, qualifier, namespace, kafka_cluster, pod, collector]]
+            metric_name_selectors:
+              - ^kafka_jvm_gc_(collections_total|collection_time_milliseconds_total)$
       prometheus:
         endpoint: "0.0.0.0:8889"
         send_timestamps: true
@@ -253,6 +326,10 @@ metrics:
           receivers: [prometheus/kafka-pvc-cloudwatch]
           processors: [resource/remove_default_attributes, resource/kafka-pvc, batch]
           exporters: [awsemf/kafka-pvc]
+        metrics/kafka-broker-cloudwatch:
+          receivers: [prometheus/kafka-broker-cloudwatch]
+          processors: [cumulativetodelta/kafka-broker, resource/remove_default_attributes, resource/kafka-broker, batch]
+          exporters: [awsemf/kafka-broker]
 
 logs:
   sharedLogsVolume:

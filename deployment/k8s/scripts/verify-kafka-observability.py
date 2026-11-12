@@ -317,7 +317,7 @@ class KafkaObservabilityTests(unittest.TestCase):
             "dimensions: [[EKSClusterName, qualifier, namespace, persistentvolumeclaim]]",
             collector,
         )
-        exporter = collector.split("awsemf/kafka-pvc:", 1)[1].split("\n  prometheus:", 1)[0]
+        exporter = collector.split("awsemf/kafka-pvc:", 1)[1].split("\n  awsemf/kafka-broker:", 1)[0]
         dimension_lines = [
             line.strip().lstrip("- ") for line in exporter.splitlines()
             if "dimensions:" in line
@@ -327,6 +327,26 @@ class KafkaObservabilityTests(unittest.TestCase):
             ["dimensions: [[EKSClusterName, qualifier, namespace, persistentvolumeclaim]]"],
         )
         self.assertIn("value: ${env:EKS_CLUSTER_NAME}", collector)
+
+    def test_eks_collector_exports_bounded_broker_jmx_metrics(self):
+        blocks = literal_blocks(self.eks_render, "collector.yaml")
+        self.assertEqual(len(blocks), 1)
+        collector = blocks[0]
+        self.assertIn("prometheus/kafka-broker-cloudwatch:", collector)
+        self.assertIn("scrape_interval: 60s", collector)
+        self.assertIn("regex: ${K8S_NODE_NAME}", collector)
+        self.assertIn("regex: ^tcp-prometheus$", collector)
+        self.assertIn("awsemf/kafka-broker:", collector)
+        self.assertIn(
+            "dimensions: [[EKSClusterName, qualifier, namespace, kafka_cluster, pod]]",
+            collector,
+        )
+        self.assertIn(
+            "dimensions: [[EKSClusterName, qualifier, namespace, kafka_cluster, pod, request, error]]",
+            collector,
+        )
+        self.assertIn("cumulativetodelta/kafka-broker", collector)
+        self.assertNotIn("topic, partition", collector)
 
     def test_cloudwatch_dashboard_uses_renderable_available_over_capacity(self):
         dashboard = json.loads(
@@ -390,7 +410,48 @@ class KafkaObservabilityTests(unittest.TestCase):
         health = widgets["Kafka abnormal volume health"]
         health_expression = health["properties"]["metrics"][0][0]
         self.assertIn("kubelet_volume_stats_health_status_abnormal", health_expression["expression"])
-        self.assertEqual(health_expression["label"], "${PROP('Dim.persistentvolumeclaim')}")
+        self.assertNotIn("label", health_expression)
+
+        for title in (
+            "Kafka replication and ISR health",
+            "Kafka controller, quorum, and uptime",
+            "Kafka produce/fetch errors and throttling",
+            "Kafka request-handler saturation",
+            "Kafka JVM heap and process CPU",
+            "Kafka JVM garbage collection",
+        ):
+            self.assertIn(title, widgets)
+        broker_expressions = "\n".join(
+            row[0]["expression"]
+            for title, widget in widgets.items()
+            if title and title.startswith("Kafka ")
+            for row in widget.get("properties", {}).get("metrics", [])
+            if row and isinstance(row[0], dict) and "expression" in row[0]
+        )
+        self.assertIn("kafka_cluster,pod", broker_expressions)
+        self.assertIn("kafka_server_replicamanager_under_replicated_partitions", broker_expressions)
+        self.assertIn("kafka_network_request_throttle_time_milliseconds", broker_expressions)
+        self.assertIn("100 * SUM(", broker_expressions)
+        handlers = widgets["Kafka request-handler saturation"]["properties"]["metrics"]
+        self.assertTrue(all("/ 2)" in row[0]["expression"] for row in handlers))
+        gc_rows = widgets["Kafka JVM garbage collection"]["properties"]["metrics"]
+        self.assertEqual(len(gc_rows), 6)
+        self.assertNotIn(
+            "${PROP('Dim.collector')}",
+            "\n".join(row[0]["label"] for row in gc_rows),
+        )
+        self.assertTrue(all("collector=" in row[0]["expression"] for row in gc_rows))
+        for title in (
+            "Kafka produce/fetch errors and throttling",
+            "Kafka JVM garbage collection",
+        ):
+            self.assertNotIn(
+                "${PROP(",
+                "\n".join(
+                    row[0].get("label", "")
+                    for row in widgets[title]["properties"]["metrics"]
+                ),
+            )
 
         text_content = "\n".join(
             widget.get("properties", {}).get("markdown", "")
@@ -451,18 +512,23 @@ class KafkaObservabilityTests(unittest.TestCase):
         self.assertIn('--set aws.eksClusterName="${MIGRATIONS_EKS_CLUSTER_NAME}"', bootstrap)
         self.assertIn("aws.eksClusterName={eks_cluster_name}", rust)
 
-    def test_broker_jmx_rules_and_monitor_are_opt_in(self):
+    def test_broker_jmx_rules_and_monitor_are_enabled_by_default(self):
         self.assertIn("name: migration-assistant-kafka-jmx-metrics", self.default_render)
-        self.assertIn("rules: []", self.default_render)
-        self.assertNotIn("kind: PodMonitor", self.default_render)
-        enabled = render(
+        self.assertIn("kafka_server_replicamanager_under_replicated_partitions", self.default_render)
+        self.assertIn("kind: PodMonitor", self.default_render)
+        self.assertIn("request=(Produce|FetchConsumer|FetchFollower)", self.default_render)
+        self.assertIn(
+            "java.lang<name=(.+), type=GarbageCollector><>CollectionCount",
+            self.default_render,
+        )
+        disabled = render(
             self.args.helm,
             self.chart,
             "--set",
-            "kafkaObservability.brokerMetrics.enabled=true",
+            "kafkaObservability.brokerMetrics.enabled=false",
         )
-        self.assertIn("kafka_server_replicamanager_under_replicated_partitions", enabled)
-        self.assertIn("kind: PodMonitor", enabled)
+        self.assertIn("rules: []", disabled)
+        self.assertNotIn("kind: PodMonitor", disabled)
         setup_kafka = (
             self.repo
             / "orchestrationSpecs/packages/migration-workflow-templates/src/workflowTemplates/setupKafka.ts"
@@ -471,7 +537,16 @@ class KafkaObservabilityTests(unittest.TestCase):
         self.assertIn("configMapKeyRef: expr.makeDict", setup_kafka)
         self.assertIn('name: KAFKA_JMX_METRICS_CONFIG_MAP', setup_kafka)
 
-    def test_broker_alerts_obey_alertmanager_and_storage_alert_gates(self):
+    def test_broker_alerts_have_an_independent_enablement_gate(self):
+        storage_only = render(
+            self.args.helm,
+            self.chart,
+            "--set",
+            "charts.kube-prometheus-stack.values.alertmanager.enabled=true",
+            "--set",
+            "kafkaObservability.prometheusAlerts.enabled=true",
+        )
+        self.assertNotIn("MigrationAssistantKafkaUnderReplicatedPartitions", storage_only)
         enabled = render(
             self.args.helm,
             self.chart,
@@ -481,6 +556,8 @@ class KafkaObservabilityTests(unittest.TestCase):
             "kafkaObservability.prometheusAlerts.enabled=true",
             "--set",
             "kafkaObservability.brokerMetrics.enabled=true",
+            "--set",
+            "kafkaObservability.brokerMetrics.alertsEnabled=true",
         )
         expected_alerts = (
             "MigrationAssistantKafkaUnderReplicatedPartitions",

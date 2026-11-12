@@ -31,7 +31,7 @@ data:
       - pattern: 'kafka.server<type=raft-metrics><>current-epoch'
         name: kafka_server_raft_current_epoch
         type: GAUGE
-      - pattern: 'kafka.network<type=RequestMetrics, name=ErrorsPerSec, request=(.+), error=(.+)><>Count'
+      - pattern: 'kafka.network<type=RequestMetrics, name=ErrorsPerSec, request=(Produce|FetchConsumer|FetchFollower), error=(?!NONE)(.+)><>Count'
         name: kafka_network_request_errors_total
         type: COUNTER
         labels:
@@ -51,12 +51,12 @@ data:
       - pattern: 'java.lang<type=Memory><HeapMemoryUsage>max'
         name: kafka_jvm_heap_max_bytes
         type: GAUGE
-      - pattern: 'java.lang<type=GarbageCollector, name=(.+)><>CollectionCount'
+      - pattern: 'java.lang<name=(.+), type=GarbageCollector><>CollectionCount'
         name: kafka_jvm_gc_collections_total
         type: COUNTER
         labels:
           collector: '$1'
-      - pattern: 'java.lang<type=GarbageCollector, name=(.+)><>CollectionTime'
+      - pattern: 'java.lang<name=(.+), type=GarbageCollector><>CollectionTime'
         name: kafka_jvm_gc_collection_time_milliseconds_total
         type: COUNTER
         labels:

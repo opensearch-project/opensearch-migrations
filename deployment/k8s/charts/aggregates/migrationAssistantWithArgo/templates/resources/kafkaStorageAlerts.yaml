@@ -270,7 +270,7 @@ data:
                   The CSI/kubelet health signal for Kafka PVC
                   {{ "{{ $labels.namespace }}" }}/{{ "{{ $labels.persistentvolumeclaim }}" }} is abnormal.
 {{- end }}
-{{- if .Values.kafkaObservability.brokerMetrics.enabled }}
+{{- if and .Values.kafkaObservability.brokerMetrics.enabled .Values.kafkaObservability.brokerMetrics.alertsEnabled }}
 
             - alert: MigrationAssistantKafkaUnderReplicatedPartitions
               expr: max by (namespace, pod) (kafka_server_replicamanager_under_replicated_partitions{namespace="{{ .Release.Namespace }}"}) > 0

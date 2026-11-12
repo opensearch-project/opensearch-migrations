@@ -382,7 +382,8 @@ kafkaObservability:
     enabled: false
     snsActionArns: []
   brokerMetrics:
-    enabled: false
+    enabled: true
+    alertsEnabled: false
 
 tracing:
   enabled: false

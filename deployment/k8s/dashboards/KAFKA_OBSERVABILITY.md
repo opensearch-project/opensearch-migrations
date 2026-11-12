@@ -165,20 +165,12 @@ alarm creation, update, and deletion; an EKS deployment is still required to
 validate the live ACK lifecycle, contributor behavior, and notifications.
 A CloudWatch fill forecast is not configured initially.
 
-## Opt-in broker JMX health
+## Broker JMX health
 
-Broker JMX metrics are disabled by default. Enable the rules and broker
-`PodMonitor` with:
-
-```yaml
-kafkaObservability:
-  brokerMetrics:
-    enabled: true
-```
-
-Managed Kafka resources reference the shipped JMX exporter ConfigMap through
-`spec.kafka.metricsConfig`. When the switch is off, the ConfigMap has no
-rules. When it is on, Grafana panels and gated Prometheus alert rules cover:
+Broker JMX metrics are enabled by default for Migration Assistant-managed
+Kafka. Prometheus scrapes the broker `PodMonitor`; on EKS, the standard metrics
+collector also scrapes each local broker once per minute and exports the same
+bounded metric set to CloudWatch. Grafana and CloudWatch panels cover:
 
 - under-replicated and offline partitions;
 - ISR expansion and shrink events;
@@ -187,7 +179,44 @@ rules. When it is on, Grafana panels and gated Prometheus alert rules cover:
 - request-handler saturation; and
 - JVM heap, garbage collection, CPU, and process uptime.
 
-The JMX rules do not export topic or partition labels. Migration Assistant does
-not expose Strimzi `kafkaExporter` through the workflow schema initially:
-broker health is supplied by JMX, while omitting exporter topic/partition
-series keeps default cardinality bounded to migration-relevant signals.
+Kafka 4.0 combined-role brokers expose `RequestHandlerAvgIdlePercent` as the
+sum of the broker and controller request-handler pool idle fractions. The
+CloudWatch saturation panel divides that value by two before converting it to
+busy percent. This keeps the displayed value on a 0–100% scale for the
+Migration Assistant-managed dual-role broker pool.
+
+Collection can be disabled explicitly:
+
+```yaml
+kafkaObservability:
+  brokerMetrics:
+    enabled: false
+```
+
+Managed Kafka resources reference the shipped JMX exporter ConfigMap through
+`spec.kafka.metricsConfig`. When collection is disabled, the ConfigMap has no
+rules and the broker `PodMonitor` is removed.
+
+Broker alerts remain disabled independently. They render only when
+Alertmanager, Kafka Prometheus alerts, and broker alerts are all enabled:
+
+```yaml
+kafkaObservability:
+  prometheusAlerts:
+    enabled: true
+  brokerMetrics:
+    alertsEnabled: true
+charts:
+  kube-prometheus-stack:
+    values:
+      alertmanager:
+        enabled: true
+```
+
+The JMX rules restrict request metrics to produce and consumer/follower fetch
+traffic and do not export topic or partition labels. CloudWatch uses
+`EKSClusterName`, `qualifier`, `namespace`, `kafka_cluster`, and `pod`, adding
+`request`, `error`, or `collector` only to the metrics that require them.
+Migration Assistant does not expose Strimzi `kafkaExporter` through the
+workflow schema initially; broker health is supplied by JMX while default
+cardinality remains bounded.

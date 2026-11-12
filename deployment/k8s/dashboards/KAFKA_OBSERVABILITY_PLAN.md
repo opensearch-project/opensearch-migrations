@@ -210,12 +210,13 @@ Working branch: `codex/kafka-observability`
     reached `Ready` without validation messages. Alarm lifecycle and
     contributor notifications remain unverified.
 
-## 7. Add follow-on Kafka broker health
+## 7. Add Kafka broker health
 
-- [x] Add an opt-in JMX exporter rules ConfigMap.
+- [x] Add a JMX exporter rules ConfigMap enabled by default for managed Kafka.
 - [x] Configure managed Kafka with `spec.kafka.metricsConfig`.
 - [x] Add a broker `PodMonitor`.
-- [x] Add panels and alerts for:
+- [x] Keep broker alerts independently disabled by default.
+- [x] Add Prometheus panels and opt-in alerts for:
   - under-replicated and offline partitions
   - ISR expansion and shrink events
   - controller and quorum health
@@ -226,3 +227,18 @@ Working branch: `codex/kafka-observability`
   schema.
 - [x] Keep topic-level metrics bounded to migration topics and avoid partition
   as a default CloudWatch dimension.
+- [x] Export the bounded broker JMX metric set through the standard EKS
+  collector with per-broker CloudWatch dimensions.
+- [x] Add CloudWatch panels for replication, ISR, controller/quorum,
+  produce/fetch health, request-handler saturation, and JVM health.
+- [x] Validate at least ten minutes of broker JMX data on EKS.
+  - On 2026-11-12, `migration-eks-cluster-eop09-us-east-2` exported 12
+    per-broker series with the bounded `EKSClusterName`, `qualifier`,
+    `namespace`, `kafka_cluster`, and `pod` dimensions. During
+    `k6-ingest-connection-modes-prjkl`, CloudWatch returned complete CPU,
+    request-handler, heap, GC, and under-replicated-partition expressions
+    across 12 consecutive one-minute points from 06:29–06:40 UTC. The
+    proxy-to-Kafka load marker supplied 11 points spanning exactly 600 seconds
+    from 06:30–06:40 UTC while ramping to approximately 79.6K records/s. All
+    12 brokers and 31 collectors remained ready, with no broker restarts or
+    failed k6 runners.

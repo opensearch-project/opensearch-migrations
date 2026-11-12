@@ -3109,7 +3109,7 @@ data:
         },
         {
           "type": "row",
-          "title": "Kafka broker health (opt-in JMX)",
+          "title": "Kafka broker health",
           "collapsed": false,
           "gridPos": {
             "h": 1,
@@ -3123,7 +3123,7 @@ data:
         {
           "type": "timeseries",
           "title": "Kafka partition replication health",
-          "description": "Under-replicated and offline partitions from the opt-in managed Kafka JMX exporter.",
+          "description": "Under-replicated and offline partitions from the managed Kafka JMX exporter.",
           "datasource": {
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
@@ -3371,7 +3371,7 @@ data:
         {
           "type": "timeseries",
           "title": "Kafka JVM and process health",
-          "description": "Heap and process CPU percentages plus garbage-collection seconds per second. Metrics are absent while the opt-in broker JMX rules are disabled.",
+          "description": "Heap and process CPU percentages plus garbage-collection seconds per second.",
           "datasource": {
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
