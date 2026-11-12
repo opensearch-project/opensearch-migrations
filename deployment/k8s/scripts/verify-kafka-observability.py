@@ -21,6 +21,7 @@ ALERTMANAGER_ENABLED = "charts.kube-prometheus-stack.values.alertmanager.enabled
 FILL_SEARCH = "FILL(SEARCH("
 SUM_FILL_SEARCH = "SUM(" + FILL_SEARCH
 GC_WIDGET_TITLE = "Kafka JVM garbage collection"
+HANDLER_SATURATION_TITLE = "Kafka request-handler saturation"
 
 
 def load_generator(path):
@@ -235,7 +236,7 @@ class KafkaObservabilityTests(unittest.TestCase):
     def test_request_handler_saturation_is_normalized_everywhere(self):
         halved = 'kafka_server_request_handler_idle_ratio{namespace="%s"}) / 2)'
         dashboard = embedded_grafana(self.default_render)
-        panel = next(p for p in dashboard["panels"] if p.get("title") == "Kafka request-handler saturation")
+        panel = next(p for p in dashboard["panels"] if p.get("title") == HANDLER_SATURATION_TITLE)
         self.assertIn(halved % "$namespace", panel["targets"][0]["expr"])
         alerts = render(
             self.args.helm,
@@ -399,7 +400,7 @@ class KafkaObservabilityTests(unittest.TestCase):
             "Kafka replication and ISR health",
             "Kafka controller, quorum, and uptime",
             "Kafka produce/fetch errors and throttling",
-            "Kafka request-handler saturation",
+            HANDLER_SATURATION_TITLE,
             "Kafka JVM heap and process CPU",
             GC_WIDGET_TITLE,
         ):
@@ -415,7 +416,7 @@ class KafkaObservabilityTests(unittest.TestCase):
         self.assertIn("kafka_server_replicamanager_under_replicated_partitions", broker_expressions)
         self.assertIn("kafka_network_request_throttle_time_milliseconds", broker_expressions)
         self.assertIn("100 * SUM(", broker_expressions)
-        handlers = widgets["Kafka request-handler saturation"]["properties"]["metrics"]
+        handlers = widgets[HANDLER_SATURATION_TITLE]["properties"]["metrics"]
         self.assertTrue(all("/ 2)" in row[0]["expression"] for row in handlers))
         gc_rows = widgets[GC_WIDGET_TITLE]["properties"]["metrics"]
         self.assertEqual(len(gc_rows), 6)
