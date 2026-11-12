@@ -156,7 +156,7 @@
                 "metrics": [
                     [
                         {
-                            "expression": "(SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,sourceStatusCode,statusCodesMatch,targetStatusCode} MetricName=\"tupleComparison\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)) + FILL(SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,statusCodesMatch,targetStatusCode} MetricName=\"tupleComparison\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)), 0)) / 60",
+                            "expression": "SUM(SEARCH('Namespace=\"OpenSearchMigrations\" MetricName=\"tupleComparison\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)) / 60",
                             "id": "e1",
                             "visible": true,
                             "label": "Replayed tuples/s"
@@ -364,7 +364,7 @@
                 "metrics": [
                     [
                         {
-                            "expression": "100 * SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,sourceStatusCode,statusCodesMatch,targetStatusCode} MetricName=\"tupleComparison\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\" statusCodesMatch=\"true\"', 'Sum', 60)) / (SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,sourceStatusCode,statusCodesMatch,targetStatusCode} MetricName=\"tupleComparison\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)) + FILL(SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,statusCodesMatch,targetStatusCode} MetricName=\"tupleComparison\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)), 0))",
+                            "expression": "IF(SUM(SEARCH('Namespace=\"OpenSearchMigrations\" MetricName=\"tupleComparison\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)) > 0, 100 * SUM(SEARCH('Namespace=\"OpenSearchMigrations\" MetricName=\"tupleComparison\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\" statusCodesMatch=\"true\"', 'Sum', 60)) / SUM(SEARCH('Namespace=\"OpenSearchMigrations\" MetricName=\"tupleComparison\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)))",
                             "id": "e1",
                             "visible": true,
                             "label": "Match %"
@@ -445,7 +445,7 @@
                 "metrics": [
                     [
                         {
-                            "expression": "100 * SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,sourceStatusCode,statusCodesMatch,targetStatusCode} MetricName=\"tupleComparison\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\" statusCodesMatch=\"true\"', 'Sum', 60)) / (SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,sourceStatusCode,statusCodesMatch,targetStatusCode} MetricName=\"tupleComparison\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)) + FILL(SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,statusCodesMatch,targetStatusCode} MetricName=\"tupleComparison\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)), 0))",
+                            "expression": "IF(SUM(SEARCH('Namespace=\"OpenSearchMigrations\" MetricName=\"tupleComparison\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)) > 0, 100 * SUM(SEARCH('Namespace=\"OpenSearchMigrations\" MetricName=\"tupleComparison\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\" statusCodesMatch=\"true\"', 'Sum', 60)) / SUM(SEARCH('Namespace=\"OpenSearchMigrations\" MetricName=\"tupleComparison\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)))",
                             "id": "e1",
                             "visible": true,
                             "label": "Match %"
@@ -595,7 +595,7 @@
                 "metrics": [
                     [
                         {
-                            "expression": "(FILL(SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,span,targetSlower} MetricName=\"tupleResponseDurationDifference\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\" span=\"firstByte\" targetSlower=\"true\"', 'Sum', 60)), 0) - FILL(SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,span,targetSlower} MetricName=\"tupleResponseDurationDifference\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\" span=\"firstByte\" targetSlower=\"false\"', 'Sum', 60)), 0)) / SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,span,targetSlower} MetricName=\"tupleResponseDurationDifference\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\" span=\"firstByte\"', 'SampleCount', 60))",
+                            "expression": "IF(SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,span,targetSlower} MetricName=\"tupleResponseDurationDifference\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\" span=\"firstByte\"', 'SampleCount', 60)) > 0, (FILL(SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,span,targetSlower} MetricName=\"tupleResponseDurationDifference\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\" span=\"firstByte\" targetSlower=\"true\"', 'Sum', 60)), 0) - FILL(SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,span,targetSlower} MetricName=\"tupleResponseDurationDifference\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\" span=\"firstByte\" targetSlower=\"false\"', 'Sum', 60)), 0)) / SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,span,targetSlower} MetricName=\"tupleResponseDurationDifference\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\" span=\"firstByte\"', 'SampleCount', 60)))",
                             "id": "e1",
                             "visible": true,
                             "label": "To first byte"
@@ -603,7 +603,7 @@
                     ],
                     [
                         {
-                            "expression": "(FILL(SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,span,targetSlower} MetricName=\"tupleResponseDurationDifference\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\" span=\"total\" targetSlower=\"true\"', 'Sum', 60)), 0) - FILL(SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,span,targetSlower} MetricName=\"tupleResponseDurationDifference\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\" span=\"total\" targetSlower=\"false\"', 'Sum', 60)), 0)) / SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,span,targetSlower} MetricName=\"tupleResponseDurationDifference\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\" span=\"total\"', 'SampleCount', 60))",
+                            "expression": "IF(SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,span,targetSlower} MetricName=\"tupleResponseDurationDifference\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\" span=\"total\"', 'SampleCount', 60)) > 0, (FILL(SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,span,targetSlower} MetricName=\"tupleResponseDurationDifference\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\" span=\"total\" targetSlower=\"true\"', 'Sum', 60)), 0) - FILL(SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,span,targetSlower} MetricName=\"tupleResponseDurationDifference\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\" span=\"total\" targetSlower=\"false\"', 'Sum', 60)), 0)) / SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,span,targetSlower} MetricName=\"tupleResponseDurationDifference\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\" span=\"total\"', 'SampleCount', 60)))",
                             "id": "e2",
                             "visible": true,
                             "label": "To response complete"
@@ -755,7 +755,7 @@
                     ],
                     [
                         {
-                            "expression": "(SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,sourceStatusCode,statusCodesMatch,targetStatusCode} MetricName=\"tupleComparison\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)) + FILL(SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,statusCodesMatch,targetStatusCode} MetricName=\"tupleComparison\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)), 0)) / 60",
+                            "expression": "SUM(SEARCH('Namespace=\"OpenSearchMigrations\" MetricName=\"tupleComparison\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)) / 60",
                             "id": "e8",
                             "visible": true,
                             "label": "Tuples compared/s"
@@ -4330,7 +4330,7 @@
             "width": 8,
             "height": 7,
             "properties": {
-                "title": "Kafka request-handler saturation",
+                "title": "Kafka broker/controller request-handler utilization (average)",
                 "view": "timeSeries",
                 "stacked": false,
                 "region": "placeholder-region",

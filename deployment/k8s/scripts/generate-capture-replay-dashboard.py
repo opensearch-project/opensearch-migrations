@@ -123,7 +123,7 @@ def text(md, x, y, w, h=1):
 
 
 def tuple_search(match=None, period=60):
-    """Both tupleComparison schemas: with sourceStatusCode and without it (source response missing).
+    """Separate tupleComparison schemas: with sourceStatusCode and without it (source response missing).
 
     period=None leaves SEARCH's period unset, so each point covers the graph's own period.
     """
@@ -134,6 +134,13 @@ def tuple_search(match=None, period=60):
     no_src = (f"SEARCH('{{{NS},OTelLib,method,qualifier,statusCodesMatch,targetStatusCode}} "
               f"MetricName=\"tupleComparison\" OTelLib=\"replayer\" qualifier=\"{Q}\"{m}', 'Sum'{p})")
     return with_src, no_src
+
+
+def all_tuples_search(match=None, period=60):
+    """All tupleComparison series, regardless of whether optional dimensions are present."""
+    m = f" statusCodesMatch=\"{match}\"" if match else ""
+    return (f"SEARCH('Namespace=\"{NS}\" MetricName=\"tupleComparison\" OTelLib=\"replayer\" "
+            f"qualifier=\"{Q}\"{m}', 'Sum', {period})")
 
 
 def es(w, metric, stat, label, domain_var="TARGET_DOMAIN", scale=None, **opts):
@@ -175,8 +182,7 @@ def kpis():
     w.rate("fullRequest", "Captured req/s", lib="captureProxy")
     out.append(w)
     w = W("Replayed tuples/s", "singleValue")
-    a, b = tuple_search()
-    w.e(f"(SUM({a}) + FILL(SUM({b}), 0)) / 60", "Replayed tuples/s")
+    w.e(f"SUM({all_tuples_search()}) / 60", "Replayed tuples/s")
     out.append(w)
     w = W("Mean replay lag (s)", "singleValue")
     lag = w.unitless_mean("lagBetweenSourceAndTargetRequests")
@@ -192,9 +198,8 @@ def kpis():
     w.e(f"IF(DIFF_TIME({s}) > PERIOD({s}), 0/0, 1 - RATE({s}))", "Speedup")
     out.append(w)
     w = W("Status-code match %", "singleValue")
-    a, b = tuple_search()
-    ma, _ = tuple_search("true")
-    w.e(f"100 * SUM({ma}) / (SUM({a}) + FILL(SUM({b}), 0))", "Match %")
+    total = f"SUM({all_tuples_search()})"
+    w.e(f"IF({total} > 0, 100 * SUM({all_tuples_search('true')}) / {total})", "Match %")
     out.append(w)
     w = W("Target CPU / JVM pressure (max node %)", "singleValue")
     es(w, "CPUUtilization", "Maximum", "CPU %")
@@ -211,8 +216,7 @@ def flow_requests():
         "Proxy Kafka records published/s")
     w.rate("kafkaSourceRecordsRead", "Replayer Kafka records read/s")
     w.rate("targetTransactionCount", "Replayer target transactions/s")
-    a, b = tuple_search()
-    w.e(f"(SUM({a}) + FILL(SUM({b}), 0)) / 60", "Tuples compared/s")
+    w.e(f"SUM({all_tuples_search()}) / 60", "Tuples compared/s")
     return w
 
 
@@ -625,7 +629,7 @@ def kafka_broker_requests():
 
 def kafka_broker_handlers():
     w = W(
-        "Kafka request-handler saturation",
+        "Kafka broker/controller request-handler utilization (average)",
         period=KAFKA_BROKER_PERIOD,
         yleft={"min": 0, "max": 100, "label": "busy %", "showUnits": False},
     )
@@ -870,9 +874,8 @@ def fleet_target():
 # --- correctness -----------------------------------------------------------------------------
 def status_match_pct():
     w = W("Status-code match % (includes missing source responses)", yleft={"min": 0, "max": 100})
-    a, b = tuple_search()
-    ma, _ = tuple_search("true")
-    w.e(f"100 * SUM({ma}) / (SUM({a}) + FILL(SUM({b}), 0))", "Match %")
+    total = f"SUM({all_tuples_search()})"
+    w.e(f"IF({total} > 0, 100 * SUM({all_tuples_search('true')}) / {total})", "Match %")
     return w
 
 
@@ -929,8 +932,11 @@ def response_time_diff():
         slower, faster = (response_search(name, "Sum", dims, f" span=\"{span}\" targetSlower=\"{t}\"")
                           for t in ("true", "false"))
         count = response_search(name, "SampleCount", dims, f" span=\"{span}\"")
+        total = f"SUM({count})"
         # The exact signed mean: magnitudes where the target was slower, less those where it was not, over all pairs.
-        w.e(f"(FILL(SUM({slower}), 0) - FILL(SUM({faster}), 0)) / SUM({count})", label)
+        # Omit idle periods instead of dividing by an empty or zero sample count, which CloudWatch reports as an
+        # arithmetic warning even though it drops the resulting non-numeric point.
+        w.e(f"IF({total} > 0, (FILL(SUM({slower}), 0) - FILL(SUM({faster}), 0)) / {total})", label)
     return w
 
 

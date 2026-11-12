@@ -20,7 +20,8 @@ free; dashboards convert them to utilization only at presentation time.
 {{- if or (lt $inode 0) (gt $inode 100) -}}
   {{- fail "kafkaObservability.storage.inodeFreePercent must be between 0 and 100" -}}
 {{- end -}}
-{{- if not (regexMatch "^([0-9]+(ms|s|m|h|d|w|y))+$" (toString $storage.forecastLookback)) -}}
+{{- $forecastLookback := toString $storage.forecastLookback -}}
+{{- if or (eq $forecastLookback "") (not (regexMatch "^([0-9]+y)?([0-9]+w)?([0-9]+d)?([0-9]+h)?([0-9]+m)?([0-9]+s)?([0-9]+ms)?$" $forecastLookback)) -}}
   {{- fail "kafkaObservability.storage.forecastLookback must be a Prometheus duration such as 6h" -}}
 {{- end -}}
 {{- if lt (int $storage.projectedFillWarningHorizonHours) 1 -}}

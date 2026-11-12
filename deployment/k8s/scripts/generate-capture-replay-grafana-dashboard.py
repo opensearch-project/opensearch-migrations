@@ -498,7 +498,7 @@ def kafka_request_saturation():
     # into this legacy metric; halve the sum to recover a 0..1 fraction (as the CloudWatch panel does).
     busy = ('100 * (1 - avg by (pod) '
             '(kafka_server_request_handler_idle_ratio{namespace="$namespace"}) / 2)')
-    return (P("Kafka request-handler saturation",
+    return (P("Kafka broker/controller request-handler utilization (average)",
               "Percent busy for each broker. Combined-role brokers report the sum of the broker and controller "
               "request-handler idle fractions, so the sum is halved before it is converted to busy percent.",
               unit="percent", mx=100)

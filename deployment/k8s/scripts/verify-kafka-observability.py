@@ -21,7 +21,7 @@ ALERTMANAGER_ENABLED = "charts.kube-prometheus-stack.values.alertmanager.enabled
 FILL_SEARCH = "FILL(SEARCH("
 SUM_FILL_SEARCH = "SUM(" + FILL_SEARCH
 GC_WIDGET_TITLE = "Kafka JVM garbage collection"
-HANDLER_SATURATION_TITLE = "Kafka request-handler saturation"
+HANDLER_SATURATION_TITLE = "Kafka broker/controller request-handler utilization (average)"
 
 
 def load_generator(path):
@@ -190,6 +190,51 @@ class KafkaObservabilityTests(unittest.TestCase):
             )
             checked_in = self.chart / "files/cloudwatch-dashboards/capture-replay-dashboard.json"
             self.assertEqual(generated.read_text(), checked_in.read_text())
+
+    def test_cloudwatch_tuple_aggregates_accept_optional_source_status_dimension(self):
+        dashboard = json.loads(
+            (self.chart / "files/cloudwatch-dashboards/capture-replay-dashboard.json").read_text()
+        )
+        widgets = {
+            widget.get("properties", {}).get("title"): widget
+            for widget in dashboard["widgets"]
+        }
+        aggregate_widgets = [
+            widgets["Replayed tuples/s"],
+            widgets["Status-code match %"],
+            widgets["Requests through the pipeline (per second)"],
+            widgets["Status-code match % (includes missing source responses)"],
+        ]
+        expressions = [
+            row[0]["expression"]
+            for widget in aggregate_widgets
+            for row in widget["properties"]["metrics"]
+            if isinstance(row[0], dict) and "tupleComparison" in row[0].get("expression", "")
+        ]
+        self.assertEqual(len(expressions), 4)
+        for expression in expressions:
+            self.assertIn('Namespace="OpenSearchMigrations"', expression)
+            self.assertNotIn("{OpenSearchMigrations,", expression)
+            self.assertNotIn("FILL(SUM(SEARCH(", expression)
+        match_expressions = [expression for expression in expressions if "100 *" in expression]
+        self.assertEqual(len(match_expressions), 2)
+        for expression in match_expressions:
+            self.assertTrue(expression.startswith("IF("))
+            self.assertIn("> 0, 100 *", expression)
+
+    def test_cloudwatch_comparison_ratios_omit_zero_denominator_periods(self):
+        dashboard = json.loads(
+            (self.chart / "files/cloudwatch-dashboards/capture-replay-dashboard.json").read_text()
+        )
+        difference_widget = next(
+            widget for widget in dashboard["widgets"]
+            if widget.get("properties", {}).get("title") == "Response time difference, target − source (mean ms)"
+        )
+        expressions = [row[0]["expression"] for row in difference_widget["properties"]["metrics"]]
+        self.assertEqual(len(expressions), 2)
+        for expression in expressions:
+            self.assertTrue(expression.startswith("IF("))
+            self.assertIn("> 0, (FILL(SUM(SEARCH(", expression)
 
     def test_alert_rules_require_both_enablement_gates(self):
         alert_only = render(
@@ -566,14 +611,26 @@ class KafkaObservabilityTests(unittest.TestCase):
         self.assertIn("criticalFreePercent must be lower", output)
 
     def test_invalid_forecast_lookback_fails_helm_render(self):
-        output = render(
-            self.args.helm,
-            self.chart,
-            "--set",
-            "kafkaObservability.storage.forecastLookback=six hours",
-            expect_success=False,
-        )
-        self.assertIn("forecastLookback must be", output)
+        for invalid_lookback in ("six hours", "1h2h", "1s1h"):
+            with self.subTest(invalid_lookback=invalid_lookback):
+                output = render(
+                    self.args.helm,
+                    self.chart,
+                    "--set-string",
+                    f"kafkaObservability.storage.forecastLookback={invalid_lookback}",
+                    expect_success=False,
+                )
+                self.assertIn("forecastLookback must be", output)
+
+    def test_valid_compound_forecast_lookback_renders(self):
+        for valid_lookback in ("1h30m", "2w3d4h5m6s7ms"):
+            with self.subTest(valid_lookback=valid_lookback):
+                render(
+                    self.args.helm,
+                    self.chart,
+                    "--set-string",
+                    f"kafkaObservability.storage.forecastLookback={valid_lookback}",
+                )
 
 
 if __name__ == "__main__":

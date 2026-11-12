@@ -176,12 +176,12 @@ bounded metric set to CloudWatch. Grafana and CloudWatch panels cover:
 - ISR expansion and shrink events;
 - active-controller and KRaft quorum health;
 - produce/fetch request errors and throttling;
-- request-handler saturation; and
+- combined broker/controller request-handler utilization; and
 - JVM heap, garbage collection, CPU, and process uptime.
 
 Kafka 4.0 combined-role brokers expose `RequestHandlerAvgIdlePercent` as the
 sum of the broker and controller request-handler pool idle fractions. The
-Grafana and CloudWatch saturation panels and the
+Grafana and CloudWatch utilization panels and the
 `MigrationAssistantKafkaRequestHandlersSaturated` alert divide that value by two
 before converting it to busy percent. This keeps the displayed value on a 0–100% scale for the
 Migration Assistant-managed dual-role broker pool.

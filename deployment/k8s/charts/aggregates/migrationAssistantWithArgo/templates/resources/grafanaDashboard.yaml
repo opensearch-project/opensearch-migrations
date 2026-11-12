@@ -3328,7 +3328,7 @@ data:
         },
         {
           "type": "timeseries",
-          "title": "Kafka request-handler saturation",
+          "title": "Kafka broker/controller request-handler utilization (average)",
           "description": "Percent busy for each broker. Combined-role brokers report the sum of the broker and controller request-handler idle fractions, so the sum is halved before it is converted to busy percent.",
           "datasource": {
             "type": "prometheus",
