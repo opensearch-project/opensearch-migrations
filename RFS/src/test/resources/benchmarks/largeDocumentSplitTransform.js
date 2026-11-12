@@ -11,6 +11,8 @@ function main(context) {
   const maxExpandedPerInvocation = Number.isFinite(configuredMaxExpanded) && configuredMaxExpanded > 0
     ? Math.floor(configuredMaxExpanded)
     : Number.POSITIVE_INFINITY;
+  const configuredForceCreate = context.get("forceCreate");
+  const forceCreate = configuredForceCreate == null ? true : Boolean(configuredForceCreate);
   const targetBytes = Number(context.get("targetBytes"));
   const valueBytes = Number(context.get("valueBytes"));
   const containerCount = Number(context.get("containerCount"));
@@ -75,13 +77,16 @@ function main(context) {
       const id = String(document.operation._id);
       const idHash = hashId(id);
 
-      // Exercise create-only semantics and remove concurrency fields that are not valid with create.
+      // Target the benchmark index.  Verb changes are optional so expansion benchmarks can retain
+      // idempotent index semantics while a separate benchmark exercises create-only behavior.
       document.operation._index = targetIndex;
-      document.operation.op_type = "create";
-      delete document.operation.version;
-      delete document.operation.version_type;
-      delete document.operation.if_seq_no;
-      delete document.operation.if_primary_term;
+      if (forceCreate) {
+        document.operation.op_type = "create";
+        delete document.operation.version;
+        delete document.operation.version_type;
+        delete document.operation.if_seq_no;
+        delete document.operation.if_primary_term;
+      }
 
       const existingPayload = document.document.benchmark_payload;
       const alreadyExpanded = existingPayload != null

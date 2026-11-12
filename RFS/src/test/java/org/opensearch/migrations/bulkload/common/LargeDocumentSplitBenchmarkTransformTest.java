@@ -57,6 +57,25 @@ class LargeDocumentSplitBenchmarkTransformTest {
     }
 
     @Test
+    void benchmarkTransformCanPreserveIndexSemantics() throws Exception {
+        var operation = BulkOperationConverter.fromRawDocument(
+            new Document("selected-0", SOURCE, Document.Operation.UPSERT, Map.of(), Map.of()), "products");
+
+        try (var transformer = transformer(Map.of("forceCreate", false))) {
+            @SuppressWarnings("unchecked")
+            var transformed = (List<Map<String, Object>>) transformer.transformJson(
+                List.of(operation.toTransformerMap(MAPPER)));
+            var result = MAPPER.convertValue(transformed.get(0), IndexOp.class);
+            var action = MAPPER.readTree(BulkNdjson.toBulkNdjson(List.of(result), MAPPER).split("\n")[0]);
+
+            assertTrue(action.has("index"));
+            assertFalse(action.has("create"));
+            assertFalse(action.path("index").has("op_type"));
+            assertEquals("products-benchmark", action.path("index").path("_index").asText());
+        }
+    }
+
+    @Test
     void exactIdSelectionBuildsTenConsecutivePayloadsAndNoOthers() throws Exception {
         var selectedIds = IntStream.range(0, 10)
             .mapToObj(i -> "document-" + String.format("%03d", i))
