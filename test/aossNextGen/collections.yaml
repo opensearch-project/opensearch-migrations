@@ -7,7 +7,9 @@ Description: >-
 Parameters:
   CollectionPrefix:
     Type: String
-    Description: Names the collection group and prefixes both collections (<prefix>-search, <prefix>-vectors).
+    Description: >-
+      Prefixes both collections (<prefix>-search, <prefix>-vectors) and their collection groups
+      (<prefix>-sg, <prefix>-vg).
     AllowedPattern: "^[a-z][a-z0-9-]{2,19}$"
   DataAccessPrincipals:
     Type: CommaDelimitedList
@@ -52,31 +54,41 @@ Resources:
           "Principal":["${Principals}"]}]
         - Principals: !Join ['","', !Ref DataAccessPrincipals]
 
-  CollectionGroup:
+  SearchCollectionGroup:
     Type: AWS::OpenSearchServerless::CollectionGroup
     Properties:
-      Name: !Ref CollectionPrefix
+      Name: !Sub "${CollectionPrefix}-sg"
       Generation: NEXTGEN
-      StandbyReplicas: DISABLED
+      StandbyReplicas: ENABLED
       CapacityLimits:
         MaxIndexingCapacityInOcu: !Ref MaxIndexingCapacityInOcu
         MaxSearchCapacityInOcu: !Ref MaxSearchCapacityInOcu
 
   SearchCollection:
     Type: AWS::OpenSearchServerless::Collection
-    DependsOn: [EncryptionPolicy, NetworkPolicy, DataAccessPolicy, CollectionGroup]
+    DependsOn: [EncryptionPolicy, NetworkPolicy, DataAccessPolicy, SearchCollectionGroup]
     Properties:
       Name: !Sub "${CollectionPrefix}-search"
       Type: SEARCH
-      CollectionGroupName: !Ref CollectionPrefix
+      CollectionGroupName: !Sub "${CollectionPrefix}-sg"
+
+  VectorCollectionGroup:
+    Type: AWS::OpenSearchServerless::CollectionGroup
+    Properties:
+      Name: !Sub "${CollectionPrefix}-vg"
+      Generation: NEXTGEN
+      StandbyReplicas: ENABLED
+      CapacityLimits:
+        MaxIndexingCapacityInOcu: !Ref MaxIndexingCapacityInOcu
+        MaxSearchCapacityInOcu: !Ref MaxSearchCapacityInOcu
 
   VectorCollection:
     Type: AWS::OpenSearchServerless::Collection
-    DependsOn: [EncryptionPolicy, NetworkPolicy, DataAccessPolicy, CollectionGroup]
+    DependsOn: [EncryptionPolicy, NetworkPolicy, DataAccessPolicy, VectorCollectionGroup]
     Properties:
       Name: !Sub "${CollectionPrefix}-vectors"
       Type: VECTORSEARCH
-      CollectionGroupName: !Ref CollectionPrefix
+      CollectionGroupName: !Sub "${CollectionPrefix}-vg"
 
 Outputs:
   SearchCollectionName:

@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.empty;
+import static org.hamcrest.Matchers.equalTo;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class InvalidResponseTest {
@@ -830,5 +831,23 @@ class InvalidResponseTest {
         Optional<String> result = iar.containsAwarenessAttributeException();
 
         assertTrue(result.isEmpty());
+    }
+
+    @Test
+    void testIsUnsupportedKnnEngine_serverlessRootCause() {
+        var body = "{\"error\":{\"root_cause\":[{\"type\":\"illegal_argument_exception\",\"reason\":\"OpenSearch exception "
+            + "[type=illegal_argument_exception, reason=Field parameter 'engine' is not supported]- server : [envoy]\"}],"
+            + "\"type\":\"illegal_argument_exception\",\"reason\":\"other\"},\"status\":400}";
+        var iar = new InvalidResponse("error", new HttpResponse(400, "", Map.of(), body));
+
+        assertThat(iar.isUnsupportedKnnEngine(), equalTo(true));
+    }
+
+    @Test
+    void testIsUnsupportedKnnEngine_otherError() {
+        var body = "{\"error\":{\"type\":\"illegal_argument_exception\",\"reason\":\"Field parameter 'mode' is not supported\"},\"status\":400}";
+        var iar = new InvalidResponse("error", new HttpResponse(400, "", Map.of(), body));
+
+        assertThat(iar.isUnsupportedKnnEngine(), equalTo(false));
     }
 }

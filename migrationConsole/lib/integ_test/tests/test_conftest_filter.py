@@ -116,6 +116,10 @@ def test_aoss_collection_routing_test_is_selected_by_its_own_id():
     assert _names(_filter_test_cases(["0024"])) == ["Test0024AossCollectionRouting"]
 
 
+def test_aoss_nextgen_direct_test_is_selected_by_its_own_id():
+    assert _names(_filter_test_cases(["0025"])) == ["Test0025AossNextGenDirectVector"]
+
+
 def test_solr_pipeline_id_set_resolves_expected_classes():
     cases = _filter_test_cases(["0070", "0071"])
     selected = _names(cases)
