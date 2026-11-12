@@ -5,8 +5,10 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import org.opensearch.migrations.bulkload.common.http.HttpResponse;
 
@@ -158,11 +160,12 @@ public class InvalidResponse extends RfsException {
             if (errorBody.isEmpty()) {
                 return false;
             }
-            var nodes = new ArrayList<JsonNode>();
-            nodes.add(errorBody.get());
-            Optional.ofNullable(errorBody.get().get(ROOT_CAUSE)).ifPresent(rootCauses -> rootCauses.forEach(nodes::add));
-            Optional.ofNullable(errorBody.get().get(CAUSED_BY)).ifPresent(nodes::add);
-            return nodes.stream()
+            var body = errorBody.get();
+            return Stream.of(
+                    Stream.of(body),
+                    body.path(ROOT_CAUSE).valueStream(),
+                    Stream.of(body.path(CAUSED_BY)))
+                .flatMap(Function.identity())
                 .map(node -> node.path(REASON).asText())
                 .anyMatch(reason -> UNSUPPORTED_KNN_ENGINE.matcher(reason).find());
         } catch (Exception e) {
