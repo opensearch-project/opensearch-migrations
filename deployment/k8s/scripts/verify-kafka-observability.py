@@ -22,6 +22,7 @@ FILL_SEARCH = "FILL(SEARCH("
 SUM_FILL_SEARCH = "SUM(" + FILL_SEARCH
 GC_WIDGET_TITLE = "Kafka JVM garbage collection"
 HANDLER_SATURATION_TITLE = "Kafka broker/controller request-handler utilization (average)"
+CLOUDWATCH_DASHBOARD_PATH = "files/cloudwatch-dashboards/capture-replay-dashboard.json"
 
 
 def load_generator(path):
@@ -188,12 +189,12 @@ class KafkaObservabilityTests(unittest.TestCase):
                 stderr=subprocess.STDOUT,
                 text=True,
             )
-            checked_in = self.chart / "files/cloudwatch-dashboards/capture-replay-dashboard.json"
+            checked_in = self.chart / CLOUDWATCH_DASHBOARD_PATH
             self.assertEqual(generated.read_text(), checked_in.read_text())
 
     def test_cloudwatch_tuple_aggregates_accept_optional_source_status_dimension(self):
         dashboard = json.loads(
-            (self.chart / "files/cloudwatch-dashboards/capture-replay-dashboard.json").read_text()
+            (self.chart / CLOUDWATCH_DASHBOARD_PATH).read_text()
         )
         widgets = {
             widget.get("properties", {}).get("title"): widget
@@ -224,7 +225,7 @@ class KafkaObservabilityTests(unittest.TestCase):
 
     def test_cloudwatch_comparison_ratios_omit_zero_denominator_periods(self):
         dashboard = json.loads(
-            (self.chart / "files/cloudwatch-dashboards/capture-replay-dashboard.json").read_text()
+            (self.chart / CLOUDWATCH_DASHBOARD_PATH).read_text()
         )
         difference_widget = next(
             widget for widget in dashboard["widgets"]
@@ -379,7 +380,7 @@ class KafkaObservabilityTests(unittest.TestCase):
 
     def test_cloudwatch_dashboard_uses_renderable_available_over_capacity(self):
         dashboard = json.loads(
-            (self.chart / "files/cloudwatch-dashboards/capture-replay-dashboard.json").read_text()
+            (self.chart / CLOUDWATCH_DASHBOARD_PATH).read_text()
         )
         widgets = {
             widget.get("properties", {}).get("title"): widget
