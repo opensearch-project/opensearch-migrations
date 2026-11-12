@@ -1274,7 +1274,8 @@ export const USER_RFS_PROCESS_OPTIONS = withOtelExportOptions(z.object({
         .checksumFor('replayer')
         .changeRestriction('impossible'),
     maxSourceDocumentSizeBytes: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER).optional()
-        .describe("Largest serialized source document body RFS may read. Enables byte-weighted source admission and "
+        .describe("Largest serialized source document body RFS may read. RFS reserves this before each Lucene read "
+            + "and retains enough source bytes for every target connection to fill a bulk request. Enables "
             + "automatic JVM/container memory sizing. A source document above the declaration fails its shard. "
             + "Unset leaves source memory admission and automatic heap sizing disabled.")
         .changeRestriction('gated'),
@@ -1475,14 +1476,23 @@ export const USER_RFS_OPTIONS = withOtelExportOptions(z.object({
         }
 
         const mib = 1024 * 1024;
-        const sourceReadParallelism = 100;
         const serializedBytesHeapExpansionFactor = 8;
         const baseHeapBytes = 5_600 * mib;
         const maxConnections = Math.max(1, Math.floor(data.maxConnections ?? 10));
         const cpuLimit = data.resources?.limits?.cpu ?? DEFAULT_RESOURCES.RFS.limits.cpu;
         const availableProcessors = Math.max(1, Math.ceil(parseK8sQuantity(cpuLimit)));
+        const sourceReadParallelism = Math.min(maxConnections, availableProcessors);
         const transformParallelism = Math.min(maxConnections, availableProcessors);
-        const sourcePermitBytes = data.maxSourceDocumentSizeBytes * sourceReadParallelism;
+        const maxDocsPerBatch = Math.max(1, Math.floor(data.documentsPerBulkRequest ?? 0x7fffffff));
+        const maxBytesPerBatch = data.documentsSizePerBulkRequest ?? 10 * mib;
+        const countLimitedBulkBytes =
+            data.maxSourceDocumentSizeBytes > maxBytesPerBatch / maxDocsPerBatch
+                ? maxBytesPerBatch
+                : data.maxSourceDocumentSizeBytes * maxDocsPerBatch;
+        const attainableBulkBytes = Math.min(maxBytesPerBatch, countLimitedBulkBytes);
+        const sourcePermitBytes =
+            data.maxSourceDocumentSizeBytes * sourceReadParallelism
+            + maxConnections * attainableBulkBytes;
         const transformPermitBytes =
             (data.maxTransformOutputBytesPerInvocation ?? 0) * transformParallelism;
         const requiredHeapBytes = baseHeapBytes

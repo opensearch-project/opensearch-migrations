@@ -563,3 +563,22 @@ tasks.register("listTestTasksAsJson") {
         println JsonOutput.prettyPrint(JsonOutput.toJson(testTasksProvider.get()))
     }
 }
+
+tasks.register('rfsMemorySizingContractTest', Exec) {
+    group = 'verification'
+    description = 'Verifies that Java RFS memory sizing and workflow memory sizing use the same contract.'
+    dependsOn ':RfsCommon:test'
+
+    def nodeExecutable = providers.gradleProperty('nodeExecutable')
+            .orElse(providers.environmentVariable('NODE_BINARY'))
+            .orElse('node')
+    workingDir rootProject.file('orchestrationSpecs/packages/schemas')
+    commandLine(
+            nodeExecutable.get(),
+            '../../node_modules/jest/bin/jest.js',
+            '--config',
+            'jest.config.js',
+            '--runInBand',
+            'tests/rfsMemorySizing.test.ts'
+    )
+}

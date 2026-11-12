@@ -2460,7 +2460,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "type": "integer",
                       "minimum": 1,
                       "maximum": 9007199254740991,
-                      "description": "Largest serialized source document body RFS may read. Enables byte-weighted source admission and automatic JVM/container memory sizing. A source document above the declaration fails its shard. Unset leaves source memory admission and automatic heap sizing disabled.",
+                      "description": "Largest serialized source document body RFS may read. RFS reserves this before each Lucene read and retains enough source bytes for every target connection to fill a bulk request. Enables automatic JVM/container memory sizing. A source document above the declaration fails its shard. Unset leaves source memory admission and automatic heap sizing disabled.",
                       "changeRestriction": "gated"
                     },
                     "maxTransformOutputBytesPerInvocation": {
@@ -5612,7 +5612,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "type": "integer",
                         "minimum": 1,
                         "maximum": 9007199254740991,
-                        "description": "Largest serialized source document body RFS may read. Enables byte-weighted source admission and automatic JVM/container memory sizing. A source document above the declaration fails its shard. Unset leaves source memory admission and automatic heap sizing disabled.",
+                        "description": "Largest serialized source document body RFS may read. RFS reserves this before each Lucene read and retains enough source bytes for every target connection to fill a bulk request. Enables automatic JVM/container memory sizing. A source document above the declaration fails its shard. Unset leaves source memory admission and automatic heap sizing disabled.",
                         "changeRestriction": "gated"
                       },
                       "maxTransformOutputBytesPerInvocation": {
