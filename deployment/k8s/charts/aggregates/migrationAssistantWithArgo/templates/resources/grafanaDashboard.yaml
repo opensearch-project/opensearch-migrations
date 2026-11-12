@@ -1,3 +1,4 @@
+{{- include "migration.validateKafkaObservability" . }}
 {{- if .Values.metrics.enabled }}
 apiVersion: v1
 kind: ConfigMap
@@ -18,7 +19,7 @@ data:
       ],
       "timezone": "browser",
       "schemaVersion": 39,
-      "version": 4,
+      "version": 6,
       "refresh": "15s",
       "time": {
         "from": "now-6h",
@@ -2803,7 +2804,7 @@ data:
         },
         {
           "type": "row",
-          "title": "Result tuples",
+          "title": "Kafka broker storage",
           "collapsed": false,
           "gridPos": {
             "h": 1,
@@ -2813,6 +2814,640 @@ data:
           },
           "panels": [],
           "id": 59
+        },
+        {
+          "type": "timeseries",
+          "title": "Kafka disk utilization across volumes",
+          "description": "Minimum, unweighted average and maximum utilization across the selected Strimzi-labeled Kafka PVCs. Utilization is 100 × (1 - available bytes / capacity bytes). Use the maximum as the first capacity-risk signal; the spread between minimum and maximum reveals broker storage imbalance.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "min((100 * (1 - (max by (namespace, persistentvolumeclaim) (kubelet_volume_stats_available_bytes{job=\"kubelet\",metrics_path=\"/metrics\",namespace=\"$namespace\",persistentvolumeclaim=~\"$kafka_volume\"}) and on (namespace, persistentvolumeclaim) max by (namespace, persistentvolumeclaim) (kube_persistentvolumeclaim_labels{namespace=\"$namespace\",persistentvolumeclaim=~\"$kafka_volume\",label_strimzi_io_cluster!=\"\",label_strimzi_io_pool_name!=\"\"})) / (max by (namespace, persistentvolumeclaim) (kubelet_volume_stats_capacity_bytes{job=\"kubelet\",metrics_path=\"/metrics\",namespace=\"$namespace\",persistentvolumeclaim=~\"$kafka_volume\"}) and on (namespace, persistentvolumeclaim) max by (namespace, persistentvolumeclaim) (kube_persistentvolumeclaim_labels{namespace=\"$namespace\",persistentvolumeclaim=~\"$kafka_volume\",label_strimzi_io_cluster!=\"\",label_strimzi_io_pool_name!=\"\"})))))",
+              "legendFormat": "Minimum"
+            },
+            {
+              "refId": "B",
+              "expr": "avg((100 * (1 - (max by (namespace, persistentvolumeclaim) (kubelet_volume_stats_available_bytes{job=\"kubelet\",metrics_path=\"/metrics\",namespace=\"$namespace\",persistentvolumeclaim=~\"$kafka_volume\"}) and on (namespace, persistentvolumeclaim) max by (namespace, persistentvolumeclaim) (kube_persistentvolumeclaim_labels{namespace=\"$namespace\",persistentvolumeclaim=~\"$kafka_volume\",label_strimzi_io_cluster!=\"\",label_strimzi_io_pool_name!=\"\"})) / (max by (namespace, persistentvolumeclaim) (kubelet_volume_stats_capacity_bytes{job=\"kubelet\",metrics_path=\"/metrics\",namespace=\"$namespace\",persistentvolumeclaim=~\"$kafka_volume\"}) and on (namespace, persistentvolumeclaim) max by (namespace, persistentvolumeclaim) (kube_persistentvolumeclaim_labels{namespace=\"$namespace\",persistentvolumeclaim=~\"$kafka_volume\",label_strimzi_io_cluster!=\"\",label_strimzi_io_pool_name!=\"\"})))))",
+              "legendFormat": "Average"
+            },
+            {
+              "refId": "C",
+              "expr": "max((100 * (1 - (max by (namespace, persistentvolumeclaim) (kubelet_volume_stats_available_bytes{job=\"kubelet\",metrics_path=\"/metrics\",namespace=\"$namespace\",persistentvolumeclaim=~\"$kafka_volume\"}) and on (namespace, persistentvolumeclaim) max by (namespace, persistentvolumeclaim) (kube_persistentvolumeclaim_labels{namespace=\"$namespace\",persistentvolumeclaim=~\"$kafka_volume\",label_strimzi_io_cluster!=\"\",label_strimzi_io_pool_name!=\"\"})) / (max by (namespace, persistentvolumeclaim) (kubelet_volume_stats_capacity_bytes{job=\"kubelet\",metrics_path=\"/metrics\",namespace=\"$namespace\",persistentvolumeclaim=~\"$kafka_volume\"}) and on (namespace, persistentvolumeclaim) max by (namespace, persistentvolumeclaim) (kube_persistentvolumeclaim_labels{namespace=\"$namespace\",persistentvolumeclaim=~\"$kafka_volume\",label_strimzi_io_cluster!=\"\",label_strimzi_io_pool_name!=\"\"})))))",
+              "legendFormat": "Maximum"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "min": 0,
+              "max": 100,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "orange",
+                    "value": {{ sub 100 (int .Values.kafkaObservability.storage.warningFreePercent) }}
+                  },
+                  {
+                    "color": "red",
+                    "value": {{ sub 100 (int .Values.kafkaObservability.storage.criticalFreePercent) }}
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 8,
+            "x": 0,
+            "y": 87
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 60
+        },
+        {
+          "type": "timeseries",
+          "title": "Kafka disk utilization by volume",
+          "description": "Utilization is 100 × (1 - available bytes / capacity bytes) for each selected Strimzi-labeled Kafka PVC. The configured global warning and critical free-space policy supplies the panel colors. The series identity is namespace + persistentvolumeclaim; pod and node are intentionally excluded.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "(100 * (1 - (max by (namespace, persistentvolumeclaim) (kubelet_volume_stats_available_bytes{job=\"kubelet\",metrics_path=\"/metrics\",namespace=\"$namespace\",persistentvolumeclaim=~\"$kafka_volume\"}) and on (namespace, persistentvolumeclaim) max by (namespace, persistentvolumeclaim) (kube_persistentvolumeclaim_labels{namespace=\"$namespace\",persistentvolumeclaim=~\"$kafka_volume\",label_strimzi_io_cluster!=\"\",label_strimzi_io_pool_name!=\"\"})) / (max by (namespace, persistentvolumeclaim) (kubelet_volume_stats_capacity_bytes{job=\"kubelet\",metrics_path=\"/metrics\",namespace=\"$namespace\",persistentvolumeclaim=~\"$kafka_volume\"}) and on (namespace, persistentvolumeclaim) max by (namespace, persistentvolumeclaim) (kube_persistentvolumeclaim_labels{namespace=\"$namespace\",persistentvolumeclaim=~\"$kafka_volume\",label_strimzi_io_cluster!=\"\",label_strimzi_io_pool_name!=\"\"}))))",
+              "legendFormat": "\u007b\u007bpersistentvolumeclaim\u007d\u007d"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "min": 0,
+              "max": 100,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "orange",
+                    "value": {{ sub 100 (int .Values.kafkaObservability.storage.warningFreePercent) }}
+                  },
+                  {
+                    "color": "red",
+                    "value": {{ sub 100 (int .Values.kafkaObservability.storage.criticalFreePercent) }}
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 8,
+            "x": 8,
+            "y": 87
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 61
+        },
+        {
+          "type": "timeseries",
+          "title": "Kafka volume free and provisioned bytes",
+          "description": "Available and provisioned bytes reported by kubelet for each selected Strimzi-labeled Kafka PVC. A gap means the CSI/filesystem provider did not publish volume stats, not that the volume has zero free space.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "(max by (namespace, persistentvolumeclaim) (kubelet_volume_stats_available_bytes{job=\"kubelet\",metrics_path=\"/metrics\",namespace=\"$namespace\",persistentvolumeclaim=~\"$kafka_volume\"}) and on (namespace, persistentvolumeclaim) max by (namespace, persistentvolumeclaim) (kube_persistentvolumeclaim_labels{namespace=\"$namespace\",persistentvolumeclaim=~\"$kafka_volume\",label_strimzi_io_cluster!=\"\",label_strimzi_io_pool_name!=\"\"}))",
+              "legendFormat": "Free \u007b\u007bpersistentvolumeclaim\u007d\u007d"
+            },
+            {
+              "refId": "B",
+              "expr": "(max by (namespace, persistentvolumeclaim) (kubelet_volume_stats_capacity_bytes{job=\"kubelet\",metrics_path=\"/metrics\",namespace=\"$namespace\",persistentvolumeclaim=~\"$kafka_volume\"}) and on (namespace, persistentvolumeclaim) max by (namespace, persistentvolumeclaim) (kube_persistentvolumeclaim_labels{namespace=\"$namespace\",persistentvolumeclaim=~\"$kafka_volume\",label_strimzi_io_cluster!=\"\",label_strimzi_io_pool_name!=\"\"}))",
+              "legendFormat": "Capacity \u007b\u007bpersistentvolumeclaim\u007d\u007d"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes",
+              "min": 0
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 8,
+            "x": 16,
+            "y": 87
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 62
+        },
+        {
+          "type": "timeseries",
+          "title": "Estimated time until full",
+          "description": "Estimated hours until available bytes reach zero if the linear consumption rate over the configured forecast lookback continues. The default lookback is six hours. A series is shown only while free space is decreasing. Retention cleanup and bursty capture traffic can make this forecast noisy.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "((max by (namespace, persistentvolumeclaim) (kubelet_volume_stats_available_bytes{job=\"kubelet\",metrics_path=\"/metrics\",namespace=\"$namespace\",persistentvolumeclaim=~\"$kafka_volume\"}) and on (namespace, persistentvolumeclaim) max by (namespace, persistentvolumeclaim) (kube_persistentvolumeclaim_labels{namespace=\"$namespace\",persistentvolumeclaim=~\"$kafka_volume\",label_strimzi_io_cluster!=\"\",label_strimzi_io_pool_name!=\"\"})) / clamp_min(-((max by (namespace, persistentvolumeclaim) (deriv(kubelet_volume_stats_available_bytes{job=\"kubelet\",metrics_path=\"/metrics\",namespace=\"$namespace\",persistentvolumeclaim=~\"$kafka_volume\"}[{{ .Values.kafkaObservability.storage.forecastLookback }}])) and on (namespace, persistentvolumeclaim) max by (namespace, persistentvolumeclaim) (kube_persistentvolumeclaim_labels{namespace=\"$namespace\",persistentvolumeclaim=~\"$kafka_volume\",label_strimzi_io_cluster!=\"\",label_strimzi_io_pool_name!=\"\"}))), 1)) / 3600 and on (namespace, persistentvolumeclaim) ((max by (namespace, persistentvolumeclaim) (deriv(kubelet_volume_stats_available_bytes{job=\"kubelet\",metrics_path=\"/metrics\",namespace=\"$namespace\",persistentvolumeclaim=~\"$kafka_volume\"}[{{ .Values.kafkaObservability.storage.forecastLookback }}])) and on (namespace, persistentvolumeclaim) max by (namespace, persistentvolumeclaim) (kube_persistentvolumeclaim_labels{namespace=\"$namespace\",persistentvolumeclaim=~\"$kafka_volume\",label_strimzi_io_cluster!=\"\",label_strimzi_io_pool_name!=\"\"})) < 0)",
+              "legendFormat": "\u007b\u007bpersistentvolumeclaim\u007d\u007d"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "h",
+              "min": 0
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 94
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 63
+        },
+        {
+          "type": "timeseries",
+          "title": "Kafka volume inode utilization and health",
+          "description": "Left axis: 100 × (1 - free inodes / total inodes) per selected PVC. Right axis: kubelet/CSI abnormal health status (1 abnormal, 0 healthy). Some CSI drivers do not publish inode or health metrics; missing series are not converted to healthy or zero usage.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "100 * (1 - (max by (namespace, persistentvolumeclaim) (kubelet_volume_stats_inodes_free{job=\"kubelet\",metrics_path=\"/metrics\",namespace=\"$namespace\",persistentvolumeclaim=~\"$kafka_volume\"}) and on (namespace, persistentvolumeclaim) max by (namespace, persistentvolumeclaim) (kube_persistentvolumeclaim_labels{namespace=\"$namespace\",persistentvolumeclaim=~\"$kafka_volume\",label_strimzi_io_cluster!=\"\",label_strimzi_io_pool_name!=\"\"})) / (max by (namespace, persistentvolumeclaim) (kubelet_volume_stats_inodes{job=\"kubelet\",metrics_path=\"/metrics\",namespace=\"$namespace\",persistentvolumeclaim=~\"$kafka_volume\"}) and on (namespace, persistentvolumeclaim) max by (namespace, persistentvolumeclaim) (kube_persistentvolumeclaim_labels{namespace=\"$namespace\",persistentvolumeclaim=~\"$kafka_volume\",label_strimzi_io_cluster!=\"\",label_strimzi_io_pool_name!=\"\"})))",
+              "legendFormat": "Inodes used \u007b\u007bpersistentvolumeclaim\u007d\u007d"
+            },
+            {
+              "refId": "B",
+              "expr": "(max by (namespace, persistentvolumeclaim) (kubelet_volume_stats_health_status_abnormal{job=\"kubelet\",metrics_path=\"/metrics\",namespace=\"$namespace\",persistentvolumeclaim=~\"$kafka_volume\"}) and on (namespace, persistentvolumeclaim) max by (namespace, persistentvolumeclaim) (kube_persistentvolumeclaim_labels{namespace=\"$namespace\",persistentvolumeclaim=~\"$kafka_volume\",label_strimzi_io_cluster!=\"\",label_strimzi_io_pool_name!=\"\"}))",
+              "legendFormat": "Abnormal health \u007b\u007bpersistentvolumeclaim\u007d\u007d"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "min": 0,
+              "max": 100,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": {{ sub 100 (int .Values.kafkaObservability.storage.inodeFreePercent) }}
+                  }
+                ]
+              }
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Abnormal health \u007b\u007bpersistentvolumeclaim\u007d\u007d"
+                },
+                "properties": [
+                  {
+                    "id": "custom.axisPlacement",
+                    "value": "right"
+                  },
+                  {
+                    "id": "unit",
+                    "value": "short"
+                  }
+                ]
+              }
+            ]
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 12,
+            "y": 94
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 64
+        },
+        {
+          "type": "row",
+          "title": "Kafka broker health (opt-in JMX)",
+          "collapsed": false,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 101
+          },
+          "panels": [],
+          "id": 65
+        },
+        {
+          "type": "timeseries",
+          "title": "Kafka partition replication health",
+          "description": "Under-replicated and offline partitions from the opt-in managed Kafka JMX exporter.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "max(kafka_server_replicamanager_under_replicated_partitions{namespace=\"$namespace\"})",
+              "legendFormat": "Under-replicated"
+            },
+            {
+              "refId": "B",
+              "expr": "max(kafka_controller_offline_partitions_count{namespace=\"$namespace\"})",
+              "legendFormat": "Offline"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "min": 0
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 8,
+            "x": 0,
+            "y": 102
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 66
+        },
+        {
+          "type": "timeseries",
+          "title": "Kafka ISR changes",
+          "description": "In-sync replica expansion and shrink events per second. Sustained shrink activity indicates replicas are falling behind.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum(rate(kafka_server_replicamanager_isr_expands_total{namespace=\"$namespace\"}[$__rate_interval]))",
+              "legendFormat": "ISR expands/s"
+            },
+            {
+              "refId": "B",
+              "expr": "sum(rate(kafka_server_replicamanager_isr_shrinks_total{namespace=\"$namespace\"}[$__rate_interval]))",
+              "legendFormat": "ISR shrinks/s"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops",
+              "min": 0
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 8,
+            "x": 8,
+            "y": 102
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 67
+        },
+        {
+          "type": "timeseries",
+          "title": "Kafka controller and quorum health",
+          "description": "Active controller count plus the KRaft current leader and epoch. A negative current leader means the quorum has no elected leader.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "max(kafka_controller_active_controller_count{namespace=\"$namespace\"})",
+              "legendFormat": "Active controllers"
+            },
+            {
+              "refId": "B",
+              "expr": "max(kafka_server_raft_current_leader{namespace=\"$namespace\"})",
+              "legendFormat": "Current quorum leader"
+            },
+            {
+              "refId": "C",
+              "expr": "max(kafka_server_raft_current_epoch{namespace=\"$namespace\"})",
+              "legendFormat": "Current quorum epoch"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "min": 0
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 8,
+            "x": 16,
+            "y": 102
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 68
+        },
+        {
+          "type": "timeseries",
+          "title": "Kafka request errors and throttling",
+          "description": "Produce/fetch request errors per second and mean broker throttle time by bounded request type.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (request, error) (rate(kafka_network_request_errors_total{namespace=\"$namespace\",request=~\"Produce|FetchConsumer|FetchFollower\",error!=\"NONE\"}[$__rate_interval]))",
+              "legendFormat": "\u007b\u007brequest\u007d\u007d \u007b\u007berror\u007d\u007d errors/s"
+            },
+            {
+              "refId": "B",
+              "expr": "max by (request) (kafka_network_request_throttle_time_milliseconds{namespace=\"$namespace\",request=~\"Produce|FetchConsumer|FetchFollower\"})",
+              "legendFormat": "\u007b\u007brequest\u007d\u007d throttle ms"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops",
+              "min": 0
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "\u007b\u007brequest\u007d\u007d throttle ms"
+                },
+                "properties": [
+                  {
+                    "id": "custom.axisPlacement",
+                    "value": "right"
+                  },
+                  {
+                    "id": "unit",
+                    "value": "ms"
+                  }
+                ]
+              }
+            ]
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 8,
+            "x": 0,
+            "y": 109
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 69
+        },
+        {
+          "type": "timeseries",
+          "title": "Kafka request-handler saturation",
+          "description": "Percent busy derived from one minus the request-handler idle ratio for each broker.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "100 * (1 - avg by (pod) (kafka_server_request_handler_idle_ratio{namespace=\"$namespace\"}))",
+              "legendFormat": "\u007b\u007bpod\u007d\u007d"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "min": 0,
+              "max": 100
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 8,
+            "x": 8,
+            "y": 109
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 70
+        },
+        {
+          "type": "timeseries",
+          "title": "Kafka JVM and process health",
+          "description": "Heap and process CPU percentages plus garbage-collection seconds per second. Metrics are absent while the opt-in broker JMX rules are disabled.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "100 * max by (pod) (kafka_jvm_heap_used_bytes{namespace=\"$namespace\"}) / max by (pod) (kafka_jvm_heap_max_bytes{namespace=\"$namespace\"})",
+              "legendFormat": "Heap \u007b\u007bpod\u007d\u007d"
+            },
+            {
+              "refId": "B",
+              "expr": "100 * max by (pod) (kafka_jvm_process_cpu_ratio{namespace=\"$namespace\"})",
+              "legendFormat": "Process CPU \u007b\u007bpod\u007d\u007d"
+            },
+            {
+              "refId": "C",
+              "expr": "sum by (collector) (rate(kafka_jvm_gc_collection_time_milliseconds_total{namespace=\"$namespace\"}[$__rate_interval])) / 1000",
+              "legendFormat": "GC \u007b\u007bcollector\u007d\u007d seconds/s"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "min": 0
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "GC \u007b\u007bcollector\u007d\u007d seconds/s"
+                },
+                "properties": [
+                  {
+                    "id": "custom.axisPlacement",
+                    "value": "right"
+                  },
+                  {
+                    "id": "unit",
+                    "value": "s"
+                  }
+                ]
+              }
+            ]
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 8,
+            "x": 16,
+            "y": 109
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "id": 71
+        },
+        {
+          "type": "row",
+          "title": "Result tuples",
+          "collapsed": false,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 116
+          },
+          "panels": [],
+          "id": 72
         },
         {
           "type": "timeseries",
@@ -2867,7 +3502,7 @@ data:
             "h": 6,
             "w": 8,
             "x": 0,
-            "y": 87
+            "y": 117
           },
           "options": {
             "legend": {
@@ -2880,7 +3515,7 @@ data:
               "sort": "desc"
             }
           },
-          "id": 60
+          "id": 73
         },
         {
           "type": "timeseries",
@@ -2918,7 +3553,7 @@ data:
             "h": 6,
             "w": 8,
             "x": 8,
-            "y": 87
+            "y": 117
           },
           "options": {
             "legend": {
@@ -2931,7 +3566,7 @@ data:
               "sort": "desc"
             }
           },
-          "id": 61
+          "id": 74
         },
         {
           "type": "timeseries",
@@ -2984,7 +3619,7 @@ data:
             "h": 6,
             "w": 8,
             "x": 16,
-            "y": 87
+            "y": 117
           },
           "options": {
             "legend": {
@@ -2997,7 +3632,7 @@ data:
               "sort": "desc"
             }
           },
-          "id": 62
+          "id": 75
         },
         {
           "type": "row",
@@ -3007,10 +3642,10 @@ data:
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 93
+            "y": 123
           },
           "panels": [],
-          "id": 63
+          "id": 76
         },
         {
           "type": "text",
@@ -3019,13 +3654,13 @@ data:
             "h": 7,
             "w": 6,
             "x": 0,
-            "y": 94
+            "y": 124
           },
           "options": {
             "mode": "markdown",
             "content": "This panel exists only on the CloudWatch dashboard: it reads AWS/ES domain metrics (CPUUtilization, JVMMemoryPressure, ThreadpoolWriteQueue, ThreadpoolWriteRejected, 5xx) for the source domain, which are not exported to Prometheus. Open the CloudWatch capture-replay dashboard and pick the domain there."
           },
-          "id": 64
+          "id": 77
         },
         {
           "type": "timeseries",
@@ -3053,7 +3688,7 @@ data:
             "h": 7,
             "w": 6,
             "x": 6,
-            "y": 94
+            "y": 124
           },
           "options": {
             "legend": {
@@ -3066,7 +3701,7 @@ data:
               "sort": "desc"
             }
           },
-          "id": 65
+          "id": 78
         },
         {
           "type": "timeseries",
@@ -3094,7 +3729,7 @@ data:
             "h": 7,
             "w": 6,
             "x": 12,
-            "y": 94
+            "y": 124
           },
           "options": {
             "legend": {
@@ -3107,7 +3742,7 @@ data:
               "sort": "desc"
             }
           },
-          "id": 66
+          "id": 79
         },
         {
           "type": "timeseries",
@@ -3135,7 +3770,7 @@ data:
             "h": 7,
             "w": 6,
             "x": 18,
-            "y": 94
+            "y": 124
           },
           "options": {
             "legend": {
@@ -3148,7 +3783,7 @@ data:
               "sort": "desc"
             }
           },
-          "id": 67
+          "id": 80
         },
         {
           "type": "timeseries",
@@ -3219,7 +3854,7 @@ data:
             "h": 7,
             "w": 8,
             "x": 0,
-            "y": 101
+            "y": 131
           },
           "options": {
             "legend": {
@@ -3232,7 +3867,7 @@ data:
               "sort": "desc"
             }
           },
-          "id": 68
+          "id": 81
         },
         {
           "type": "timeseries",
@@ -3260,7 +3895,7 @@ data:
             "h": 7,
             "w": 8,
             "x": 8,
-            "y": 101
+            "y": 131
           },
           "options": {
             "legend": {
@@ -3273,7 +3908,7 @@ data:
               "sort": "desc"
             }
           },
-          "id": 69
+          "id": 82
         },
         {
           "type": "timeseries",
@@ -3308,7 +3943,7 @@ data:
             "h": 7,
             "w": 8,
             "x": 16,
-            "y": 101
+            "y": 131
           },
           "options": {
             "legend": {
@@ -3321,7 +3956,7 @@ data:
               "sort": "desc"
             }
           },
-          "id": 70
+          "id": 83
         }
       ],
       "templating": {
@@ -3382,6 +4017,29 @@ data:
             },
             "includeAll": false,
             "multi": false,
+            "refresh": 1
+          },
+          {
+            "name": "kafka_volume",
+            "type": "query",
+            "label": "Kafka PVC(s)",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${DS_PROMETHEUS}"
+            },
+            "definition": "label_values(kube_persistentvolumeclaim_labels{namespace=\"$namespace\",label_strimzi_io_cluster!=\"\",label_strimzi_io_pool_name!=\"\"}, persistentvolumeclaim)",
+            "query": {
+              "query": "label_values(kube_persistentvolumeclaim_labels{namespace=\"$namespace\",label_strimzi_io_cluster!=\"\",label_strimzi_io_pool_name!=\"\"}, persistentvolumeclaim)",
+              "refId": "PrometheusVariableQueryEditor-VariableQuery"
+            },
+            "current": {
+              "selected": true,
+              "text": "All",
+              "value": "$__all"
+            },
+            "includeAll": true,
+            "allValue": ".*",
+            "multi": true,
             "refresh": 1
           }
         ]

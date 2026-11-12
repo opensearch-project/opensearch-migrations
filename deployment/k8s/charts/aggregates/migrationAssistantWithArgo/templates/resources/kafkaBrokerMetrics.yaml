@@ -1,0 +1,213 @@
+{{- $name := "migration-assistant-kafka-jmx-metrics" }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+data:
+  metrics-config.yml: |
+    lowercaseOutputName: true
+    lowercaseOutputLabelNames: true
+{{- if .Values.kafkaObservability.brokerMetrics.enabled }}
+    rules:
+      - pattern: 'kafka.server<type=ReplicaManager, name=UnderReplicatedPartitions><>Value'
+        name: kafka_server_replicamanager_under_replicated_partitions
+        type: GAUGE
+      - pattern: 'kafka.controller<type=KafkaController, name=OfflinePartitionsCount><>Value'
+        name: kafka_controller_offline_partitions_count
+        type: GAUGE
+      - pattern: 'kafka.server<type=ReplicaManager, name=IsrExpandsPerSec><>Count'
+        name: kafka_server_replicamanager_isr_expands_total
+        type: COUNTER
+      - pattern: 'kafka.server<type=ReplicaManager, name=IsrShrinksPerSec><>Count'
+        name: kafka_server_replicamanager_isr_shrinks_total
+        type: COUNTER
+      - pattern: 'kafka.controller<type=KafkaController, name=ActiveControllerCount><>Value'
+        name: kafka_controller_active_controller_count
+        type: GAUGE
+      - pattern: 'kafka.server<type=raft-metrics><>current-leader'
+        name: kafka_server_raft_current_leader
+        type: GAUGE
+      - pattern: 'kafka.server<type=raft-metrics><>current-epoch'
+        name: kafka_server_raft_current_epoch
+        type: GAUGE
+      - pattern: 'kafka.network<type=RequestMetrics, name=ErrorsPerSec, request=(.+), error=(.+)><>Count'
+        name: kafka_network_request_errors_total
+        type: COUNTER
+        labels:
+          request: '$1'
+          error: '$2'
+      - pattern: 'kafka.network<type=RequestMetrics, name=ThrottleTimeMs, request=(Produce|FetchConsumer|FetchFollower)><>Mean'
+        name: kafka_network_request_throttle_time_milliseconds
+        type: GAUGE
+        labels:
+          request: '$1'
+      - pattern: 'kafka.server<type=KafkaRequestHandlerPool, name=RequestHandlerAvgIdlePercent><>OneMinuteRate'
+        name: kafka_server_request_handler_idle_ratio
+        type: GAUGE
+      - pattern: 'java.lang<type=Memory><HeapMemoryUsage>used'
+        name: kafka_jvm_heap_used_bytes
+        type: GAUGE
+      - pattern: 'java.lang<type=Memory><HeapMemoryUsage>max'
+        name: kafka_jvm_heap_max_bytes
+        type: GAUGE
+      - pattern: 'java.lang<type=GarbageCollector, name=(.+)><>CollectionCount'
+        name: kafka_jvm_gc_collections_total
+        type: COUNTER
+        labels:
+          collector: '$1'
+      - pattern: 'java.lang<type=GarbageCollector, name=(.+)><>CollectionTime'
+        name: kafka_jvm_gc_collection_time_milliseconds_total
+        type: COUNTER
+        labels:
+          collector: '$1'
+      - pattern: 'java.lang<type=OperatingSystem><>ProcessCpuLoad'
+        name: kafka_jvm_process_cpu_ratio
+        type: GAUGE
+      - pattern: 'java.lang<type=Runtime><>Uptime'
+        name: kafka_jvm_uptime_milliseconds
+        type: GAUGE
+{{- else }}
+    # Managed Kafka always references this ConfigMap so enabling the Helm switch
+    # upgrades existing clusters without changing their workflow configuration.
+    # Empty rules keep broker JMX series disabled by default.
+    rules: []
+{{- end }}
+{{- $prometheusStackEnabled := get .Values.conditionalPackageInstalls "kube-prometheus-stack" }}
+{{- if and .Values.metrics.enabled $prometheusStackEnabled }}
+{{- $reconciler := printf "%s-kafka-broker-metrics" .Release.Name }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $reconciler }}
+  namespace: {{ .Release.Namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $reconciler }}
+  namespace: {{ .Release.Namespace }}
+rules:
+  - apiGroups: ["monitoring.coreos.com"]
+    resources: ["podmonitors"]
+    verbs: ["get", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $reconciler }}
+  namespace: {{ .Release.Namespace }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $reconciler }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $reconciler }}
+{{- if .Values.kafkaObservability.brokerMetrics.enabled }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $reconciler }}-pod-monitor
+  namespace: {{ .Release.Namespace }}
+data:
+  pod-monitor.yaml: |
+    apiVersion: monitoring.coreos.com/v1
+    kind: PodMonitor
+    metadata:
+      name: {{ $reconciler }}
+      namespace: {{ .Release.Namespace }}
+      labels:
+        release: kube-prometheus-stack
+    spec:
+      namespaceSelector:
+        matchNames:
+          - {{ .Release.Namespace }}
+      selector:
+        matchLabels:
+          strimzi.io/kind: Kafka
+      podMetricsEndpoints:
+        - port: tcp-prometheus
+          path: /metrics
+          interval: 30s
+{{- end }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $reconciler }}-reconcile
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "6"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  activeDeadlineSeconds: 180
+  template:
+    spec:
+      serviceAccountName: {{ $reconciler }}
+      restartPolicy: Never
+      containers:
+        - name: reconcile
+          image: {{ include "migration.image" (dict "root" . "image" .Values.images.installer) }}
+          command:
+            - /bin/bash
+            - -euc
+            - |
+              pod_monitor_api_ready=false
+              for attempt in $(seq 1 60); do
+                if kubectl get podmonitor {{ $reconciler }} --namespace {{ .Release.Namespace }} --ignore-not-found >/dev/null 2>&1; then
+                  pod_monitor_api_ready=true
+                  break
+                fi
+                sleep 2
+              done
+              if [[ "${pod_monitor_api_ready}" != "true" ]]; then
+                echo "PodMonitor API did not become available within 120 seconds" >&2
+                exit 1
+              fi
+{{- if .Values.kafkaObservability.brokerMetrics.enabled }}
+              kubectl apply -f /monitor/pod-monitor.yaml
+{{- else }}
+              kubectl delete podmonitor {{ $reconciler }} --namespace {{ .Release.Namespace }} --ignore-not-found
+{{- end }}
+{{- if .Values.kafkaObservability.brokerMetrics.enabled }}
+          volumeMounts:
+            - name: monitor
+              mountPath: /monitor
+      volumes:
+        - name: monitor
+          configMap:
+            name: {{ $reconciler }}-pod-monitor
+{{- end }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $reconciler }}-delete
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    "helm.sh/hook": pre-delete
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  activeDeadlineSeconds: 120
+  template:
+    spec:
+      serviceAccountName: {{ $reconciler }}
+      restartPolicy: Never
+      containers:
+        - name: delete
+          image: {{ include "migration.image" (dict "root" . "image" .Values.images.installer) }}
+          command:
+            - kubectl
+            - delete
+            - podmonitor
+            - {{ $reconciler }}
+            - --namespace
+            - {{ .Release.Namespace }}
+            - --ignore-not-found
+{{- end }}

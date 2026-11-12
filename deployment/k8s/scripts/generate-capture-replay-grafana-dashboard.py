@@ -48,6 +48,14 @@ def p95(h, scale=1, sel=""):
 # The proxy and the replayer both export waitingForResponseDuration, so pin the scope where a name is shared.
 PROXY = 'otel_scope_name="captureProxy"'
 REPLAYER = 'otel_scope_name="replayer"'
+KAFKA_VOLUME = ('job="kubelet",metrics_path="/metrics",namespace="$namespace",'
+                'persistentvolumeclaim=~"$kafka_volume"')
+KAFKA_PVC_LABELS = ('namespace="$namespace",persistentvolumeclaim=~"$kafka_volume",'
+                    'label_strimzi_io_cluster!="",label_strimzi_io_pool_name!=""')
+KAFKA_WARNING_UTILIZATION = "__KAFKA_WARNING_UTILIZATION__"
+KAFKA_CRITICAL_UTILIZATION = "__KAFKA_CRITICAL_UTILIZATION__"
+KAFKA_INODE_UTILIZATION = "__KAFKA_INODE_UTILIZATION__"
+KAFKA_FORECAST_LOOKBACK = "__KAFKA_FORECAST_LOOKBACK__"
 
 
 def hottest(g, by="exported_instance"):
@@ -67,9 +75,10 @@ MATCH_PCT = "100 * " + rate("tupleComparison_total", TRUE_SEL) + " / " + TUPLES
 
 
 class P:
-    def __init__(self, title, desc, kind="timeseries", unit=None, runit=None, stacked=False, mn=0, mx=None):
+    def __init__(self, title, desc, kind="timeseries", unit=None, runit=None, stacked=False, mn=0, mx=None,
+                 thresholds=None):
         self.title, self.desc, self.kind, self.unit, self.runit = title, desc, kind, unit, runit
-        self.stacked, self.mn, self.mx, self.t = stacked, mn, mx, []
+        self.stacked, self.mn, self.mx, self.thresholds, self.t = stacked, mn, mx, thresholds, []
 
     def q(self, expr, legend, right=False, instant=False):
         self.t.append((expr, legend, right, instant))
@@ -89,6 +98,11 @@ class P:
             d["min"] = self.mn
         if self.mx is not None:
             d["max"] = self.mx
+        if self.thresholds:
+            d["thresholds"] = {
+                "mode": "absolute",
+                "steps": [{"color": color, "value": value} for color, value in self.thresholds],
+            }
         if self.stacked:
             d["custom"] = {"stacking": {"mode": "normal", "group": "A"}, "fillOpacity": 40}
         overrides = []
@@ -335,6 +349,168 @@ def kafka_brokers():
             .q(f"sum({w}) / {MIB}", "Disk writes (fleet)", right=True)
             .q(f"sum({r}) / {MIB}", "Disk reads (fleet)", right=True)
             .q(f"max({w}) / {MIB}", "Disk writes (busiest volume)", right=True))
+
+
+def kafka_pvc_metric(metric, range_selector=""):
+    volume = f'{metric}{{{KAFKA_VOLUME}}}{range_selector}'
+    labels = f'kube_persistentvolumeclaim_labels{{{KAFKA_PVC_LABELS}}}'
+    return (f'(max by (namespace, persistentvolumeclaim) ({volume}) '
+            f'and on (namespace, persistentvolumeclaim) '
+            f'max by (namespace, persistentvolumeclaim) ({labels}))')
+
+
+def kafka_volume_utilization():
+    available = kafka_pvc_metric("kubelet_volume_stats_available_bytes")
+    capacity = kafka_pvc_metric("kubelet_volume_stats_capacity_bytes")
+    return f'(100 * (1 - {available} / {capacity}))'
+
+
+def kafka_volume_utilization_summary():
+    utilization = kafka_volume_utilization()
+    return (P("Kafka disk utilization across volumes",
+              "Minimum, unweighted average and maximum utilization across the selected Strimzi-labeled Kafka PVCs. "
+              "Utilization is 100 × (1 - available bytes / capacity bytes). Use the "
+              "maximum as the first capacity-risk signal; the spread between minimum and maximum reveals broker "
+              "storage imbalance.",
+              unit="percent", mx=100, thresholds=[
+                  ("green", None),
+                  ("orange", KAFKA_WARNING_UTILIZATION),
+                  ("red", KAFKA_CRITICAL_UTILIZATION),
+              ])
+            .q(f"min({utilization})", "Minimum")
+            .q(f"avg({utilization})", "Average")
+            .q(f"max({utilization})", "Maximum"))
+
+
+def kafka_volume_utilization_by_volume():
+    utilization = kafka_volume_utilization()
+    return (P("Kafka disk utilization by volume",
+              "Utilization is 100 × (1 - available bytes / capacity bytes) for each selected Strimzi-labeled Kafka "
+              "PVC. The configured global warning and critical free-space policy supplies the panel colors. The "
+              "series identity is namespace + persistentvolumeclaim; pod and node are intentionally excluded.",
+              unit="percent", mx=100, thresholds=[
+                  ("green", None),
+                  ("orange", KAFKA_WARNING_UTILIZATION),
+                  ("red", KAFKA_CRITICAL_UTILIZATION),
+              ])
+            .q(utilization, "{{persistentvolumeclaim}}"))
+
+
+def kafka_volume_capacity():
+    available = kafka_pvc_metric("kubelet_volume_stats_available_bytes")
+    capacity = kafka_pvc_metric("kubelet_volume_stats_capacity_bytes")
+    return (P("Kafka volume free and provisioned bytes",
+              "Available and provisioned bytes reported by kubelet for each selected Strimzi-labeled Kafka PVC. A "
+              "gap means the CSI/filesystem provider did not publish volume stats, not that the volume has zero free "
+              "space.",
+              unit="bytes")
+            .q(available, "Free {{persistentvolumeclaim}}")
+            .q(capacity, "Capacity {{persistentvolumeclaim}}"))
+
+
+def kafka_volume_fill_eta():
+    available = kafka_pvc_metric("kubelet_volume_stats_available_bytes")
+    # kafka_pvc_metric appends the selector after a metric name. The deriv expression needs the
+    # selector inside the range vector, so build that one explicitly.
+    slope = (
+        f'(max by (namespace, persistentvolumeclaim) '
+        f'(deriv(kubelet_volume_stats_available_bytes{{{KAFKA_VOLUME}}}[{KAFKA_FORECAST_LOOKBACK}])) '
+        f'and on (namespace, persistentvolumeclaim) max by (namespace, persistentvolumeclaim) '
+        f'(kube_persistentvolumeclaim_labels{{{KAFKA_PVC_LABELS}}}))'
+    )
+    eta = (f'({available} / clamp_min(-({slope}), 1)) / 3600 '
+           f'and on (namespace, persistentvolumeclaim) ({slope} < 0)')
+    return (P("Estimated time until full",
+              "Estimated hours until available bytes reach zero if the linear consumption rate over the configured "
+              "forecast lookback continues. The default lookback is six hours. A series is shown only while free "
+              "space is decreasing. Retention cleanup and bursty capture traffic can make this forecast noisy.",
+              unit="h")
+            .q(eta, "{{persistentvolumeclaim}}"))
+
+
+def kafka_volume_inodes():
+    free = kafka_pvc_metric("kubelet_volume_stats_inodes_free")
+    total = kafka_pvc_metric("kubelet_volume_stats_inodes")
+    unhealthy = kafka_pvc_metric("kubelet_volume_stats_health_status_abnormal")
+    return (P("Kafka volume inode utilization and health",
+              "Left axis: 100 × (1 - free inodes / total inodes) per selected PVC. Right axis: kubelet/CSI abnormal "
+              "health status (1 abnormal, 0 healthy). Some CSI drivers do not publish inode or health metrics; "
+              "missing series are not converted to healthy or zero usage.",
+              unit="percent", runit="short", mx=100, thresholds=[
+                  ("green", None),
+                  ("red", KAFKA_INODE_UTILIZATION),
+              ])
+            .q(f"100 * (1 - {free} / {total})", "Inodes used {{persistentvolumeclaim}}")
+            .q(unhealthy, "Abnormal health {{persistentvolumeclaim}}", right=True))
+
+
+def kafka_partition_health():
+    return (P("Kafka partition replication health",
+              "Under-replicated and offline partitions from the opt-in managed Kafka JMX exporter.",
+              unit="short")
+            .q('max(kafka_server_replicamanager_under_replicated_partitions{namespace="$namespace"})',
+               "Under-replicated")
+            .q('max(kafka_controller_offline_partitions_count{namespace="$namespace"})',
+               "Offline"))
+
+
+def kafka_isr_health():
+    return (P("Kafka ISR changes",
+              "In-sync replica expansion and shrink events per second. Sustained shrink activity indicates replicas "
+              "are falling behind.",
+              unit="ops")
+            .q(f'sum(rate(kafka_server_replicamanager_isr_expands_total{{namespace="$namespace"}}[{RI}]))',
+               "ISR expands/s")
+            .q(f'sum(rate(kafka_server_replicamanager_isr_shrinks_total{{namespace="$namespace"}}[{RI}]))',
+               "ISR shrinks/s"))
+
+
+def kafka_controller_health():
+    return (P("Kafka controller and quorum health",
+              "Active controller count plus the KRaft current leader and epoch. A negative current leader means the "
+              "quorum has no elected leader.",
+              unit="short")
+            .q('max(kafka_controller_active_controller_count{namespace="$namespace"})', "Active controllers")
+            .q('max(kafka_server_raft_current_leader{namespace="$namespace"})', "Current quorum leader")
+            .q('max(kafka_server_raft_current_epoch{namespace="$namespace"})', "Current quorum epoch"))
+
+
+def kafka_request_health():
+    errors = (f'sum by (request, error) (rate(kafka_network_request_errors_total'
+              f'{{namespace="$namespace",request=~"Produce|FetchConsumer|FetchFollower",error!="NONE"}}[{RI}]))')
+    throttle = ('max by (request) (kafka_network_request_throttle_time_milliseconds'
+                '{namespace="$namespace",request=~"Produce|FetchConsumer|FetchFollower"})')
+    return (P("Kafka request errors and throttling",
+              "Produce/fetch request errors per second and mean broker throttle time by bounded request type.",
+              unit="ops", runit="ms")
+            .q(errors, "{{request}} {{error}} errors/s")
+            .q(throttle, "{{request}} throttle ms", right=True))
+
+
+def kafka_request_saturation():
+    busy = ('100 * (1 - avg by (pod) '
+            '(kafka_server_request_handler_idle_ratio{namespace="$namespace"}))')
+    return (P("Kafka request-handler saturation",
+              "Percent busy derived from one minus the request-handler idle ratio for each broker.",
+              unit="percent", mx=100)
+            .q(busy, "{{pod}}"))
+
+
+def kafka_jvm_health():
+    heap = (
+        '100 * max by (pod) (kafka_jvm_heap_used_bytes{namespace="$namespace"}) / '
+        'max by (pod) (kafka_jvm_heap_max_bytes{namespace="$namespace"})'
+    )
+    gc = (f'sum by (collector) (rate(kafka_jvm_gc_collection_time_milliseconds_total'
+          f'{{namespace="$namespace"}}[{RI}])) / 1000')
+    cpu = '100 * max by (pod) (kafka_jvm_process_cpu_ratio{namespace="$namespace"})'
+    return (P("Kafka JVM and process health",
+              "Heap and process CPU percentages plus garbage-collection seconds per second. Metrics are absent while "
+              "the opt-in broker JMX rules are disabled.",
+              unit="percent", runit="s")
+            .q(heap, "Heap {{pod}}")
+            .q(cpu, "Process CPU {{pod}}")
+            .q(gc, "GC {{collector}} seconds/s", right=True))
 
 
 # --- skew ---
@@ -684,6 +860,23 @@ def layout():
         ps.append(b().build(i * 8, y, 8, 7))
     y += 7
     y = layout_grid(ps, y)
+    ps.append(row("Kafka broker storage", y))
+    y += 1
+    for i, b in enumerate([kafka_volume_utilization_summary, kafka_volume_utilization_by_volume,
+                           kafka_volume_capacity]):
+        ps.append(b().build(i * 8, y, 8, 7))
+    y += 7
+    for i, b in enumerate([kafka_volume_fill_eta, kafka_volume_inodes]):
+        ps.append(b().build(i * 12, y, 12, 7))
+    y += 7
+    ps.append(row("Kafka broker health (opt-in JMX)", y))
+    y += 1
+    for i, b in enumerate([kafka_partition_health, kafka_isr_health, kafka_controller_health]):
+        ps.append(b().build(i * 8, y, 8, 7))
+    y += 7
+    for i, b in enumerate([kafka_request_health, kafka_request_saturation, kafka_jvm_health]):
+        ps.append(b().build(i * 8, y, 8, 7))
+    y += 7
     ps.append(row("Result tuples", y))
     y += 1
     for i, b in enumerate([tuple_flow, tuple_latency, tuple_errors]):
@@ -714,7 +907,14 @@ TEMPLATING = json.loads(r'''
    "definition": "label_values(container_cpu_usage_seconds_total{container=\"replayer\"}, namespace)",
    "query": {"query": "label_values(container_cpu_usage_seconds_total{container=\"replayer\"}, namespace)",
              "refId": "PrometheusVariableQueryEditor-VariableQuery"},
-   "current": {"selected": true, "text": "ma", "value": "ma"}, "includeAll": false, "multi": false, "refresh": 1}
+   "current": {"selected": true, "text": "ma", "value": "ma"}, "includeAll": false, "multi": false, "refresh": 1},
+  {"name": "kafka_volume", "type": "query", "label": "Kafka PVC(s)",
+   "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+   "definition": "label_values(kube_persistentvolumeclaim_labels{namespace=\"$namespace\",label_strimzi_io_cluster!=\"\",label_strimzi_io_pool_name!=\"\"}, persistentvolumeclaim)",
+   "query": {"query": "label_values(kube_persistentvolumeclaim_labels{namespace=\"$namespace\",label_strimzi_io_cluster!=\"\",label_strimzi_io_pool_name!=\"\"}, persistentvolumeclaim)",
+             "refId": "PrometheusVariableQueryEditor-VariableQuery"},
+   "current": {"selected": true, "text": "All", "value": "$__all"}, "includeAll": true, "allValue": ".*",
+   "multi": true, "refresh": 1}
 ]}''')
 
 
@@ -723,14 +923,28 @@ def main(out):
     for i, p in enumerate(panels, 1):
         p["id"] = i
     dash = {"id": None, "uid": "capture-replay-observability", "title": "Capture and Replay Observability",
-            "tags": ["capture", "replay", "kubernetes"], "timezone": "browser", "schemaVersion": 39, "version": 4,
+            "tags": ["capture", "replay", "kubernetes"], "timezone": "browser", "schemaVersion": 39, "version": 6,
             "refresh": "15s", "time": {"from": "now-6h", "to": "now"}, "panels": panels, "templating": TEMPLATING}
     body = json.dumps(dash, indent=2, ensure_ascii=False)
     # Helm would treat {{ }} as template actions; Grafana legend placeholders are unicode-escaped instead.
     body = body.replace("{{", "\\u007b\\u007b").replace("}}", "\\u007d\\u007d")
     json.loads(body)
+    body = body.replace(
+        f'"{KAFKA_WARNING_UTILIZATION}"',
+        '{{ sub 100 (int .Values.kafkaObservability.storage.warningFreePercent) }}',
+    ).replace(
+        f'"{KAFKA_CRITICAL_UTILIZATION}"',
+        '{{ sub 100 (int .Values.kafkaObservability.storage.criticalFreePercent) }}',
+    ).replace(
+        f'"{KAFKA_INODE_UTILIZATION}"',
+        '{{ sub 100 (int .Values.kafkaObservability.storage.inodeFreePercent) }}',
+    ).replace(
+        KAFKA_FORECAST_LOOKBACK,
+        '{{ .Values.kafkaObservability.storage.forecastLookback }}',
+    )
     indented = "\n".join(("    " + line) if line else line for line in body.splitlines())
-    head = ("{{- if .Values.metrics.enabled }}\napiVersion: v1\nkind: ConfigMap\nmetadata:\n"
+    head = ('{{- include "migration.validateKafkaObservability" . }}\n'
+            "{{- if .Values.metrics.enabled }}\napiVersion: v1\nkind: ConfigMap\nmetadata:\n"
             "  name: capture-replay-observability-dashboard\n  labels:\n    grafana_dashboard: \"1\"\ndata:\n"
             "  capture-replay-observability.json: |\n")
     open(out, "w").write(head + indented + "\n{{- end }}\n")

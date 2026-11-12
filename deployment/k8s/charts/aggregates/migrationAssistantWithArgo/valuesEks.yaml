@@ -11,6 +11,7 @@ aws:
   configureAwsEksResources: true
   region: ""
   account: ""
+  eksClusterName: ""
 
 # EKS Auto Mode labels every node with its zone and launches capacity in the zone a pod needs.
 workloadsNodePool:
@@ -61,6 +62,11 @@ metrics:
         configMapKeyRef:
           name: aws-metadata
           key: AWS_REGION
+    - name: EKS_CLUSTER_NAME
+      valueFrom:
+        configMapKeyRef:
+          name: aws-metadata
+          key: EKS_CLUSTER_NAME
   collectorConfig: |
     receivers:
       otlp:
@@ -90,6 +96,38 @@ metrics:
                 # Keep node name as a label
                 - source_labels: [__meta_kubernetes_node_name]
                   target_label: node
+      # CloudWatch-only scrape of kubelet PVC statistics. Prometheus continues
+      # to use kube-prometheus-stack's kubelet scrape and joins these series to
+      # Strimzi PVC labels; CloudWatch has no Kubernetes label join, so the
+      # current managed dual-role PVC naming contract is applied here.
+      prometheus/kafka-pvc-cloudwatch:
+        config:
+          scrape_configs:
+            - job_name: 'kafka-pvc-cloudwatch'
+              scrape_interval: 60s
+              scheme: https
+              authorization:
+                credentials_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+              tls_config:
+                ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+              kubernetes_sd_configs:
+                - role: node
+              relabel_configs:
+                - source_labels: [__meta_kubernetes_node_name]
+                  action: keep
+                  regex: ${K8S_NODE_NAME}
+                - target_label: __metrics_path__
+                  replacement: /metrics
+              metric_relabel_configs:
+                - source_labels: [__name__]
+                  action: keep
+                  regex: ^kubelet_volume_stats_(available_bytes|capacity_bytes|inodes|inodes_free|health_status_abnormal)$
+                - source_labels: [namespace]
+                  action: keep
+                  regex: ^{{ .Release.Namespace }}$
+                - source_labels: [persistentvolumeclaim]
+                  action: keep
+                  regex: ^data(-[0-9]+)?-.+-dual-role-[0-9]+$
     processors:
       batch:
         timeout: 10s
@@ -98,6 +136,14 @@ metrics:
       cumulativetodelta:
       resource/metrics:
         attributes:
+          - key: qualifier
+            value: ${env:QUALIFIER}
+            action: upsert
+      resource/kafka-pvc:
+        attributes:
+          - key: EKSClusterName
+            value: ${env:EKS_CLUSTER_NAME}
+            action: upsert
           - key: qualifier
             value: ${env:QUALIFIER}
             action: upsert
@@ -170,6 +216,15 @@ metrics:
             metric_name_selectors:
               - container_fs_writes_bytes_total
               - container_fs_reads_bytes_total
+      awsemf/kafka-pvc:
+        namespace: 'OpenSearchMigrations'
+        dimension_rollup_option: NoDimensionRollup
+        resource_to_telemetry_conversion:
+          enabled: true
+        metric_declarations:
+          - dimensions: [[EKSClusterName, qualifier, namespace, persistentvolumeclaim]]
+            metric_name_selectors:
+              - ^kubelet_volume_stats_(available_bytes|capacity_bytes|inodes|inodes_free|health_status_abnormal)$
       prometheus:
         endpoint: "0.0.0.0:8889"
         send_timestamps: true
@@ -194,6 +249,10 @@ metrics:
           receivers: [prometheus]
           processors: [batch]
           exporters: [prometheus]
+        metrics/kafka-pvc-cloudwatch:
+          receivers: [prometheus/kafka-pvc-cloudwatch]
+          processors: [resource/remove_default_attributes, resource/kafka-pvc, batch]
+          exporters: [awsemf/kafka-pvc]
 
 logs:
   sharedLogsVolume:

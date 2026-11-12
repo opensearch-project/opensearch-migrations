@@ -66,6 +66,9 @@ aws:
   configureAwsEksResources: false
   region: us-east-2
   account: "123456789012"
+  # EKS cluster identity attached to Kafka PVC CloudWatch metrics. Deployment
+  # entrypoints populate this value from the CloudFormation stack output.
+  eksClusterName: ""
 
   # Tags to stamp onto the AWS resources that EKS Auto Mode provisions for this release:
   # EC2 instances, EBS volumes and the load balancers/target groups behind any Service or
@@ -362,6 +365,24 @@ metrics:
           receivers: [ otlp ]
           processors:
           exporters: [ debug ]
+
+# Global policy shared by Prometheus dashboards/alerts and CloudWatch alarms.
+# Percentages describe capacity remaining free, not capacity used.
+kafkaObservability:
+  storage:
+    warningFreePercent: 20
+    criticalFreePercent: 10
+    inodeFreePercent: 10
+    forecastLookback: 6h
+    projectedFillWarningHorizonHours: 24
+    abnormalVolumeHealthAlerting: true
+  prometheusAlerts:
+    enabled: false
+  cloudWatchAlarms:
+    enabled: false
+    snsActionArns: []
+  brokerMetrics:
+    enabled: false
 
 tracing:
   enabled: false
@@ -868,6 +889,11 @@ charts:
           requests: { cpu: 50m, memory: 128Mi }
           limits:   { cpu: 250m, memory: 256Mi }
       kube-state-metrics:
+        # kubelet_volume_stats_* identifies a PVC only by namespace/name. Export
+        # these Strimzi labels so PromQL can join the volume series to the PVC
+        # identity instead of treating every data-* claim as Kafka.
+        metricLabelsAllowlist:
+          - "persistentvolumeclaims=[strimzi.io/cluster,strimzi.io/pool-name]"
         resources:
           requests: { cpu: 50m, memory: 64Mi }
           limits:   { cpu: 200m, memory: 128Mi }

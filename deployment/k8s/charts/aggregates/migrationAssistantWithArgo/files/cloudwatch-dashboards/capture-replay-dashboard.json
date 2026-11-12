@@ -29,6 +29,24 @@
         },
         {
             "type": "pattern",
+            "pattern": "EKS_CLUSTER_NAME",
+            "inputType": "input",
+            "id": "EKS_CLUSTER_NAME",
+            "label": "EKS cluster",
+            "defaultValue": "placeholder-cluster",
+            "visible": false
+        },
+        {
+            "type": "pattern",
+            "pattern": "MA_NAMESPACE",
+            "inputType": "input",
+            "id": "MA_NAMESPACE",
+            "label": "Kubernetes namespace",
+            "defaultValue": "placeholder-namespace",
+            "visible": false
+        },
+        {
+            "type": "pattern",
             "pattern": "CATCHUP_FLOOR_SECONDS",
             "inputType": "select",
             "id": "CATCHUP_FLOOR_SECONDS",
@@ -3873,6 +3891,246 @@
             "width": 24,
             "height": 1,
             "properties": {
+                "markdown": "## Kafka broker storage",
+                "background": "transparent"
+            }
+        },
+        {
+            "type": "text",
+            "x": 0,
+            "y": 85,
+            "width": 24,
+            "height": 2,
+            "properties": {
+                "markdown": "These panels cover the complete Migration Assistant-managed Kafka cluster; no broker-volume selection is required. Fleet disk and inode utilization are capacity-weighted five-minute views. Free space and abnormal health retain per-volume legends to expose imbalance or a specific failing volume. Missing inode or abnormal-health data means the kubelet/CSI driver did not publish that metric; it is not treated as zero or healthy.",
+                "background": "transparent"
+            }
+        },
+        {
+            "type": "metric",
+            "x": 0,
+            "y": 87,
+            "width": 8,
+            "height": 7,
+            "properties": {
+                "title": "Kafka storage utilization (fleet, capacity-weighted)",
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "placeholder-region",
+                "period": 300,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        {
+                            "expression": "100 * (1 - SUM(FILL(SEARCH('{OpenSearchMigrations,EKSClusterName,qualifier,namespace,persistentvolumeclaim} EKSClusterName=\"EKS_CLUSTER_NAME\" qualifier=\"MA_QUALIFIER\" namespace=\"MA_NAMESPACE\" MetricName=\"kubelet_volume_stats_available_bytes\"', 'Minimum', 300), REPEAT)) / SUM(FILL(SEARCH('{OpenSearchMigrations,EKSClusterName,qualifier,namespace,persistentvolumeclaim} EKSClusterName=\"EKS_CLUSTER_NAME\" qualifier=\"MA_QUALIFIER\" namespace=\"MA_NAMESPACE\" MetricName=\"kubelet_volume_stats_capacity_bytes\"', 'Maximum', 300), REPEAT)))",
+                            "label": "Fleet utilization",
+                            "id": "e1",
+                            "visible": true
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "min": 0,
+                        "max": 100,
+                        "label": "utilization %",
+                        "showUnits": false
+                    }
+                },
+                "annotations": {
+                    "horizontal": [
+                        {
+                            "label": "Warning",
+                            "value": "placeholder-warning-utilization",
+                            "color": "#ff9900"
+                        },
+                        {
+                            "label": "Critical",
+                            "value": "placeholder-critical-utilization",
+                            "color": "#d13212"
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "type": "metric",
+            "x": 8,
+            "y": 87,
+            "width": 8,
+            "height": 7,
+            "properties": {
+                "title": "Kafka free space by broker volume (GiB)",
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "placeholder-region",
+                "period": 300,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        {
+                            "expression": "FILL(SEARCH('{OpenSearchMigrations,EKSClusterName,qualifier,namespace,persistentvolumeclaim} EKSClusterName=\"EKS_CLUSTER_NAME\" qualifier=\"MA_QUALIFIER\" namespace=\"MA_NAMESPACE\" MetricName=\"kubelet_volume_stats_available_bytes\"', 'Minimum', 300), REPEAT) / 1073741824",
+                            "label": "${PROP('Dim.persistentvolumeclaim')}",
+                            "id": "e1",
+                            "visible": true
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "min": 0,
+                        "label": "GiB",
+                        "showUnits": false
+                    }
+                }
+            }
+        },
+        {
+            "type": "metric",
+            "x": 16,
+            "y": 87,
+            "width": 8,
+            "height": 7,
+            "properties": {
+                "title": "Kafka storage totals (GiB)",
+                "view": "singleValue",
+                "region": "placeholder-region",
+                "period": 300,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        {
+                            "expression": "SUM(FILL(SEARCH('{OpenSearchMigrations,EKSClusterName,qualifier,namespace,persistentvolumeclaim} EKSClusterName=\"EKS_CLUSTER_NAME\" qualifier=\"MA_QUALIFIER\" namespace=\"MA_NAMESPACE\" MetricName=\"kubelet_volume_stats_available_bytes\"', 'Minimum', 300), REPEAT))",
+                            "label": "Fleet available bytes",
+                            "id": "e1",
+                            "visible": false
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(FILL(SEARCH('{OpenSearchMigrations,EKSClusterName,qualifier,namespace,persistentvolumeclaim} EKSClusterName=\"EKS_CLUSTER_NAME\" qualifier=\"MA_QUALIFIER\" namespace=\"MA_NAMESPACE\" MetricName=\"kubelet_volume_stats_capacity_bytes\"', 'Maximum', 300), REPEAT))",
+                            "label": "Fleet capacity bytes",
+                            "id": "e2",
+                            "visible": false
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "e1 / 1073741824",
+                            "label": "Free (GiB)",
+                            "id": "e3",
+                            "visible": true
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "(e2 - e1) / 1073741824",
+                            "label": "Used (GiB)",
+                            "id": "e4",
+                            "visible": true
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "e2 / 1073741824",
+                            "label": "Capacity (GiB)",
+                            "id": "e5",
+                            "visible": true
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "min": 0,
+                        "label": "GiB",
+                        "showUnits": false
+                    }
+                },
+                "sparkline": true
+            }
+        },
+        {
+            "type": "metric",
+            "x": 0,
+            "y": 94,
+            "width": 12,
+            "height": 7,
+            "properties": {
+                "title": "Kafka inode utilization (fleet, capacity-weighted)",
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "placeholder-region",
+                "period": 300,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        {
+                            "expression": "100 * (1 - SUM(FILL(SEARCH('{OpenSearchMigrations,EKSClusterName,qualifier,namespace,persistentvolumeclaim} EKSClusterName=\"EKS_CLUSTER_NAME\" qualifier=\"MA_QUALIFIER\" namespace=\"MA_NAMESPACE\" MetricName=\"kubelet_volume_stats_inodes_free\"', 'Minimum', 300), REPEAT)) / SUM(FILL(SEARCH('{OpenSearchMigrations,EKSClusterName,qualifier,namespace,persistentvolumeclaim} EKSClusterName=\"EKS_CLUSTER_NAME\" qualifier=\"MA_QUALIFIER\" namespace=\"MA_NAMESPACE\" MetricName=\"kubelet_volume_stats_inodes\"', 'Maximum', 300), REPEAT)))",
+                            "label": "Fleet inode utilization",
+                            "id": "e1",
+                            "visible": true
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "min": 0,
+                        "max": 100,
+                        "label": "utilization %",
+                        "showUnits": false
+                    }
+                },
+                "annotations": {
+                    "horizontal": [
+                        {
+                            "label": "Low free inodes",
+                            "value": "placeholder-inode-utilization",
+                            "color": "#d13212"
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "type": "metric",
+            "x": 12,
+            "y": 94,
+            "width": 12,
+            "height": 7,
+            "properties": {
+                "title": "Kafka abnormal volume health",
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "placeholder-region",
+                "period": 300,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        {
+                            "expression": "SEARCH('{OpenSearchMigrations,EKSClusterName,qualifier,namespace,persistentvolumeclaim} EKSClusterName=\"EKS_CLUSTER_NAME\" qualifier=\"MA_QUALIFIER\" namespace=\"MA_NAMESPACE\" MetricName=\"kubelet_volume_stats_health_status_abnormal\"', 'Maximum', 300)",
+                            "label": "${PROP('Dim.persistentvolumeclaim')}",
+                            "id": "e1",
+                            "visible": true
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "min": 0,
+                        "max": 1,
+                        "label": "1 = abnormal",
+                        "showUnits": false
+                    }
+                }
+            }
+        },
+        {
+            "type": "text",
+            "x": 0,
+            "y": 101,
+            "width": 24,
+            "height": 1,
+            "properties": {
                 "markdown": "## Source cluster and replayer internals",
                 "background": "transparent"
             }
@@ -3880,7 +4138,7 @@
         {
             "type": "metric",
             "x": 0,
-            "y": 85,
+            "y": 102,
             "width": 6,
             "height": 7,
             "properties": {
@@ -3946,7 +4204,7 @@
         {
             "type": "metric",
             "x": 6,
-            "y": 85,
+            "y": 102,
             "width": 6,
             "height": 7,
             "properties": {
@@ -3971,7 +4229,7 @@
         {
             "type": "metric",
             "x": 12,
-            "y": 85,
+            "y": 102,
             "width": 6,
             "height": 7,
             "properties": {
@@ -3996,7 +4254,7 @@
         {
             "type": "metric",
             "x": 18,
-            "y": 85,
+            "y": 102,
             "width": 6,
             "height": 7,
             "properties": {
@@ -4021,7 +4279,7 @@
         {
             "type": "metric",
             "x": 0,
-            "y": 92,
+            "y": 109,
             "width": 8,
             "height": 7,
             "properties": {
@@ -4110,7 +4368,7 @@
         {
             "type": "metric",
             "x": 8,
-            "y": 92,
+            "y": 109,
             "width": 8,
             "height": 7,
             "properties": {
@@ -4172,7 +4430,7 @@
         {
             "type": "metric",
             "x": 16,
-            "y": 92,
+            "y": 109,
             "width": 8,
             "height": 7,
             "properties": {

@@ -20,14 +20,20 @@ import sys
 NS = "OpenSearchMigrations"
 Q = "MA_QUALIFIER"
 R = "placeholder-region"
+EKS_CLUSTER = "EKS_CLUSTER_NAME"
+MA_NAMESPACE = "MA_NAMESPACE"
+WARNING_UTILIZATION = "placeholder-warning-utilization"
+CRITICAL_UTILIZATION = "placeholder-critical-utilization"
+INODE_UTILIZATION = "placeholder-inode-utilization"
 
 
 class W:
     """One metric widget; collects metric rows and returns a dashboard widget dict."""
 
-    def __init__(self, title, view="timeSeries", stacked=False, yleft=None, yright=None, period=60, stat="Sum"):
+    def __init__(self, title, view="timeSeries", stacked=False, yleft=None, yright=None, period=60, stat="Sum",
+                 annotations=None):
         self.title, self.view, self.stacked, self.period, self.stat = title, view, stacked, period, stat
-        self.rows, self.n, self.yleft, self.yright = [], 0, yleft, yright
+        self.rows, self.n, self.yleft, self.yright, self.annotations = [], 0, yleft, yright, annotations
 
     def _id(self, p):
         self.n += 1
@@ -101,6 +107,8 @@ class W:
             yaxis["right"] = self.yright
         if yaxis:
             p["yAxis"] = yaxis
+        if self.annotations:
+            p["annotations"] = self.annotations
         if self.view == "singleValue":
             p["sparkline"] = True
             p.pop("stacked")
@@ -134,6 +142,7 @@ def es(w, metric, stat, label, domain_var="TARGET_DOMAIN", scale=None, **opts):
 
 
 MIB = 1048576
+GIB = 1073741824
 # Metric math keeps a source metric's unit, so a millisecond metric divided by 1000 would still be
 # labelled as milliseconds (4,200 s drawn as "4.2s"). Axes for rescaled durations drop the unit.
 SECONDS_AXIS = {"label": "seconds", "showUnits": False}
@@ -385,6 +394,123 @@ def kafka_brokers():
     w.e(f"SUM(SEARCH('{disk % 'container_fs_writes_bytes_total'}', 'Sum', 300)) / 300 / {MIB}", "Disk writes (fleet)", yAxis="right")
     w.e(f"SUM(SEARCH('{disk % 'container_fs_reads_bytes_total'}', 'Sum', 300)) / 300 / {MIB}", "Disk reads (fleet)", yAxis="right")
     w.e(f"MAX(SEARCH('{disk % 'container_fs_writes_bytes_total'}', 'Sum', 300)) / 300 / {MIB}", "Disk writes (busiest volume)", yAxis="right")
+    return w
+
+
+KAFKA_PVC_SCHEMA = (
+    f"{{{NS},EKSClusterName,qualifier,namespace,persistentvolumeclaim}} "
+    f'EKSClusterName="{EKS_CLUSTER}" qualifier="{Q}" namespace="{MA_NAMESPACE}"'
+)
+KAFKA_DISK_THRESHOLDS = {
+    "horizontal": [
+        {"label": "Warning", "value": WARNING_UTILIZATION, "color": "#ff9900"},
+        {"label": "Critical", "value": CRITICAL_UTILIZATION, "color": "#d13212"},
+    ]
+}
+KAFKA_INODE_THRESHOLD = {
+    "horizontal": [
+        {"label": "Low free inodes", "value": INODE_UTILIZATION, "color": "#d13212"},
+    ]
+}
+
+
+KAFKA_PVC_PERIOD = 300
+
+
+def kafka_pvc_search(metric, stat="Maximum"):
+    return f"SEARCH('{KAFKA_PVC_SCHEMA} MetricName=\"{metric}\"', '{stat}', {KAFKA_PVC_PERIOD})"
+
+
+def filled_kafka_pvc_search(metric, stat="Maximum"):
+    # Each PVC is scraped by the collector on its node, so samples do not all
+    # arrive in the same second. Repeat-fill short gaps before fleet reduction
+    # to prevent an incomplete current interval from looking like capacity
+    # disappeared.
+    return f"FILL({kafka_pvc_search(metric, stat)}, REPEAT)"
+
+
+def kafka_fleet_disk_utilization():
+    """Capacity-weighted fleet utilization.
+
+    SEARCH returns an array of time series. CloudWatch cannot divide two such
+    arrays element by element, but reducing each array to one fleet total
+    before division is valid and preserves the available/capacity definition.
+    """
+    available = filled_kafka_pvc_search("kubelet_volume_stats_available_bytes", "Minimum")
+    capacity = filled_kafka_pvc_search("kubelet_volume_stats_capacity_bytes")
+    return f"100 * (1 - SUM({available}) / SUM({capacity}))"
+
+
+def kafka_storage_summary():
+    w = W(
+        "Kafka storage utilization (fleet, capacity-weighted)",
+        yleft={"min": 0, "max": 100, "label": "utilization %", "showUnits": False},
+        period=KAFKA_PVC_PERIOD,
+        annotations=KAFKA_DISK_THRESHOLDS,
+    )
+    w.e(kafka_fleet_disk_utilization(), "Fleet utilization")
+    return w
+
+
+def kafka_storage_free_by_pvc():
+    w = W(
+        "Kafka free space by broker volume (GiB)",
+        yleft={"min": 0, "label": "GiB", "showUnits": False},
+        period=KAFKA_PVC_PERIOD,
+    )
+    w.e(
+        f"{filled_kafka_pvc_search('kubelet_volume_stats_available_bytes', 'Minimum')} / {GIB}",
+        "${PROP('Dim.persistentvolumeclaim')}",
+    )
+    return w
+
+
+def kafka_storage_capacity():
+    w = W(
+        "Kafka storage totals (GiB)",
+        "singleValue",
+        yleft={"min": 0, "label": "GiB", "showUnits": False},
+        period=KAFKA_PVC_PERIOD,
+    )
+    available = w.e(
+        f"SUM({filled_kafka_pvc_search('kubelet_volume_stats_available_bytes', 'Minimum')})",
+        "Fleet available bytes",
+        visible=False,
+    )
+    capacity = w.e(
+        f"SUM({filled_kafka_pvc_search('kubelet_volume_stats_capacity_bytes')})",
+        "Fleet capacity bytes",
+        visible=False,
+    )
+    w.e(f"{available} / {GIB}", "Free (GiB)")
+    w.e(f"({capacity} - {available}) / {GIB}", "Used (GiB)")
+    w.e(f"{capacity} / {GIB}", "Capacity (GiB)")
+    return w
+
+
+def kafka_storage_inodes():
+    w = W(
+        "Kafka inode utilization (fleet, capacity-weighted)",
+        yleft={"min": 0, "max": 100, "label": "utilization %", "showUnits": False},
+        period=KAFKA_PVC_PERIOD,
+        annotations=KAFKA_INODE_THRESHOLD,
+    )
+    free = filled_kafka_pvc_search("kubelet_volume_stats_inodes_free", "Minimum")
+    total = filled_kafka_pvc_search("kubelet_volume_stats_inodes")
+    w.e(f"100 * (1 - SUM({free}) / SUM({total}))", "Fleet inode utilization")
+    return w
+
+
+def kafka_storage_health():
+    w = W(
+        "Kafka abnormal volume health",
+        yleft={"min": 0, "max": 1, "label": "1 = abnormal", "showUnits": False},
+        period=KAFKA_PVC_PERIOD,
+    )
+    w.e(
+        kafka_pvc_search("kubelet_volume_stats_health_status_abnormal"),
+        "${PROP('Dim.persistentvolumeclaim')}",
+    )
     return w
 
 
@@ -760,6 +886,23 @@ def layout_columns():
     for i, b in enumerate([tuple_flow, tuple_latency, tuple_errors]):
         ws.append(b().widget(i * 8, y, 8, 6))
     y += 6
+    ws.append(text("## Kafka broker storage", 0, y, 24))
+    y += 1
+    ws.append(text(
+        "These panels cover the complete Migration Assistant-managed Kafka cluster; no broker-volume selection "
+        "is required. Fleet disk and inode utilization are capacity-weighted five-minute views. Free space and "
+        "abnormal health retain per-volume legends to expose imbalance or a specific failing volume. Missing inode or "
+        "abnormal-health data means the kubelet/CSI driver did not publish that metric; it is not treated as "
+        "zero or healthy.",
+        0, y, 24, 2,
+    ))
+    y += 2
+    for i, b in enumerate([kafka_storage_summary, kafka_storage_free_by_pvc, kafka_storage_capacity]):
+        ws.append(b().widget(i * 8, y, 8, 7))
+    y += 7
+    for i, b in enumerate([kafka_storage_inodes, kafka_storage_health]):
+        ws.append(b().widget(i * 12, y, 12, 7))
+    y += 7
     ws.append(text("## Source cluster and replayer internals", 0, y, 24))
     y += 1
     for i, b in enumerate([source_domain, contexts_by_activity, ops_by_type, resources_owned]):
@@ -778,6 +921,10 @@ VARIABLES = [
      "defaultValue": "placeholder-stage", "visible": False},
     {"type": "pattern", "pattern": "MA_QUALIFIER", "inputType": "input", "id": "MA_QUALIFIER", "label": "Migration Qualifier",
      "defaultValue": "placeholder-qualifier", "visible": False},
+    {"type": "pattern", "pattern": "EKS_CLUSTER_NAME", "inputType": "input", "id": "EKS_CLUSTER_NAME",
+     "label": "EKS cluster", "defaultValue": "placeholder-cluster", "visible": False},
+    {"type": "pattern", "pattern": "MA_NAMESPACE", "inputType": "input", "id": "MA_NAMESPACE",
+     "label": "Kubernetes namespace", "defaultValue": "placeholder-namespace", "visible": False},
     {"type": "pattern", "pattern": "CATCHUP_FLOOR_SECONDS", "inputType": "select", "id": "CATCHUP_FLOOR_SECONDS",
      "label": "Catch-up lag floor", "defaultValue": "5",
      "values": [{"label": "1 second", "value": "1"}, {"label": "5 seconds", "value": "5"}, {"label": "1 minute", "value": "60"}],

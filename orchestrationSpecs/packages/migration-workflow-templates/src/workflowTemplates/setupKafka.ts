@@ -33,6 +33,7 @@ type KafkaConfig = z.infer<typeof KAFKA_CLUSTER_CREATION_CONFIG>;
 const KAFKA_CLUSTER_LABEL = "migrations.opensearch.org/kafka-cluster";
 const SOURCE_LABEL = "migrations.opensearch.org/source";
 const WORKFLOW_LABEL = "workflows.argoproj.io/workflow";
+const KAFKA_JMX_METRICS_CONFIG_MAP = "migration-assistant-kafka-jmx-metrics";
 const KAFKA_READY_DIAGNOSTIC_ACTIVE_DEADLINE_SECONDS = 5 * 60;
 const KAFKA_DIAGNOSTIC_ARTIFACT_NAME = "kafkaReadinessDiagnostics";
 const KAFKA_DIAGNOSTIC_LOG_PATH = "/tmp/kafka-readiness-diagnostics.log";
@@ -89,6 +90,18 @@ function makeManagedKafkaListeners(authType: BaseExpression<string>) {
         expr.toArray(makeScramListener()),
         expr.toArray(makePlainListener(), makeTlsListener())
     );
+}
+
+function makeManagedKafkaMetricsConfig() {
+    return expr.makeDict({
+        type: "jmxPrometheusExporter",
+        valueFrom: expr.makeDict({
+            configMapKeyRef: expr.makeDict({
+                name: KAFKA_JMX_METRICS_CONFIG_MAP,
+                key: "metrics-config.yml",
+            }),
+        }),
+    });
 }
 
 function makeManagedKafkaUserManifest(args: {
@@ -211,7 +224,8 @@ function makeManagedKafkaSpecNoAuth(args: {
         expr.makeDict({
             version: args.version,
             metadataVersion: "4.0-IV3",
-            listeners: expr.toArray(makePlainListener(), makeTlsListener())
+            listeners: expr.toArray(makePlainListener(), makeTlsListener()),
+            metricsConfig: makeManagedKafkaMetricsConfig(),
         }),
         kafkaSpecOverrides
     );
@@ -228,7 +242,8 @@ function makeManagedKafkaSpecScram(args: {
         expr.makeDict({
             version: args.version,
             metadataVersion: "4.0-IV3",
-            listeners: expr.toArray(makeScramListener())
+            listeners: expr.toArray(makeScramListener()),
+            metricsConfig: makeManagedKafkaMetricsConfig(),
         }),
         kafkaSpecOverrides
     );

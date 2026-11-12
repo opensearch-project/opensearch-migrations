@@ -22,7 +22,7 @@ DASHBOARD_MANIFESTS = "/dashboards/dashboards.yaml"
 # A single exec argument is limited to 128 KiB (MAX_ARG_STRLEN); keep the inlined Job scripts well under it.
 MAX_SCRIPT_BYTES = 96 * 1024
 UNRESOLVED_PLACEHOLDER = re.compile(
-    r"placeholder-(?:region|stage|qualifier|account-id)"
+    r"placeholder-(?:region|stage|qualifier|account-id|cluster|namespace|warning-utilization|critical-utilization|inode-utilization)"
 )
 
 # The lowest Kubernetes version the chart supports (Chart.yaml kubeVersion).
@@ -235,6 +235,8 @@ def main():
         "aws.region=us-east-2",
         "--set-string",
         "aws.account=123456789012",
+        "--set-string",
+        "aws.eksClusterName=verify-eks-cluster",
     )
     validate_grafana(local, "local")
     validate_grafana(eks, "EKS")
