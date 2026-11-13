@@ -556,6 +556,19 @@ class KafkaObservabilityTests(unittest.TestCase):
 
     def test_broker_jmx_rules_and_monitor_are_enabled_by_default(self):
         self.assertIn("name: migration-assistant-kafka-jmx-metrics", self.default_render)
+        for object_name in (
+            "kafka.server:type=ReplicaManager,name=UnderReplicatedPartitions",
+            "kafka.controller:type=KafkaController,name=OfflinePartitionsCount",
+            "kafka.server:type=raft-metrics",
+            "kafka.network:type=RequestMetrics,name=ErrorsPerSec,*",
+            "kafka.network:type=RequestMetrics,name=ThrottleTimeMs,*",
+            "kafka.server:type=KafkaRequestHandlerPool,name=RequestHandlerAvgIdlePercent",
+            "java.lang:type=Memory",
+            "java.lang:type=GarbageCollector,name=*",
+            "java.lang:type=OperatingSystem",
+            "java.lang:type=Runtime",
+        ):
+            self.assertIn(f'- "{object_name}"', self.default_render)
         self.assertIn("kafka_server_replicamanager_under_replicated_partitions", self.default_render)
         self.assertIn("kind: PodMonitor", self.default_render)
         self.assertIn("request=(Produce|FetchConsumer|FetchFollower)", self.default_render)

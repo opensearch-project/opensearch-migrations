@@ -9,6 +9,23 @@ data:
     lowercaseOutputName: true
     lowercaseOutputLabelNames: true
 {{- if .Values.kafkaObservability.brokerMetrics.enabled }}
+    # Filter the JMX query itself before applying the rules below. Without this
+    # allowlist the exporter enumerates every broker MBean on each Prometheus
+    # and CloudWatch scrape even though the rules discard nearly all of them.
+    includeObjectNames:
+      - "kafka.server:type=ReplicaManager,name=UnderReplicatedPartitions"
+      - "kafka.server:type=ReplicaManager,name=IsrExpandsPerSec"
+      - "kafka.server:type=ReplicaManager,name=IsrShrinksPerSec"
+      - "kafka.controller:type=KafkaController,name=OfflinePartitionsCount"
+      - "kafka.controller:type=KafkaController,name=ActiveControllerCount"
+      - "kafka.server:type=raft-metrics"
+      - "kafka.network:type=RequestMetrics,name=ErrorsPerSec,*"
+      - "kafka.network:type=RequestMetrics,name=ThrottleTimeMs,*"
+      - "kafka.server:type=KafkaRequestHandlerPool,name=RequestHandlerAvgIdlePercent"
+      - "java.lang:type=Memory"
+      - "java.lang:type=GarbageCollector,name=*"
+      - "java.lang:type=OperatingSystem"
+      - "java.lang:type=Runtime"
     rules:
       - pattern: 'kafka.server<type=ReplicaManager, name=UnderReplicatedPartitions><>Value'
         name: kafka_server_replicamanager_under_replicated_partitions

@@ -200,6 +200,11 @@ Managed Kafka resources reference the shipped JMX exporter ConfigMap through
 `spec.kafka.metricsConfig`. When collection is disabled, the ConfigMap has no
 rules and the broker `PodMonitor` is removed.
 
+When collection is enabled, the exporter restricts its JMX query to the Kafka
+and JVM object names used by the published metric rules. This avoids
+enumerating unrelated broker MBeans on both the Prometheus and CloudWatch
+scrape paths.
+
 Broker alerts remain disabled independently. They render only when
 Alertmanager, Kafka Prometheus alerts, and broker alerts are all enabled:
 
