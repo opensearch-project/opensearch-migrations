@@ -1,0 +1,331 @@
+{{- include "migration.validateKafkaObservability" . }}
+{{- $prometheusStackEnabled := get .Values.conditionalPackageInstalls "kube-prometheus-stack" }}
+{{- if and .Values.metrics.enabled $prometheusStackEnabled }}
+{{- $stack := index .Values.charts "kube-prometheus-stack" }}
+{{- $alertmanagerEnabled := dig "values" "alertmanager" "enabled" false $stack }}
+{{- $alertsEnabled := .Values.kafkaObservability.prometheusAlerts.enabled }}
+{{- $renderRules := and $alertmanagerEnabled $alertsEnabled }}
+{{- $name := printf "%s-kafka-storage" .Release.Name }}
+{{- $storage := .Values.kafkaObservability.storage }}
+{{- $freeBytes := include "migration.kafkaPvcMetric" (dict "root" . "metric" "kubelet_volume_stats_available_bytes") }}
+{{- $freeBytesPercent := include "migration.kafkaPvcFreePercent" (dict "root" . "free" "kubelet_volume_stats_available_bytes" "total" "kubelet_volume_stats_capacity_bytes") }}
+{{- $freeInodesPercent := include "migration.kafkaPvcFreePercent" (dict "root" . "free" "kubelet_volume_stats_inodes_free" "total" "kubelet_volume_stats_inodes") }}
+{{- $abnormalHealth := include "migration.kafkaPvcMetric" (dict "root" . "metric" "kubelet_volume_stats_health_status_abnormal") }}
+{{- if $renderRules }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}-prometheus-rule
+  namespace: {{ .Release.Namespace }}
+data:
+  rules.yaml: |
+    apiVersion: monitoring.coreos.com/v1
+    kind: PrometheusRule
+    metadata:
+      name: {{ $name }}
+      namespace: {{ .Release.Namespace }}
+      labels:
+        release: kube-prometheus-stack
+        app.kubernetes.io/managed-by: {{ .Release.Service }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      groups:
+        - name: migration-assistant-kafka-storage
+          rules:
+            - alert: MigrationAssistantKafkaVolumeLowFreeSpaceWarning
+              expr: |
+                {{ $freeBytesPercent }} < {{ $storage.warningFreePercent }}
+                and on (namespace, persistentvolumeclaim)
+                {{ $freeBytesPercent }} >= {{ $storage.criticalFreePercent }}
+              for: 15m
+              labels:
+                severity: warning
+              annotations:
+                summary: "Kafka PVC has less than the configured warning free-space percentage"
+                description: >-
+                  Kafka PVC {{ "{{ $labels.namespace }}" }}/{{ "{{ $labels.persistentvolumeclaim }}" }}
+                  has less than {{ .Values.kafkaObservability.storage.warningFreePercent }}% capacity remaining free.
+
+            - alert: MigrationAssistantKafkaVolumeLowFreeSpaceCritical
+              expr: |
+                {{ $freeBytesPercent }} < {{ $storage.criticalFreePercent }}
+              for: 15m
+              labels:
+                severity: critical
+              annotations:
+                summary: "Kafka PVC has less than the configured critical free-space percentage"
+                description: >-
+                  Kafka PVC {{ "{{ $labels.namespace }}" }}/{{ "{{ $labels.persistentvolumeclaim }}" }}
+                  has less than {{ .Values.kafkaObservability.storage.criticalFreePercent }}% capacity remaining free.
+
+            - alert: MigrationAssistantKafkaVolumeProjectedToFill
+              expr: |
+                predict_linear(
+                  {{ $freeBytes }}[{{ $storage.forecastLookback }}:5m],
+                  {{ mul (int $storage.projectedFillWarningHorizonHours) 3600 }}
+                ) < 0
+              for: 15m
+              labels:
+                severity: warning
+              annotations:
+                summary: "Kafka PVC is projected to fill within the configured warning horizon"
+                description: >-
+                  Kafka PVC {{ "{{ $labels.namespace }}" }}/{{ "{{ $labels.persistentvolumeclaim }}" }}
+                  is projected to fill within
+                  {{ .Values.kafkaObservability.storage.projectedFillWarningHorizonHours }} hours.
+
+            - alert: MigrationAssistantKafkaVolumeLowFreeInodes
+              expr: |
+                {{ $freeInodesPercent }} < {{ $storage.inodeFreePercent }}
+              for: 15m
+              labels:
+                severity: warning
+              annotations:
+                summary: "Kafka PVC has fewer free inodes than the configured percentage"
+                description: >-
+                  Kafka PVC {{ "{{ $labels.namespace }}" }}/{{ "{{ $labels.persistentvolumeclaim }}" }}
+                  has less than {{ .Values.kafkaObservability.storage.inodeFreePercent }}% inodes free.
+{{- if .Values.kafkaObservability.storage.abnormalVolumeHealthAlerting }}
+
+            - alert: MigrationAssistantKafkaVolumeHealthAbnormal
+              expr: |
+                {{ $abnormalHealth }} == 1
+              for: 5m
+              labels:
+                severity: critical
+              annotations:
+                summary: "Kafka PVC health is abnormal"
+                description: >-
+                  The CSI/kubelet health signal for Kafka PVC
+                  {{ "{{ $labels.namespace }}" }}/{{ "{{ $labels.persistentvolumeclaim }}" }} is abnormal.
+{{- end }}
+{{- if and .Values.kafkaObservability.brokerMetrics.enabled .Values.kafkaObservability.brokerMetrics.alertsEnabled }}
+
+            - alert: MigrationAssistantKafkaUnderReplicatedPartitions
+              expr: max by (namespace, pod) (kafka_server_replicamanager_under_replicated_partitions{namespace="{{ .Release.Namespace }}"}) > 0
+              for: 10m
+              labels:
+                severity: warning
+              annotations:
+                summary: "Kafka has under-replicated partitions"
+
+            - alert: MigrationAssistantKafkaOfflinePartitions
+              expr: max by (namespace, pod) (kafka_controller_offline_partitions_count{namespace="{{ .Release.Namespace }}"}) > 0
+              for: 5m
+              labels:
+                severity: critical
+              annotations:
+                summary: "Kafka has offline partitions"
+
+            - alert: MigrationAssistantKafkaIsrShrinking
+              expr: sum by (namespace, pod) (rate(kafka_server_replicamanager_isr_shrinks_total{namespace="{{ .Release.Namespace }}"}[10m])) > 0
+              for: 10m
+              labels:
+                severity: warning
+              annotations:
+                summary: "Kafka ISR is persistently shrinking"
+
+            - alert: MigrationAssistantKafkaIsrChurn
+              expr: |
+                sum by (namespace, pod) (
+                  rate(kafka_server_replicamanager_isr_expands_total{namespace="{{ .Release.Namespace }}"}[10m])
+                  +
+                  rate(kafka_server_replicamanager_isr_shrinks_total{namespace="{{ .Release.Namespace }}"}[10m])
+                ) > 0
+              for: 15m
+              labels:
+                severity: warning
+              annotations:
+                summary: "Kafka ISR membership is changing continuously"
+
+            - alert: MigrationAssistantKafkaControllerUnavailable
+              expr: max(kafka_controller_active_controller_count{namespace="{{ .Release.Namespace }}"}) != 1
+              for: 5m
+              labels:
+                severity: critical
+              annotations:
+                summary: "Kafka does not report exactly one active controller"
+
+            - alert: MigrationAssistantKafkaQuorumLeaderUnavailable
+              expr: max(kafka_server_raft_current_leader{namespace="{{ .Release.Namespace }}"}) < 0
+              for: 5m
+              labels:
+                severity: critical
+              annotations:
+                summary: "Kafka quorum does not report a current leader"
+
+            - alert: MigrationAssistantKafkaRequestErrors
+              expr: sum by (namespace, request, error) (rate(kafka_network_request_errors_total{namespace="{{ .Release.Namespace }}",request=~"Produce|FetchConsumer|FetchFollower",error!="NONE"}[10m])) > 0
+              for: 10m
+              labels:
+                severity: warning
+              annotations:
+                summary: "Kafka produce or fetch request errors are continuing"
+
+            - alert: MigrationAssistantKafkaRequestThrottled
+              expr: max by (namespace, pod, request) (kafka_network_request_throttle_time_milliseconds{namespace="{{ .Release.Namespace }}",request=~"Produce|FetchConsumer|FetchFollower"}) > 1000
+              for: 10m
+              labels:
+                severity: warning
+              annotations:
+                summary: "Kafka produce or fetch requests are throttled by more than one second"
+
+            - alert: MigrationAssistantKafkaRequestHandlersSaturated
+              expr: 100 * (1 - avg by (namespace, pod) (kafka_server_request_handler_idle_ratio{namespace="{{ .Release.Namespace }}"}) / 2) > 80
+              for: 15m
+              labels:
+                severity: warning
+              annotations:
+                summary: "Kafka request handlers are more than 80% busy"
+
+            - alert: MigrationAssistantKafkaJvmHeapHigh
+              expr: |
+                100 *
+                max by (namespace, pod) (kafka_jvm_heap_used_bytes{namespace="{{ .Release.Namespace }}"})
+                /
+                max by (namespace, pod) (kafka_jvm_heap_max_bytes{namespace="{{ .Release.Namespace }}"})
+                > 85
+              for: 15m
+              labels:
+                severity: warning
+              annotations:
+                summary: "Kafka JVM heap utilization is above 85%"
+
+            - alert: MigrationAssistantKafkaJvmGcHigh
+              expr: |
+                sum by (namespace, pod) (
+                  rate(kafka_jvm_gc_collection_time_milliseconds_total{namespace="{{ .Release.Namespace }}"}[10m])
+                ) / 1000 > 0.5
+              for: 15m
+              labels:
+                severity: warning
+              annotations:
+                summary: "Kafka JVM is spending more than half its time in garbage collection"
+
+            - alert: MigrationAssistantKafkaProcessCpuHigh
+              expr: 100 * max by (namespace, pod) (kafka_jvm_process_cpu_ratio{namespace="{{ .Release.Namespace }}"}) > 90
+              for: 15m
+              labels:
+                severity: warning
+              annotations:
+                summary: "Kafka process CPU utilization is above 90%"
+
+            - alert: MigrationAssistantKafkaProcessRestarted
+              expr: resets(kafka_jvm_uptime_milliseconds{namespace="{{ .Release.Namespace }}"}[15m]) > 0
+              labels:
+                severity: warning
+              annotations:
+                summary: "Kafka process uptime reset during the last 15 minutes"
+{{- end }}
+---
+{{- end }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}-rule-reconciler
+  namespace: {{ .Release.Namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}-rule-reconciler
+  namespace: {{ .Release.Namespace }}
+rules:
+  - apiGroups: ["monitoring.coreos.com"]
+    resources: ["prometheusrules"]
+    verbs: ["get", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}-rule-reconciler
+  namespace: {{ .Release.Namespace }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}-rule-reconciler
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name }}-rule-reconciler
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $name }}-rule-reconcile
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  activeDeadlineSeconds: 180
+  template:
+    spec:
+      serviceAccountName: {{ $name }}-rule-reconciler
+      restartPolicy: Never
+      containers:
+        - name: reconcile
+          image: {{ include "migration.image" (dict "root" . "image" .Values.images.installer) }}
+          command:
+            - /bin/bash
+            - -euc
+            - |
+              rule_api_ready=false
+              for attempt in $(seq 1 60); do
+                if kubectl get prometheusrule {{ $name }} --namespace {{ .Release.Namespace }} --ignore-not-found >/dev/null 2>&1; then
+                  rule_api_ready=true
+                  break
+                fi
+                sleep 2
+              done
+              if [[ "${rule_api_ready}" != "true" ]]; then
+                echo "PrometheusRule API did not become available within 120 seconds" >&2
+                exit 1
+              fi
+{{- if $renderRules }}
+              kubectl apply -f /rules/rules.yaml
+{{- else }}
+              kubectl delete prometheusrule {{ $name }} --namespace {{ .Release.Namespace }} --ignore-not-found
+{{- end }}
+{{- if $renderRules }}
+          volumeMounts:
+            - name: rules
+              mountPath: /rules
+      volumes:
+        - name: rules
+          configMap:
+            name: {{ $name }}-prometheus-rule
+{{- end }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $name }}-rule-delete
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    "helm.sh/hook": pre-delete
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  activeDeadlineSeconds: 120
+  template:
+    spec:
+      serviceAccountName: {{ $name }}-rule-reconciler
+      restartPolicy: Never
+      containers:
+        - name: delete
+          image: {{ include "migration.image" (dict "root" . "image" .Values.images.installer) }}
+          command:
+            - /bin/bash
+            - -euc
+            - |
+              # --ignore-not-found does not cover a missing resource type; a release whose
+              # monitoring CRDs never arrived must still uninstall.
+              monitoring_resources="$(kubectl api-resources --api-group=monitoring.coreos.com -o name)"
+              if ! grep -qx prometheusrules.monitoring.coreos.com <<< "${monitoring_resources}"; then
+                echo "PrometheusRule API is not installed; nothing to delete"
+                exit 0
+              fi
+              kubectl delete prometheusrule {{ $name }} --namespace {{ .Release.Namespace }} --ignore-not-found
+{{- end }}
