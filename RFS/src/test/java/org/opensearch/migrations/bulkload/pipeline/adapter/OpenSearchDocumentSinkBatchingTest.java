@@ -157,12 +157,12 @@ class OpenSearchDocumentSinkBatchingTest {
     }
 
     @Test
-    void rawSourceSizingDefersJsonValidationUntilTheConcurrentSendPath() {
+    void rawSourcePreparationDefersJsonValidationUntilTheConcurrentSendPath() {
         var invalid = doc("d1", "{\"value\":}");
         var valid = doc("d1", "{\"value\":1}");
         var sink = sink(null, Integer.MAX_VALUE, 1024);
 
-        long measured = assertDoesNotThrow(() -> sink.sourceBatchBytes("idx", invalid));
+        long measured = assertDoesNotThrow(() -> sink.prepareSourceDocument("idx", invalid)).sizeBytes();
 
         assertEquals(serialized(List.of(valid)).length - valid.sourceLength() + invalid.sourceLength(), measured);
         assertThrows(RuntimeException.class,
@@ -173,7 +173,7 @@ class OpenSearchDocumentSinkBatchingTest {
     void rawSourceSizingDoesNotRetainDocumentsInTheSink() throws Exception {
         var sink = sink(null, Integer.MAX_VALUE, 1024);
 
-        sink.sourceBatchBytes("idx", doc("d1", "{\"value\":1}"));
+        sink.prepareSourceDocument("idx", doc("d1", "{\"value\":1}"));
 
         int retainedDocuments;
         try {

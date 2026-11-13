@@ -23,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -56,12 +57,12 @@ class OpenSearchDocumentSinkTest {
         assertNotNull(result);
         assertEquals(2, result.docsInBatch());
         verify(client).sendBulkRequestPreparedRaw(eq("idx"), anyList(), isNull(), any(), eq(1));
-        verify(client, never()).sendBulkRequest(anyString(), anyList(), any(), anyBoolean(), any());
+        verify(client, never()).sendBulkRequest(anyString(), anyList(), any(), anyBoolean(), any(), anyInt());
     }
 
     @Test
     void writeBatch_withTransformer_usesTransformPath() {
-        when(client.sendBulkRequest(anyString(), anyList(), any(), anyBoolean(), any())).thenReturn(OK);
+        when(client.sendBulkRequest(anyString(), anyList(), any(), anyBoolean(), any(), eq(1))).thenReturn(OK);
 
         IJsonTransformer identity = input -> input;
         var sink = new OpenSearchDocumentSink(client, () -> identity, false, DocumentExceptionAllowlist.empty(), null);
@@ -69,7 +70,7 @@ class OpenSearchDocumentSinkTest {
 
         sink.writeBatch("idx", docs).block();
 
-        verify(client).sendBulkRequest(eq("idx"), anyList(), isNull(), eq(false), any());
+        verify(client).sendBulkRequest(eq("idx"), anyList(), isNull(), eq(false), any(), eq(1));
         verify(client, never()).sendBulkRequestRaw(anyString(), anyList(), any(), anyBoolean(), any());
     }
 
@@ -124,7 +125,7 @@ class OpenSearchDocumentSinkTest {
     @SuppressWarnings("unchecked")
     @Test
     void writeBatch_withTypeMappingTransformer_handlesPolyglotTypes() {
-        when(client.sendBulkRequest(anyString(), anyList(), any(), anyBoolean(), any())).thenReturn(OK);
+        when(client.sendBulkRequest(anyString(), anyList(), any(), anyBoolean(), any(), eq(1))).thenReturn(OK);
 
         // Use the real TypeMappingSanitization transformer (GraalVM/JS-based) which returns
         // PolyglotList/PolyglotMap types that must be normalized to native Java types
@@ -147,13 +148,13 @@ class OpenSearchDocumentSinkTest {
         var result = sink.writeBatch("source_index", docs).block();
 
         assertNotNull(result);
-        verify(client).sendBulkRequest(eq("source_index"), anyList(), isNull(), eq(false), any());
+        verify(client).sendBulkRequest(eq("source_index"), anyList(), isNull(), eq(false), any(), eq(1));
     }
 
     @SuppressWarnings("unchecked")
     @Test
     void writeBatch_transformerModifiesDocs_sendsTransformed() {
-        when(client.sendBulkRequest(anyString(), anyList(), any(), anyBoolean(), any())).thenReturn(OK);
+        when(client.sendBulkRequest(anyString(), anyList(), any(), anyBoolean(), any(), eq(1))).thenReturn(OK);
 
         IJsonTransformer identity = input -> input;
         var sink = new OpenSearchDocumentSink(client, () -> identity, false, DocumentExceptionAllowlist.empty(), null);
@@ -161,7 +162,7 @@ class OpenSearchDocumentSinkTest {
 
         sink.writeBatch("idx", docs).block();
 
-        verify(client).sendBulkRequest(eq("idx"), anyList(), isNull(), eq(false), any());
+        verify(client).sendBulkRequest(eq("idx"), anyList(), isNull(), eq(false), any(), eq(1));
         verify(client, never()).sendBulkRequestRaw(anyString(), anyList(), any(), anyBoolean(), any());
     }
 
@@ -172,7 +173,7 @@ class OpenSearchDocumentSinkTest {
         // (pre-transformation) source so a failed document stream record can report the source document.
         org.mockito.ArgumentCaptor<List<org.opensearch.migrations.bulkload.common.bulk.BulkOperationSpec>> captor =
             org.mockito.ArgumentCaptor.forClass(List.class);
-        when(client.sendBulkRequest(anyString(), captor.capture(), any(), anyBoolean(), any())).thenReturn(OK);
+        when(client.sendBulkRequest(anyString(), captor.capture(), any(), anyBoolean(), any(), eq(1))).thenReturn(OK);
 
         // Transformer mutates the document body in place.
         IJsonTransformer mutate = input -> {
@@ -200,7 +201,7 @@ class OpenSearchDocumentSinkTest {
         // failed document stream will fall back to the transformed body.
         org.mockito.ArgumentCaptor<List<org.opensearch.migrations.bulkload.common.bulk.BulkOperationSpec>> captor =
             org.mockito.ArgumentCaptor.forClass(List.class);
-        when(client.sendBulkRequest(anyString(), captor.capture(), any(), anyBoolean(), any())).thenReturn(OK);
+        when(client.sendBulkRequest(anyString(), captor.capture(), any(), anyBoolean(), any(), eq(1))).thenReturn(OK);
 
         IJsonTransformer renamer = input -> {
             for (var m : (List<Map<String, Object>>) input) {

@@ -118,13 +118,6 @@ class DocumentMigrationPipelineBatchingTest {
             }
 
             @Override
-            public Mono<BatchResult> writeBatchGroup(
-                String collectionName, List<List<Document>> sourceBatches, int requestConcurrency
-            ) {
-                throw new AssertionError("The grouped pipeline must retain the preparation annotation");
-            }
-
-            @Override
             public Mono<BatchResult> writePreparedBatchGroup(
                 String collectionName,
                 List<List<PreparedDocument<String>>> sourceBatches,

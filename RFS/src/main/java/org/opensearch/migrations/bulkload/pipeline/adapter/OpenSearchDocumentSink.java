@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
@@ -108,11 +109,6 @@ public class OpenSearchDocumentSink implements GroupedDocumentSink<BulkNdjson.Pr
     }
 
     @Override
-    public long sourceBatchBytes(String collectionName, Document document) {
-        return prepareSourceDocument(collectionName, document).sizeBytes();
-    }
-
-    @Override
     public PreparedDocument<BulkNdjson.PreparedRawOperation> prepareSourceDocument(
         String collectionName, Document document
     ) {
@@ -121,20 +117,6 @@ public class OpenSearchDocumentSink implements GroupedDocumentSink<BulkNdjson.Pr
         }
         var prepared = BulkNdjson.prepareRaw(document, collectionName, allowServerGeneratedIds, OBJECT_MAPPER);
         return new PreparedDocument<>(document, prepared.size(), prepared);
-    }
-
-    @Override
-    public Mono<BatchResult> writeBatchGroup(
-        String collectionName,
-        List<List<Document>> sourceBatches,
-        int requestConcurrency
-    ) {
-        var preparedBatches = sourceBatches.stream()
-            .map(batch -> batch.stream()
-                .map(document -> prepareSourceDocument(collectionName, document))
-                .toList())
-            .toList();
-        return writePreparedBatchGroup(collectionName, preparedBatches, requestConcurrency);
     }
 
     @Override
@@ -194,11 +176,10 @@ public class OpenSearchDocumentSink implements GroupedDocumentSink<BulkNdjson.Pr
         var prepared = documents.stream()
             .map(document -> new OpenSearchClient.PreparedRawDocument(
                 document.document(),
-                document.preparation() != null
-                    ? document.preparation()
-                    : BulkNdjson.prepareRaw(
-                        document.document(), collectionName, allowServerGeneratedIds, OBJECT_MAPPER
-                    )))
+                Objects.requireNonNull(
+                    document.preparation(),
+                    "raw fast-path documents must carry prepared bulk metadata"
+                )))
             .toList();
         return client.sendBulkRequestPreparedRaw(
             collectionName, prepared, requestContext, allowlist, splitRequestConcurrency);
@@ -210,16 +191,14 @@ public class OpenSearchDocumentSink implements GroupedDocumentSink<BulkNdjson.Pr
         IRfsContexts.IRequestContext requestContext,
         int splitRequestConcurrency
     ) {
-        return splitRequestConcurrency == 1
-            ? client.sendBulkRequest(collectionName, operations, requestContext, allowServerGeneratedIds, allowlist)
-            : client.sendBulkRequest(
-                collectionName,
-                operations,
-                requestContext,
-                allowServerGeneratedIds,
-                allowlist,
-                splitRequestConcurrency
-            );
+        return client.sendBulkRequest(
+            collectionName,
+            operations,
+            requestContext,
+            allowServerGeneratedIds,
+            allowlist,
+            splitRequestConcurrency
+        );
     }
 
     private boolean usesRawFastPath() {
