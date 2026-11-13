@@ -17,6 +17,7 @@ import org.opensearch.migrations.reindexer.FailedRequestsLogger;
 import org.opensearch.migrations.testutils.CloseableLogSetup;
 
 import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.core.config.Configurator;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -72,15 +73,16 @@ class BulkRequestTraceTest {
     }
 
     @Test
-    void nothingIsFormattedWhileTracingIsOff() {
+    void nothingIsLoggedWhileTracingIsOff() {
         when(restClient.postAsyncBytes(any(), any(), any(), any()))
             .thenReturn(Mono.just(new HttpResponse(200, "OK", Map.of(), RESPONSE)));
-        Configurator.setLevel(OpenSearchClient.BULK_REQUEST_TRACE_LOGGER, Level.OFF);
-        long before = OpenSearchClient.bulkTraceBodiesFormatted.get();
+        try (var logs = new CloseableLogSetup(OpenSearchClient.BULK_REQUEST_TRACE_LOGGER)) {
+            ((org.apache.logging.log4j.core.Logger) LogManager.getLogger(
+                OpenSearchClient.BULK_REQUEST_TRACE_LOGGER)).setLevel(Level.OFF);
+            send();
 
-        send();
-
-        assertEquals(before, OpenSearchClient.bulkTraceBodiesFormatted.get());
+            assertThat(logs.getLogEvents(), hasSize(0));
+        }
     }
 
     @Test
@@ -116,20 +118,29 @@ class BulkRequestTraceTest {
 
     @Test
     void longBodiesAreCutAtTheConfiguredLimit() {
-        var body = new byte[OpenSearchClient.BULK_TRACE_MAX_BYTES + 10];
+        var body = new byte[OpenSearchClient.DEFAULT_BULK_TRACE_MAX_BYTES + 10];
         java.util.Arrays.fill(body, (byte) 'x');
 
-        var traced = OpenSearchClient.traceBody(body);
+        var traced = OpenSearchClient.traceBody(body, OpenSearchClient.DEFAULT_BULK_TRACE_MAX_BYTES);
 
         assertThat(traced, endsWith("... [10 more bytes not logged]"));
-        assertEquals(OpenSearchClient.BULK_TRACE_MAX_BYTES + "... [10 more bytes not logged]".length(), traced.length());
+        assertEquals(OpenSearchClient.DEFAULT_BULK_TRACE_MAX_BYTES
+            + "... [10 more bytes not logged]".length(), traced.length());
     }
 
     @Test
-    void theLimitComesFromTheEnvironmentWithASafeDefault() {
-        assertEquals(1024 * 1024, OpenSearchClient.parseTraceMaxBytes(null));
-        assertEquals(1024 * 1024, OpenSearchClient.parseTraceMaxBytes("not-a-number"));
-        assertEquals(0, OpenSearchClient.parseTraceMaxBytes("0"));
-        assertEquals(500, OpenSearchClient.parseTraceMaxBytes(" 500 "));
+    void theConfiguredLimitIsAppliedToLoggedBodies() {
+        when(restClient.postAsyncBytes(any(), any(), any(), any()))
+            .thenReturn(Mono.just(new HttpResponse(200, "OK", Map.of(), RESPONSE)));
+        client.setBulkTraceMaxBytes(5);
+
+        try (var logs = tracing()) {
+            send();
+
+            assertThat(logs.getLogEvents(), hasSize(2));
+            assertThat(logs.getLogEvents().get(0), containsString("... ["));
+            assertThat(logs.getLogEvents().get(1), containsString("... ["));
+        }
+        assertThrows(IllegalArgumentException.class, () -> client.setBulkTraceMaxBytes(-1));
     }
 }

@@ -11,6 +11,7 @@ the metadata migration pod) changes.
 
 ```yaml
 documentBackfillConfig:
+  bulkRequestTraceMaxBytes: 1048576  # Maximum request/response body bytes per trace entry; 0 means unlimited
   logLevels:
     root: info               # MIGRATIONS_ROOT_LOG_LEVEL, default info
     bulkRequestTrace: trace  # BULK_REQUEST_TRACE_LOG_LEVEL, default off
@@ -28,7 +29,9 @@ documentBackfillConfig:
 
 Prefer `bulkRequestTrace: trace` to `root: trace` when debugging bulk writes. The root logger at `trace` also
 traces Netty and the AWS SDK, which buries the bulk traffic. **The bulk trace contains document contents**, so
-turn it on only where the logs may hold the migrated data, and turn it off again afterward.
+turn it on only where the logs may hold the migrated data, and turn it off again afterward. Every request and
+response can add a body to the logs, so their size can grow rapidly. `bulkRequestTraceMaxBytes` limits each body
+to 1 MiB by default; set it to `0` only when complete bodies are necessary.
 
 ## 2. `kubectl set env` (temporary)
 

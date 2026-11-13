@@ -350,6 +350,25 @@ class RfsMigrateDocumentsHelpersTest {
     }
 
     @Test
+    void bulkRequestTraceMaxBytes_isReadFromCli() {
+        var args = new RfsMigrateDocuments.Args();
+        JsonCommandLineParser.newBuilder().addObject(args).build()
+            .parse(new String[]{
+                "--target-host", "http://localhost",
+                "--bulk-request-trace-max-bytes", "500"
+            });
+        assertThat(args.bulkRequestTraceMaxBytes, equalTo(500));
+    }
+
+    @Test
+    void validateArgs_rejectsNegativeBulkRequestTraceMaxBytes() {
+        var args = validEsArgs();
+        args.bulkRequestTraceMaxBytes = -1;
+        var thrown = assertThrows(ParameterException.class, () -> RfsMigrateDocuments.validateArgs(args));
+        assertThat(thrown.getMessage(), org.hamcrest.Matchers.containsString("--bulk-request-trace-max-bytes"));
+    }
+
+    @Test
     void validateArgs_acceptsFileRepoUriOnly() {
         assertDoesNotThrow(() -> RfsMigrateDocuments.validateArgs(validEsArgs()));
     }

@@ -1154,6 +1154,10 @@ export const USER_RFS_PROCESS_OPTIONS = withOtelExportOptions(z.object({
         .describe("Maximum number of documents per bulk indexing request to the target cluster. Lower values reduce per-request latency but increase overhead."),
     documentsSizePerBulkRequest: z.number().default(10*1024*1024).optional()
         .describe("Maximum aggregate document size in bytes per bulk indexing request. Individual documents larger than this limit are sent as single-document requests."),
+    bulkRequestTraceMaxBytes: z.number().int().nonnegative().default(1024*1024).optional()
+        .describe("Maximum request or response body bytes included in each BulkRequestTrace log entry. " +
+            "Set to 0 to log complete bodies. The trace contains document contents and can produce logs rapidly. " +
+            "Default: 1048576 (1 MiB)."),
     maxDocumentSizeBytes: z.number().int().min(1).optional()
         .describe("Documents bigger than this many bytes are not sent to the target. They are recorded in the failed " +
             "document stream with failureType 'document_too_large' and the backfill moves past them. The limit applies " +

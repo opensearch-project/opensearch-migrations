@@ -81,10 +81,7 @@ public abstract class OpenSearchClient {
      */
     public static final String BULK_REQUEST_TRACE_LOGGER = "BulkRequestTrace";
     private static final Logger BULK_TRACE = LoggerFactory.getLogger(BULK_REQUEST_TRACE_LOGGER);
-    /** Request and response bodies in the trace are cut to this many bytes (0: no cut); BULK_REQUEST_TRACE_MAX_BYTES. */
-    static final int BULK_TRACE_MAX_BYTES = parseTraceMaxBytes(System.getenv("BULK_REQUEST_TRACE_MAX_BYTES"));
-    // Counts bodies formatted for the trace, so tests can show nothing is formatted while tracing is off.
-    static final AtomicLong bulkTraceBodiesFormatted = new AtomicLong();
+    public static final int DEFAULT_BULK_TRACE_MAX_BYTES = 1024 * 1024;
     public static final String SNAPSHOT_PREFIX_STR = "_snapshot/";
 
     protected final RestClient client;
@@ -115,6 +112,8 @@ public abstract class OpenSearchClient {
     static final Duration OVERSIZED_OPERATION_WARNING_INTERVAL = Duration.ofMinutes(1);
     // Documents bigger than this are not sent (0 = no limit). See rejectOversizedDocument.
     private volatile long maxDocumentSizeBytes;
+    /** Maximum request or response body bytes included in each bulk trace entry; 0 logs the complete body. */
+    private volatile int bulkTraceMaxBytes = DEFAULT_BULK_TRACE_MAX_BYTES;
     /** failureType for documents not sent because they exceed {@code maxDocumentSizeBytes}. */
     public static final String DOCUMENT_TOO_LARGE = "document_too_large";
     /** {@code measured} value for the encoded document body checked against {@code maxDocumentSizeBytes}. */
@@ -173,6 +172,13 @@ public abstract class OpenSearchClient {
 
     public long getMaxDocumentSizeBytes() {
         return maxDocumentSizeBytes;
+    }
+
+    public void setBulkTraceMaxBytes(int bulkTraceMaxBytes) {
+        if (bulkTraceMaxBytes < 0) {
+            throw new IllegalArgumentException("bulkTraceMaxBytes must be >= 0, got " + bulkTraceMaxBytes);
+        }
+        this.bulkTraceMaxBytes = bulkTraceMaxBytes;
     }
 
     /**
@@ -784,20 +790,8 @@ public abstract class OpenSearchClient {
         });
     }
 
-    static int parseTraceMaxBytes(String value) {
-        if (value == null || value.isBlank()) {
-            return 1024 * 1024;
-        }
-        try {
-            return Math.max(0, Integer.parseInt(value.trim()));
-        } catch (NumberFormatException e) {
-            log.atWarn().setMessage("Ignoring BULK_REQUEST_TRACE_MAX_BYTES={}: not an integer").addArgument(value).log();
-            return 1024 * 1024;
-        }
-    }
-
     // Each trace method checks the level first, so nothing is converted or copied while tracing is off.
-    private static void traceRequest(String indexName, long attempt, int operations, byte[] body) {
+    private void traceRequest(String indexName, long attempt, int operations, byte[] body) {
         if (!BULK_TRACE.isTraceEnabled()) {
             return;
         }
@@ -807,11 +801,11 @@ public abstract class OpenSearchClient {
             .addArgument(indexName)
             .addArgument(operations)
             .addArgument(body.length)
-            .addArgument(traceBody(body))
+            .addArgument(() -> traceBody(body, bulkTraceMaxBytes))
             .log();
     }
 
-    private static void traceResponse(String indexName, long attempt, HttpResponse response, long elapsedNanos) {
+    private void traceResponse(String indexName, long attempt, HttpResponse response, long elapsedNanos) {
         if (!BULK_TRACE.isTraceEnabled()) {
             return;
         }
@@ -821,7 +815,9 @@ public abstract class OpenSearchClient {
             .addArgument(indexName)
             .addArgument(response.statusCode)
             .addArgument(Duration.ofNanos(elapsedNanos).toMillis())
-            .addArgument(response.body == null ? null : traceBody(response.body.getBytes(StandardCharsets.UTF_8)))
+            .addArgument(() -> response.body == null
+                ? null
+                : traceBody(response.body.getBytes(StandardCharsets.UTF_8), bulkTraceMaxBytes))
             .log();
     }
 
@@ -839,9 +835,7 @@ public abstract class OpenSearchClient {
             .log();
     }
 
-    static String traceBody(byte[] body) {
-        bulkTraceBodiesFormatted.incrementAndGet();
-        int limit = BULK_TRACE_MAX_BYTES;
+    static String traceBody(byte[] body, int limit) {
         if (limit == 0 || body.length <= limit) {
             return new String(body, StandardCharsets.UTF_8);
         }

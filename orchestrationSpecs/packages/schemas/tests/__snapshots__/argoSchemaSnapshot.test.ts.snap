@@ -2421,6 +2421,11 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "type": "number",
                       "default": 10485760
                     },
+                    "bulkRequestTraceMaxBytes": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "default": 1048576
+                    },
                     "maxDocumentSizeBytes": {
                       "type": "integer",
                       "minimum": 1,
@@ -5508,6 +5513,12 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "type": "number",
                         "default": 10485760,
                         "description": "Maximum aggregate document size in bytes per bulk indexing request. Individual documents larger than this limit are sent as single-document requests."
+                      },
+                      "bulkRequestTraceMaxBytes": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "default": 1048576,
+                        "description": "Maximum request or response body bytes included in each BulkRequestTrace log entry. Set to 0 to log complete bodies. The trace contains document contents and can produce logs rapidly. Default: 1048576 (1 MiB)."
                       },
                       "maxDocumentSizeBytes": {
                         "type": "integer",

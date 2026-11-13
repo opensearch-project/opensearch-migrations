@@ -201,6 +201,7 @@ exports[`resolved migration resources extracts resolved resource parameters from
       ],
       "documentBackfillAllowLooseVersionMatching": true,
       "documentBackfillAllowedDocExceptionTypes": [],
+      "documentBackfillBulkRequestTraceMaxBytes": 1048576,
       "documentBackfillCoordinatorRetryInitialDelayMs": 1000,
       "documentBackfillCoordinatorRetryMaxDelayMs": 64000,
       "documentBackfillCoordinatorRetryMaxRetries": 7,

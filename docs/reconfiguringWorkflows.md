@@ -384,6 +384,7 @@ Every field of `documentBackfillConfig` is listed here; a test in `orchestration
 | `spec.documentBackfillConfig.documentTransforms` | Impossible |  | ✅ |
 | `spec.documentBackfillConfig.documentsPerBulkRequest` | Safe | Bigger bulks don't add concurrency; the target sees the same parallelism | ❌ |
 | `spec.documentBackfillConfig.documentsSizePerBulkRequest` | Safe | Same as documentsPerBulkRequest | ❌ |
+| `spec.documentBackfillConfig.bulkRequestTraceMaxBytes` | Safe | Changes only how much of each traced request or response body is logged | ❌ |
 | `spec.documentBackfillConfig.maxDocumentSizeBytes` | Impossible | Changes which documents migrate | ✅ |
 | `spec.documentBackfillConfig.initialLeaseDuration` | Safe | Only schedules leases granted after the change | ❌ |
 | `spec.documentBackfillConfig.maxConnections` | Gated on increase | Lowering only reduces load on the target; raising adds load, so it needs approval | ❌ |

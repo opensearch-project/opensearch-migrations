@@ -259,6 +259,12 @@ public class RfsMigrateDocuments {
         long maxDocumentSizeBytes = 0;
 
         @Parameter(required = false,
+            names = { "--bulk-request-trace-max-bytes", "--bulkRequestTraceMaxBytes" },
+            description = "Optional. Maximum request or response body bytes included in each BulkRequestTrace " +
+                "entry. 0 logs complete bodies. Default: 1 MiB")
+        int bulkRequestTraceMaxBytes = OpenSearchClient.DEFAULT_BULK_TRACE_MAX_BYTES;
+
+        @Parameter(required = false,
             names = {"--max-connections", "--maxConnections" },
             description = "Optional.  The maximum number of connections to simultaneously " +
                 "used to communicate to the target, default " + DEFAULT_BATCH_CONCURRENCY)
@@ -491,6 +497,9 @@ public class RfsMigrateDocuments {
         if (args.maxDocumentSizeBytes < 0) {
             throw new ParameterException("--max-document-size-bytes must be 0 (no limit) or positive.");
         }
+        if (args.bulkRequestTraceMaxBytes < 0) {
+            throw new ParameterException("--bulk-request-trace-max-bytes must be 0 (no limit) or positive.");
+        }
         validateFailedDocumentStreamArgs(args.failedDocumentStreamArgs);
     }
 
@@ -646,6 +655,7 @@ public class RfsMigrateDocuments {
         var failedDocumentStreamSink = buildFailedDocumentStreamSink(arguments, workerId, resolvedSessionId);
         targetClient.setFailedDocumentStreamContext(failedDocumentStreamSink, resolvedSessionId, workerId);
         targetClient.setMaxDocumentSizeBytes(arguments.maxDocumentSizeBytes);
+        targetClient.setBulkTraceMaxBytes(arguments.bulkRequestTraceMaxBytes);
         logFailedDocumentStreamStatus(failedDocumentStreamSink, resolvedSessionId);
 
         boolean useServerGeneratedIds = switch (arguments.serverGeneratedIds) {

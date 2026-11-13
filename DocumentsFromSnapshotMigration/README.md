@@ -348,14 +348,15 @@ Common exception types that can be allowlisted:
 ## Logging
 
 Log levels come from environment variables read by `log4j2.properties`. In a workflow, set them with
-`documentBackfillConfig.logLevels`; see [Turning up logging](../docs/turningUpLogging.md).
+`documentBackfillConfig.logLevels`; see [Turning up logging](../docs/turningUpLogging.md). Set the maximum
+request or response body included in each trace entry with `documentBackfillConfig.bulkRequestTraceMaxBytes`
+or `--bulk-request-trace-max-bytes`; `0` logs complete bodies.
 
-| Variable                          | Default | Controls                                                                 |
-|-----------------------------------|---------|--------------------------------------------------------------------------|
-| `MIGRATIONS_ROOT_LOG_LEVEL`       | `info`  | Everything not listed below, including Netty and the AWS SDK.            |
-| `FAILED_REQUESTS_LOGGER_LEVEL`    | `info`  | The `FailedRequestsLogger` file of bulk requests that ran out of retries. |
-| `BULK_REQUEST_TRACE_LOG_LEVEL`    | `off`   | The `BulkRequestTrace` logger (below).                                   |
-| `BULK_REQUEST_TRACE_MAX_BYTES`    | 1048576 | Bodies in the bulk trace are cut to this many bytes; `0` logs them whole. |
+| Variable                       | Default | Controls                                                                 |
+|--------------------------------|---------|--------------------------------------------------------------------------|
+| `MIGRATIONS_ROOT_LOG_LEVEL`    | `info`  | Everything not listed below, including Netty and the AWS SDK.            |
+| `FAILED_REQUESTS_LOGGER_LEVEL` | `info`  | The `FailedRequestsLogger` file of bulk requests that ran out of retries. |
+| `BULK_REQUEST_TRACE_LOG_LEVEL` | `off`   | The `BulkRequestTrace` logger (below).                                   |
 
 ### Tracing bulk requests
 
@@ -365,8 +366,8 @@ body, or the exception when no response came back. It's off by default and costs
 own logger so that it can be turned on without tracing the root logger, which would also trace Netty and the
 AWS SDK.
 
-**The trace contains document contents.** Turn it on only where the logs may hold the migrated data, and turn
-it off again when you're done.
+**The trace contains document contents and can grow rapidly.** Turn it on only where the logs may hold the
+migrated data, use `bulkRequestTraceMaxBytes` to bound each body, and turn it off again when you're done.
 
 ## Committed metrics
 
