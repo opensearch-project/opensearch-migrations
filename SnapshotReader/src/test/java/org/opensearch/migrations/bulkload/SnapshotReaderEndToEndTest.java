@@ -1,9 +1,12 @@
 package org.opensearch.migrations.bulkload;
 
 import java.io.File;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
@@ -11,6 +14,7 @@ import java.util.stream.Stream;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
 import org.opensearch.migrations.bulkload.common.LuceneDocumentChange;
+import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.RepoUri;
 import org.opensearch.migrations.bulkload.common.SnapshotCreator;
@@ -33,6 +37,7 @@ import org.opensearch.migrations.testfixtures.SearchClusterContainer;
 import org.opensearch.migrations.testfixtures.SearchClusterContainer.ContainerVersion;
 import org.opensearch.migrations.testfixtures.SupportedClusters;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.io.TempDir;
@@ -194,19 +199,28 @@ public class SnapshotReaderEndToEndTest {
      * Validates the full document reading pipeline:
      * source cluster → snapshot → local FS → ClusterSnapshotReader → Flux<LuceneDocumentChange>
      */
-    @ParameterizedTest(name = "Document IR from {0}")
+    @ParameterizedTest(name = "Document IDs and contents from {0}")
     @MethodSource("allSources")
     void snapshotProducesCorrectDocumentIR(ContainerVersion sourceVersion) throws Exception {
-        var snapshot = getOrCreateSnapshot(sourceVersion, "docIR", ops -> {
+        var mapper = ObjectMapperFactory.createDefaultMapper();
+        var expectedDocuments = new LinkedHashMap<String, JsonNode>();
+        // Exercise Elasticsearch's ID encodings, Unicode, punctuation, and the 512-byte ID boundary.
+        for (var id : List.of("doc1", "doc2", "doc3", "123", "1234", "ASNFZw", "_gEj",
+            "customer-\u00e9-\ud83d\ude80", "customer,legacy", "00000000-0000-4000-8000-000000000001",
+            "x".repeat(512), "\u00e9".repeat(256), "9".repeat(512))) {
+            expectedDocuments.put(id, mapper.createObjectNode()
+                .put("title", "Document " + expectedDocuments.size())
+                .put("value", expectedDocuments.size()));
+        }
+        var snapshot = getOrCreateSnapshot(sourceVersion, "docIR-exact-identities", ops -> {
             ops.createIndex(INDEX_NAME, "{"
                 + "\"settings\": {"
                 + "  \"number_of_shards\": 1,"
                 + "  \"number_of_replicas\": 0"
                 + "}"
                 + "}");
-            ops.createDocument(INDEX_NAME, "doc1", "{\"title\": \"First\", \"value\": 1}");
-            ops.createDocument(INDEX_NAME, "doc2", "{\"title\": \"Second\", \"value\": 2}");
-            ops.createDocument(INDEX_NAME, "doc3", "{\"title\": \"Third\", \"value\": 3}");
+            expectedDocuments.forEach((id, source) -> ops.createDocument(INDEX_NAME,
+                URLEncoder.encode(id, StandardCharsets.UTF_8), source.toString()));
             ops.post("/" + INDEX_NAME + "/_refresh", null);
         });
 
@@ -224,16 +238,18 @@ public class SnapshotReaderEndToEndTest {
                 })
                 .verifyComplete();
 
-            assertThat("Expected 3 documents from snapshot", docs, hasSize(3));
+            assertThat("Every source document should survive the snapshot", docs, hasSize(expectedDocuments.size()));
 
             var docIds = docs.stream().map(LuceneDocumentChange::getId).sorted().toList();
-            assertThat(docIds, equalTo(List.of("doc1", "doc2", "doc3")));
+            assertThat(docIds, equalTo(expectedDocuments.keySet().stream().sorted().toList()));
 
             for (var doc : docs) {
                 assertThat("Document " + doc.getId() + " should have source",
                     doc.getSource(), notNullValue());
                 assertThat("Document " + doc.getId() + " should have non-empty source",
                     doc.getSource().length, greaterThan(0));
+                assertThat("Document " + doc.getId() + " should preserve its contents",
+                    mapper.readTree(doc.getSource()), equalTo(expectedDocuments.get(doc.getId())));
             }
 
             log.info("Successfully read {} documents from {} snapshot", docs.size(), sourceVersion);
