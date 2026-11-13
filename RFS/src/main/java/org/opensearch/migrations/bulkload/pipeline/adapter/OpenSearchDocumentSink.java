@@ -193,7 +193,7 @@ public class OpenSearchDocumentSink implements GroupedDocumentSink<BulkNdjson.En
             // Fast path: skip byte[]→Map→byte[] round-trip, write raw source bytes directly
             var documents = sourceBatches.stream().flatMap(List::stream).toList();
             bulkMono = sendRaw(targetClient, collectionName, documents, requestContext,
-                useServerGeneratedIds, splitRequestConcurrency, invalidDocuments);
+                splitRequestConcurrency, invalidDocuments);
         } else {
             bulkMono = Flux.fromIterable(sourceBatches)
                 .flatMapSequential(batch -> Mono.fromCallable(
@@ -215,7 +215,6 @@ public class OpenSearchDocumentSink implements GroupedDocumentSink<BulkNdjson.En
         String collectionName,
         List<PreparedDocument<BulkNdjson.EncodedOperation>> documents,
         IRfsContexts.IRequestContext requestContext,
-        boolean useServerGeneratedIds,
         int splitRequestConcurrency,
         AtomicLong invalidDocuments
     ) {
