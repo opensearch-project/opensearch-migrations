@@ -23,6 +23,7 @@ SUM_FILL_SEARCH = "SUM(" + FILL_SEARCH
 GC_WIDGET_TITLE = "Kafka JVM garbage collection (G1)"
 HANDLER_SATURATION_TITLE = "Kafka broker/controller request-handler utilization (average)"
 CLOUDWATCH_DASHBOARD_PATH = "files/cloudwatch-dashboards/capture-replay-dashboard.json"
+COLLECTOR_CONFIG_KEY = "collector.yaml"
 
 
 def load_generator(path):
@@ -334,7 +335,7 @@ class KafkaObservabilityTests(unittest.TestCase):
         self.assertIn("172800", rendered)
 
     def test_eks_collector_exports_only_required_pvc_dimensions(self):
-        blocks = literal_blocks(self.eks_render, "collector.yaml")
+        blocks = literal_blocks(self.eks_render, COLLECTOR_CONFIG_KEY)
         self.assertEqual(len(blocks), 1)
         collector = blocks[0]
         self.assertIn("prometheus/kafka-pvc-cloudwatch:", collector)
@@ -359,7 +360,7 @@ class KafkaObservabilityTests(unittest.TestCase):
         self.assertIn("processors: [resource/remove_default_attributes, resource/kafka, batch]", collector)
 
     def test_eks_collector_exports_bounded_broker_jmx_metrics(self):
-        blocks = literal_blocks(self.eks_render, "collector.yaml")
+        blocks = literal_blocks(self.eks_render, COLLECTOR_CONFIG_KEY)
         self.assertEqual(len(blocks), 1)
         collector = blocks[0]
         self.assertIn("prometheus/kafka-broker-cloudwatch:", collector)
@@ -393,7 +394,7 @@ class KafkaObservabilityTests(unittest.TestCase):
             "--set",
             "metrics.cloudWatch.enabled=false",
         )
-        blocks = literal_blocks(disabled, "collector.yaml")
+        blocks = literal_blocks(disabled, COLLECTOR_CONFIG_KEY)
         self.assertEqual(len(blocks), 1)
         collector = blocks[0]
         self.assertNotIn("awsemf/", collector)
@@ -414,7 +415,7 @@ class KafkaObservabilityTests(unittest.TestCase):
         )
 
     def test_cloudwatch_export_and_dashboards_are_enabled_by_default(self):
-        blocks = literal_blocks(self.eks_render, "collector.yaml")
+        blocks = literal_blocks(self.eks_render, COLLECTOR_CONFIG_KEY)
         self.assertEqual(len(blocks), 1)
         collector = blocks[0]
         self.assertIn("awsemf/app:", collector)
