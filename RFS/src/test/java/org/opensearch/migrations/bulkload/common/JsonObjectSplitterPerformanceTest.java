@@ -1,11 +1,9 @@
 package org.opensearch.migrations.bulkload.common;
 
 import java.io.IOException;
-import java.lang.management.ManagementFactory;
 import java.util.List;
 import java.util.Locale;
 
-import com.sun.management.ThreadMXBean;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 
@@ -25,7 +23,7 @@ class JsonObjectSplitterPerformanceTest {
 
     @Test
     void recordLargeNestedDocumentSplitProfile() throws IOException {
-        System.out.println("document_mib,document_bytes,fragments,split_millis,thread_allocated_bytes");
+        System.out.println("document_mib,document_bytes,fragments,split_millis");
         for (int documentMiB : DOCUMENT_MIB) {
             byte[] document = JsonObjectSplitterBenchmark.nestedDocument(
                 documentMiB * MIB, 4096, 512, 8);
@@ -34,34 +32,14 @@ class JsonObjectSplitterPerformanceTest {
             JsonObjectSplitter.split(
                 JsonObjectSplitterBenchmark.nestedDocument(MIB, 4096, 16, 3), FRAGMENT_MIB * MIB);
 
-            ThreadMXBean threads = (ThreadMXBean) ManagementFactory.getThreadMXBean();
-            if (threads.isThreadAllocatedMemorySupported() && !threads.isThreadAllocatedMemoryEnabled()) {
-                threads.setThreadAllocatedMemoryEnabled(true);
-            }
-            long threadId = Thread.currentThread().threadId();
-            long allocatedBefore = threads.isThreadAllocatedMemorySupported()
-                ? threads.getThreadAllocatedBytes(threadId) : -1;
             long started = System.nanoTime();
             List<byte[]> fragments = JsonObjectSplitter.split(document, FRAGMENT_MIB * MIB);
             double elapsedMillis = (System.nanoTime() - started) / 1_000_000.0;
-            long allocatedAfter = allocatedBefore < 0 ? -1 : threads.getThreadAllocatedBytes(threadId);
-            long allocatedBytes = allocatedBefore < 0 ? -1 : allocatedAfter - allocatedBefore;
 
             assertTrue(fragments.stream().allMatch(fragment -> fragment.length <= FRAGMENT_MIB * MIB));
             assertTrue(fragments.size() >= Math.ceil(document.length / (double) (FRAGMENT_MIB * MIB)));
-            if (allocatedBytes >= 0) {
-                assertTrue(
-                    Math.addExact(document.length, allocatedBytes)
-                        <= Math.multiplyExact(
-                            (long) document.length,
-                            RfsMemorySizing.SERIALIZED_BYTES_HEAP_EXPANSION_FACTOR
-                        ),
-                    "splitter input plus allocations exceeded the configured serialized-byte heap factor"
-                );
-            }
-            System.out.printf(Locale.ROOT, "%d,%d,%d,%.3f,%d%n",
-                documentMiB, document.length, fragments.size(), elapsedMillis,
-                allocatedBytes);
+            System.out.printf(Locale.ROOT, "%d,%d,%d,%.3f%n",
+                documentMiB, document.length, fragments.size(), elapsedMillis);
         }
     }
 }

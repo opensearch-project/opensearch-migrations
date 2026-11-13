@@ -140,3 +140,39 @@ tasks.register('jsonSplitterPerformanceTest', Test) {
         showStandardStreams = true
     }
 }
+
+tasks.register('largeDocumentHeapProfileTest', Test) {
+    group = 'verification'
+    description = 'Profiles sustained normal and split large-document RFS paths in isolated child JVMs.'
+    useJUnitPlatform()
+    maxParallelForks = 1
+    outputs.upToDateWhen { false }
+    filter {
+        includeTestsMatching(
+                'org.opensearch.migrations.bulkload.common.RfsLargeDocumentHeapProfileTest')
+    }
+    systemProperty 'rfs.largeDocument.heapProfile', 'true'
+    systemProperty 'rfs.largeDocument.heapProfile.outputDirectory',
+            project.file("${project.buildDir}/reports/rfs-large-document-heap").absolutePath
+    if (project.hasProperty('rfsHeapProfileWarmupSeconds')) {
+        systemProperty 'rfs.largeDocument.heapProfile.warmupSeconds',
+                project.property('rfsHeapProfileWarmupSeconds')
+    }
+    if (project.hasProperty('rfsHeapProfileMeasureSeconds')) {
+        systemProperty 'rfs.largeDocument.heapProfile.measureSeconds',
+                project.property('rfsHeapProfileMeasureSeconds')
+    }
+    if (project.hasProperty('rfsHeapProfileCaseFilter')) {
+        systemProperty 'rfs.largeDocument.heapProfile.caseFilter',
+                project.property('rfsHeapProfileCaseFilter')
+    }
+    if (project.hasProperty('rfsHeapProfileResume')) {
+        systemProperty 'rfs.largeDocument.heapProfile.resume',
+                project.property('rfsHeapProfileResume')
+    }
+    maxHeapSize = '1g'
+    testLogging {
+        events 'passed', 'skipped', 'failed'
+        showStandardStreams = true
+    }
+}

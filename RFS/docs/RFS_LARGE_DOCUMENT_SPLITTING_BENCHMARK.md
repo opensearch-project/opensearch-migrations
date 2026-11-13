@@ -76,6 +76,67 @@ Time is approximately linear in this matrix: increasing the serialized input by 
 but its approximately 4-5x amplification is large enough to matter inside a worker that
 already holds transformed documents and concurrent bulk batches.
 
+## Sustained complete-path heap profile
+
+The cumulative thread-allocation measurement above does not measure peak live heap. A
+separate opt-in child-JVM profile now exercises the complete RFS document path:
+
+- source-file read through `SourceDocumentMemoryTracker`;
+- optional synthetic expansion through the ordinary transformation adapter;
+- ordinary raw or transformed bulk serialization;
+- optional `LargeDocumentSplit` reconstruction;
+- a controlled successful mock target that retains no data; and
+- source and transform permit release.
+
+Each of the 24 matrix cells runs in an isolated G1 child JVM. It warms up first, then records
+at least 60 seconds of sustained work, extending by 60-second windows when trailing occupancy
+has not stabilized. The 390 MiB transformed, concurrency-four case ran for 121.9 seconds.
+Heap occupancy is sampled every 2 ms and cross-checked with JFR garbage-collection, heap-summary,
+and pause events. After the sustained metrics are sealed, one additional document wave is held
+in flight while a full GC measures the reachable live heap. This avoids treating bytes left
+behind by a young collection as live data. Every case then releases its permits and performs
+a final full GC to verify recovery.
+
+Run the matrix with:
+
+```text
+./gradlew :RFS:largeDocumentHeapProfileTest \
+  -PrfsHeapProfileWarmupSeconds=15 \
+  -PrfsHeapProfileMeasureSeconds=60
+```
+
+The generated aggregate, factor summary, 2 ms samples, and JFR recordings are under
+`RFS/build/reports/rfs-large-document-heap/`.
+
+The measured maxima on November 13, 2026 were:
+
+| Factor | Maximum | Worst case |
+| --- | ---: | --- |
+| Normal transient | 80.001735x | Transform-expanded 10 MiB, concurrency 1 |
+| Normal retained/live | 3.439923x | Transform-expanded 10 MiB, concurrency 1 |
+| Split transient | 19.314546x | Transform-expanded 190 MiB, concurrency 1 |
+| Split retained/live | 2.341337x | Transform-expanded 390 MiB, concurrency 4 |
+
+The transient maxima are real pre-GC occupancy, but they are not stable per-document
+expansion constants. They include garbage accumulated over a G1 collection cycle and a fixed
+allocation wave that is divided by the admitted serialized bytes. This is most visible in the
+10 MiB normal case. The same effect made the 390 MiB transformed concurrency-four case reach
+23.96 GiB before collection while its in-flight full-GC live heap was only 3.60 GiB for
+1.52 GiB of admitted serialized data.
+
+The retained/live measurements are much tighter. True split cases ranged from 2.11x to 2.34x.
+The 95 MiB split-enabled controls stayed on the normal path: each emitted exactly one request,
+and their retained factors matched the split-disabled twins. Concurrency-four admitted exactly
+four times the concurrency-one serialized bytes; for split cases, measured live heap composed
+at 3.91x to 4.19x. Every case returned to within 2.21 MiB of its post-GC baseline after permit
+release.
+
+These results support separate live-memory ceilings for the normal and split paths. A practical
+rounded ceiling from this matrix is 4x for normal documents and 3x for split documents. Raw
+pre-GC occupancy should instead be handled as JVM/GC headroom plus the independently bounded
+live set; using the 80x or 19.4x transient maxima directly as serialized-byte multipliers would
+encode the chosen child-heap and G1 policy into workflow sizing.
+
 ## Cluster results
 
 The no-op/create profile completed and provides the control. The expanded profiles were
