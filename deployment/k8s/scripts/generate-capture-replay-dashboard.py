@@ -660,7 +660,7 @@ def kafka_broker_jvm():
 
 def kafka_broker_gc():
     w = W(
-        "Kafka JVM garbage collection",
+        "Kafka JVM garbage collection (G1)",
         period=KAFKA_BROKER_PERIOD,
         yright={"label": "collections/s", "showUnits": False},
     )

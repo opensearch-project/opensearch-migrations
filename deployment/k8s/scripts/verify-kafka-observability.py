@@ -20,7 +20,7 @@ PROMETHEUS_ALERTS_ENABLED = "kafkaObservability.prometheusAlerts.enabled=true"
 ALERTMANAGER_ENABLED = "charts.kube-prometheus-stack.values.alertmanager.enabled=true"
 FILL_SEARCH = "FILL(SEARCH("
 SUM_FILL_SEARCH = "SUM(" + FILL_SEARCH
-GC_WIDGET_TITLE = "Kafka JVM garbage collection"
+GC_WIDGET_TITLE = "Kafka JVM garbage collection (G1)"
 HANDLER_SATURATION_TITLE = "Kafka broker/controller request-handler utilization (average)"
 CLOUDWATCH_DASHBOARD_PATH = "files/cloudwatch-dashboards/capture-replay-dashboard.json"
 
@@ -378,6 +378,51 @@ class KafkaObservabilityTests(unittest.TestCase):
         self.assertIn("cumulativetodelta/kafka-broker", collector)
         self.assertNotIn("topic, partition", collector)
 
+    def test_cloudwatch_export_and_dashboards_can_be_disabled(self):
+        disabled = render(
+            self.args.helm,
+            self.chart,
+            "--values",
+            str(self.chart / "valuesEks.yaml"),
+            "--set",
+            "stageName=verify",
+            "--set",
+            "aws.region=us-east-2",
+            "--set-string",
+            "aws.account=123456789012",
+            "--set",
+            "metrics.cloudWatch.enabled=false",
+        )
+        blocks = literal_blocks(disabled, "collector.yaml")
+        self.assertEqual(len(blocks), 1)
+        collector = blocks[0]
+        self.assertNotIn("awsemf/", collector)
+        self.assertNotIn("prometheus/kafka-pvc-cloudwatch", collector)
+        self.assertNotIn("prometheus/kafka-broker-cloudwatch", collector)
+        self.assertNotIn("metrics/kafka-pvc-cloudwatch", collector)
+        self.assertNotIn("metrics/kafka-broker-cloudwatch", collector)
+        self.assertIn("metrics/app-prometheus:", collector)
+        self.assertIn("metrics/cadvisor-prometheus:", collector)
+        self.assertNotIn("Applying CloudWatch Dashboard CRs", disabled)
+        self.assertIn(
+            "CloudWatch metric export and dashboards are disabled",
+            disabled,
+        )
+        self.assertIn(
+            "kubectl delete -f /dashboards/dashboards.yaml --ignore-not-found",
+            disabled,
+        )
+
+    def test_cloudwatch_export_and_dashboards_are_enabled_by_default(self):
+        blocks = literal_blocks(self.eks_render, "collector.yaml")
+        self.assertEqual(len(blocks), 1)
+        collector = blocks[0]
+        self.assertIn("awsemf/app:", collector)
+        self.assertIn("awsemf/kafka-pvc:", collector)
+        self.assertIn("awsemf/kafka-broker:", collector)
+        self.assertIn("Applying CloudWatch Dashboard CRs", self.eks_render)
+        self.assertNotIn("kind: MetricAlarm", self.eks_render)
+
     def test_cloudwatch_dashboard_uses_renderable_available_over_capacity(self):
         dashboard = json.loads(
             (self.chart / CLOUDWATCH_DASHBOARD_PATH).read_text()
@@ -503,38 +548,6 @@ class KafkaObservabilityTests(unittest.TestCase):
                     re.search(r"SEARCH\([^)]*\)\s*/\s*SEARCH\(", row[0]["expression"]),
                     row[0]["expression"],
                 )
-
-    def test_cloudwatch_alarm_defaults_and_configuration(self):
-        self.assertNotIn("kind: MetricAlarm", self.eks_render)
-        rendered = render(
-            self.args.helm,
-            self.chart,
-            "--values",
-            str(self.chart / "valuesEks.yaml"),
-            "--set",
-            "stageName=verify",
-            "--set",
-            "aws.region=us-east-2",
-            "--set-string",
-            "aws.account=123456789012",
-            "--set",
-            "aws.eksClusterName=verify-cluster",
-            "--set",
-            "kafkaObservability.cloudWatchAlarms.enabled=true",
-            "--set",
-            "kafkaObservability.storage.warningFreePercent=25",
-            "--set",
-            "kafkaObservability.storage.criticalFreePercent=7",
-            "--set",
-            "kafkaObservability.cloudWatchAlarms.snsActionArns[0]=arn:aws:sns:us-east-2:123456789012:kafka",
-        )
-        self.assertEqual(rendered.count("kind: MetricAlarm"), 2)
-        self.assertIn("threshold: 25", rendered)
-        self.assertIn("threshold: 7", rendered)
-        self.assertIn("GROUP BY persistentvolumeclaim", rendered)
-        self.assertIn("expression: 100 * available / capacity", rendered)
-        self.assertIn("expression: MIN(freepct)", rendered)
-        self.assertIn("arn:aws:sns:us-east-2:123456789012:kafka", rendered)
 
     def test_cluster_name_is_propagated_by_bootstrap(self):
         # The Rust deployer asserts the same flag in its own unit tests.

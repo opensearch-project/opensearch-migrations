@@ -4412,7 +4412,7 @@
             "width": 8,
             "height": 7,
             "properties": {
-                "title": "Kafka JVM garbage collection",
+                "title": "Kafka JVM garbage collection (G1)",
                 "view": "timeSeries",
                 "stacked": false,
                 "region": "placeholder-region",

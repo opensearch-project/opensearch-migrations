@@ -289,6 +289,10 @@ otelConfiguration:
 
 metrics:
   enabled: true
+  cloudWatch:
+    # Disable to keep Prometheus/Grafana metrics while suppressing CloudWatch
+    # metric export and ACK-managed dashboards.
+    enabled: true
   metricsCollectorEndpoint: "http://otel-collector:4317"
   env: []
   collectorResources:
@@ -366,7 +370,7 @@ metrics:
           processors:
           exporters: [ debug ]
 
-# Global policy shared by Prometheus dashboards/alerts and CloudWatch alarms.
+# Global policy shared by the Prometheus and CloudWatch dashboards.
 # Percentages describe capacity remaining free, not capacity used.
 kafkaObservability:
   storage:
@@ -378,9 +382,6 @@ kafkaObservability:
     abnormalVolumeHealthAlerting: true
   prometheusAlerts:
     enabled: false
-  cloudWatchAlarms:
-    enabled: false
-    snsActionArns: []
   brokerMetrics:
     enabled: true
     alertsEnabled: false

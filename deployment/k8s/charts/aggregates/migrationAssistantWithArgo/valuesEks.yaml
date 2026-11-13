@@ -96,6 +96,7 @@ metrics:
                 # Keep node name as a label
                 - source_labels: [__meta_kubernetes_node_name]
                   target_label: node
+    {{ if .Values.metrics.cloudWatch.enabled }}
       # CloudWatch-only scrape of kubelet PVC statistics. Prometheus continues
       # to use kube-prometheus-stack's kubelet scrape and joins these series to
       # Strimzi PVC labels; CloudWatch has no Kubernetes label join, so the
@@ -162,17 +163,19 @@ metrics:
                 - source_labels: [__name__]
                   action: keep
                   regex: ^kafka_(server_replicamanager_(under_replicated_partitions|isr_(expands|shrinks)_total)|controller_(offline_partitions_count|active_controller_count)|server_raft_current_(leader|epoch)|network_request_(errors_total|throttle_time_milliseconds)|server_request_handler_idle_ratio|jvm_(heap_(used|max)_bytes|gc_(collections_total|collection_time_milliseconds_total)|process_cpu_ratio|uptime_milliseconds))$
+    {{ end }}
     processors:
       batch:
         timeout: 10s
         send_batch_size: 8192
         send_batch_max_size: 10000
-      cumulativetodelta:
       resource/metrics:
         attributes:
           - key: qualifier
             value: ${env:QUALIFIER}
             action: upsert
+    {{ if .Values.metrics.cloudWatch.enabled }}
+      cumulativetodelta:
       resource/kafka:
         attributes:
           - key: EKSClusterName
@@ -217,6 +220,7 @@ metrics:
               - action: aggregate_labels
                 label_set: [container, namespace]
                 aggregation_type: sum
+    {{ end }}
       resource/remove_telemetry_sdk_attributes:
         attributes:
           - key: telemetry.sdk.name
@@ -233,6 +237,7 @@ metrics:
         verbosity: detailed
         sampling_initial: 5
         sampling_thereafter: 200
+    {{ if .Values.metrics.cloudWatch.enabled }}
       awsemf/app:
         namespace: 'OpenSearchMigrations'
         dimension_rollup_option: NoDimensionRollup
@@ -290,6 +295,7 @@ metrics:
           - dimensions: [[EKSClusterName, qualifier, namespace, kafka_cluster, pod, collector]]
             metric_name_selectors:
               - ^kafka_jvm_gc_(collections_total|collection_time_milliseconds_total)$
+    {{ end }}
       prometheus:
         endpoint: "0.0.0.0:8889"
         send_timestamps: true
@@ -298,22 +304,27 @@ metrics:
     service:
       extensions: [health_check]
       pipelines:
+    {{ if .Values.metrics.cloudWatch.enabled }}
         metrics/app:
           receivers: [otlp]
           processors: [batch, resource/remove_default_attributes, resource/metrics, cumulativetodelta]
           exporters: [awsemf/app]
+    {{ end }}
         metrics/app-prometheus:
           receivers: [otlp]
           processors: [batch, resource/remove_telemetry_sdk_attributes, resource/metrics]
           exporters: [prometheus]
+    {{ if .Values.metrics.cloudWatch.enabled }}
         metrics/cadvisor:
           receivers: [prometheus]
           processors: [cumulativetodelta/cadvisor, metricstransform/cadvisor, batch]
           exporters: [awsemf/cadvisor]
+    {{ end }}
         metrics/cadvisor-prometheus:
           receivers: [prometheus]
           processors: [batch]
           exporters: [prometheus]
+    {{ if .Values.metrics.cloudWatch.enabled }}
         metrics/kafka-pvc-cloudwatch:
           receivers: [prometheus/kafka-pvc-cloudwatch]
           processors: [resource/remove_default_attributes, resource/kafka, batch]
@@ -322,6 +333,7 @@ metrics:
           receivers: [prometheus/kafka-broker-cloudwatch]
           processors: [cumulativetodelta/kafka-broker, resource/remove_default_attributes, resource/kafka, batch]
           exporters: [awsemf/kafka-broker]
+    {{ end }}
 
 logs:
   sharedLogsVolume:

@@ -145,25 +145,23 @@ credentials. Configure the underlying `kube-prometheus-stack` Alertmanager
 route and receivers for the customer's email, Slack, PagerDuty, or other
 destination, and keep credentials in a customer-managed Kubernetes Secret.
 
-## CloudWatch alarms and SNS
+## Disabling CloudWatch metrics and dashboards
 
-CloudWatch alarms are disabled by default. Enabling them creates warning and
-critical ACK `MetricAlarm` resources that group Metrics Insights inputs by
-`persistentvolumeclaim`, calculate remaining free percentage, and evaluate
-the global hard percentage thresholds:
+CloudWatch export and the ACK-managed dashboards are enabled by default on
+EKS. Customers who cannot use CloudWatch or do not want to publish custom
+metrics can disable both while retaining Prometheus and Grafana:
 
 ```yaml
-kafkaObservability:
-  cloudWatchAlarms:
-    enabled: true
-    snsActionArns:
-      - arn:aws:sns:us-east-1:123456789012:migration-kafka-alerts
+metrics:
+  cloudWatch:
+    enabled: false
 ```
 
-SNS topics and subscriptions are customer-supplied. The Helm release manages
-alarm creation, update, and deletion; an EKS deployment is still required to
-validate the live ACK lifecycle, contributor behavior, and notifications.
-A CloudWatch fill forecast is not configured initially.
+This setting suppresses all CloudWatch metric exporters and removes the
+Capture Replay and Reindex From Snapshot dashboard resources on upgrade. It
+does not disable the ACK CloudWatch controller itself; customers can disable
+the `ack-cloudwatch-controller` conditional package independently when they do
+not need it for other resources.
 
 ## Broker JMX health
 
@@ -178,6 +176,10 @@ bounded metric set to CloudWatch. Grafana and CloudWatch panels cover:
 - produce/fetch request errors and throttling;
 - combined broker/controller request-handler utilization; and
 - JVM heap, garbage collection, CPU, and process uptime.
+
+The managed Kafka 4.0 deployment uses G1 garbage collection. The CloudWatch GC
+panel names the three G1 collectors explicitly; a customer-supplied JVM
+collector override requires corresponding dashboard changes.
 
 Kafka 4.0 combined-role brokers expose `RequestHandlerAvgIdlePercent` as the
 sum of the broker and controller request-handler pool idle fractions. The
