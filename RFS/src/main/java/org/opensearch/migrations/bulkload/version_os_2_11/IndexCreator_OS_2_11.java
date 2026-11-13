@@ -18,6 +18,7 @@ import org.opensearch.migrations.metadata.IndexCreator;
 import org.opensearch.migrations.metadata.tracing.IMetadataMigrationContexts.ICreateIndexContext;
 import org.opensearch.migrations.parsing.ObjectNodeUtils;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.AllArgsConstructor;
@@ -27,6 +28,7 @@ import lombok.extern.slf4j.Slf4j;
 @AllArgsConstructor
 public class IndexCreator_OS_2_11 implements IndexCreator {
     private static final ObjectMapper mapper = new ObjectMapper();
+    private static final String KNN_ENGINE = "engine";
 
     /**
      * Maps top-level index metadata fields from the snapshot to their corresponding
@@ -116,6 +118,23 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
             result.exception(e);
         }
         return result.build();
+    }
+
+    static int removeKnnVectorEngines(JsonNode node) {
+        if (node == null || !node.isContainerNode()) {
+            return 0;
+        }
+        var removed = 0;
+        if (node instanceof ObjectNode field
+            && "knn_vector".equals(field.path("type").asText())
+            && field.get("method") instanceof ObjectNode method
+            && method.remove(KNN_ENGINE) != null) {
+            removed++;
+        }
+        for (var child : (Iterable<JsonNode>) node::elements) {
+            removed += removeKnnVectorEngines(child);
+        }
+        return removed;
     }
 
     private boolean isServerlessTarget() {
@@ -250,6 +269,17 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
             }
 
             log.info("Reattempting creation of index '{}' after removing unsupported mapping parameters: {}", indexName, unsupportedMappingParams);
+            return;
+        }
+
+        if (invalidResponse.isUnsupportedKnnEngine()) {
+            var removed = removeKnnVectorEngines(mappings);
+            if (removed == 0) {
+                log.debug("Target rejected the knn engine parameter, but index '{}' has no knn_vector method.engine to remove", indexName);
+                throw invalidResponse;
+            }
+            log.info("Reattempting creation of index '{}' after removing method.engine from {} knn_vector field(s); the target chooses the engine",
+                indexName, removed);
             return;
         }
 
