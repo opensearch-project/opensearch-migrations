@@ -231,10 +231,9 @@ public class DocumentMigrationPipeline {
         long upserts = 0;
         long bytes = 0;
         for (var preparedDocument : batch) {
-            var document = preparedDocument.document();
-            if (document.operation() == Document.Operation.UPSERT) {
+            if (preparedDocument.document().operation() == Document.Operation.UPSERT) {
                 upserts++;
-                bytes += document.sourceLength();
+                bytes += preparedDocument.document().sourceLength();
             }
         }
         return new MigrationMetrics.Operations(upserts, batch.size() - upserts, bytes);
