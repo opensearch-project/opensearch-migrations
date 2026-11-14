@@ -139,16 +139,17 @@ passing a Helm values override file through `--helm-values`:
 ```
 
 By default, instance family and size selection remain with EKS Auto Mode.
-Dedicated Kafka, proxy and replayer pools require On-Demand capacity because
-interruptions affect capture availability and replay-rate stability. The
-shared pool and dedicated k6 pool leave capacity type unconstrained, so Auto
-Mode may select Spot for them. The sample file at
+Dedicated RFS, Kafka, proxy and replayer pools require On-Demand capacity
+because interruptions affect backfill progress, capture availability and
+replay-rate stability. The shared pool and dedicated k6 pool leave capacity
+type unconstrained, so Auto Mode may select Spot for them. The sample file at
 [`examples/nodepool-overrides.yaml`](./examples/nodepool-overrides.yaml)
 requires On-Demand for every pool and narrows selection to c/m/r instances of
-generation 5 and newer, up to `4xlarge`. It sets each of these shared-pool
-fields:
+generation 5 and newer, up to `4xlarge`. It pins the RFS pool to one exact
+benchmark SKU. It demonstrates these fields:
 
 - `workloadsNodePool.mode`
+- `workloadsNodePool.instanceTypes`
 - `workloadsNodePool.architectures`
 - `workloadsNodePool.capacityTypes`
 - `workloadsNodePool.instanceCategories`
@@ -161,11 +162,11 @@ fields:
 
 `workloadsNodePool.mode` selects the data-plane placement model:
 
-- `shared` keeps Kafka, capture proxies, and replayers together on `general-work-pool`.
-- `isolated` gives Kafka, capture proxies, and replayers separate tainted NodePools.
+- `shared` keeps RFS workers, Kafka, capture proxies, and replayers together on `general-work-pool`.
+- `isolated` gives RFS workers, Kafka, capture proxies, and replayers separate tainted NodePools.
 
 `isolated` is the default for EKS deployments. Set the mode to `shared` to
-consolidate Kafka, capture proxies, and replayers onto `general-work-pool`.
+consolidate RFS workers, Kafka, capture proxies, and replayers onto `general-work-pool`.
 
 The optional k6 load generator uses a separate tainted pool in both modes.
 Generated pods carry a required node selector as well as the matching
@@ -176,22 +177,30 @@ Isolation does not require `NodePool.spec.limits`. Limits are optional total
 capacity ceilings for cost or quota control. Per-pool limits and instance
 requirements can be set below:
 
+- `workloadsNodePool.dedicatedPools.rfs`
 - `workloadsNodePool.dedicatedPools.kafka`
 - `workloadsNodePool.dedicatedPools.proxy`
 - `workloadsNodePool.dedicatedPools.replayer`
 - `workloadsNodePool.dedicatedPools.k6`
 
-Dedicated pools inherit the shared architecture, capacity type, instance
-category, minimum generation, instance size, and disruption settings unless
-they override them. Kafka, proxy and replayer override the default capacity
-type with `["on-demand"]`; any pool can explicitly select `["spot"]`,
-`["on-demand"]`, or another EKS-supported capacity type through its own
-`capacityTypes` value. Their `limits` are independent and empty by default.
+Dedicated pools inherit the shared instance types, architecture, capacity
+type, instance category, minimum generation, instance size, and disruption
+settings unless they override them. RFS, Kafka, proxy and replayer override
+the default capacity type with `["on-demand"]`; any pool can explicitly select
+`["spot"]`, `["on-demand"]`, or another EKS-supported capacity type through
+its own `capacityTypes` value. Their `limits` are independent and empty by
+default.
 
-In `shared` mode, Kafka, proxies, and replayers necessarily use the shared
-pool's single capacity policy. Set `workloadsNodePool.capacityTypes:
-["on-demand"]` when using shared mode if proxy and replay interruption is not
-acceptable.
+Set `instanceTypes` to select exact EC2 SKUs, for example
+`instanceTypes: ["c6id.24xlarge"]`. A non-empty `instanceTypes` list replaces
+the architecture, category, generation and size filters for that pool. This
+lets a dedicated pool inherit general selection defaults without those
+defaults excluding its exact SKU.
+
+In `shared` mode, RFS, Kafka, proxies, and replayers necessarily use the
+shared pool's single capacity policy. Set `workloadsNodePool.capacityTypes:
+["on-demand"]` when using shared mode if backfill, proxy, or replay
+interruption is not acceptable.
 
 Values files follow normal Helm merge behavior: map fields merge by key, scalar
 conflicts are resolved by the later source, and list fields replace the full

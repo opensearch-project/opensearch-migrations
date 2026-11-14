@@ -7,10 +7,12 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Supplier;
 import java.util.stream.IntStream;
 
 import org.opensearch.migrations.Version;
@@ -25,6 +27,7 @@ import org.opensearch.migrations.bulkload.common.bulk.operations.IndexOperationM
 import org.opensearch.migrations.bulkload.common.http.CompressionMode;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.common.http.HttpResponse;
+import org.opensearch.migrations.bulkload.common.retry.BulkRetryPolicy;
 import org.opensearch.migrations.bulkload.pipeline.DocumentMigrationPipeline;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
 import org.opensearch.migrations.bulkload.pipeline.model.ProgressCursor;
@@ -44,6 +47,7 @@ import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
 import reactor.util.retry.Retry;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -64,6 +68,16 @@ class OpenSearchDocumentSinkBatchingTest {
     private final RestClient transport = mock(RestClient.class);
 
     private OpenSearchDocumentSink sink(IJsonTransformer transformer, int maxDocs, long maxBytes) {
+        return sink(transformer, maxDocs, maxBytes, Retry.max(0));
+    }
+
+    private OpenSearchDocumentSink sink(IJsonTransformer transformer, int maxDocs, long maxBytes, Retry retry) {
+        return sinkFromSupplier(transformer == null ? null : () -> transformer, maxDocs, maxBytes, retry);
+    }
+
+    private OpenSearchDocumentSink sinkFromSupplier(
+        Supplier<IJsonTransformer> transformerSupplier, int maxDocs, long maxBytes, Retry retry
+    ) {
         var connection = mock(ConnectionContext.class);
         when(connection.getUri()).thenReturn(URI.create("http://localhost/"));
         when(transport.getConnectionContext()).thenReturn(connection);
@@ -74,11 +88,11 @@ class OpenSearchDocumentSinkBatchingTest {
         var client = new OpenSearchClient_OS_2_11(transport, mock(FailedRequestsLogger.class),
             Version.fromString("OS 2.11"), CompressionMode.UNCOMPRESSED, maxDocs, maxBytes) {
             @Override
-            protected Retry getBulkRetryStrategy() {
-                return Retry.max(0);
+            protected Retry getBulkRetryStrategy(BulkRetryPolicy.Batch batch) {
+                return retry;
             }
         };
-        return new OpenSearchDocumentSink(client, transformer == null ? null : () -> transformer,
+        return new OpenSearchDocumentSink(client, transformerSupplier,
             false, DocumentExceptionAllowlist.empty(), null);
     }
 
@@ -148,6 +162,37 @@ class OpenSearchDocumentSinkBatchingTest {
     @ValueSource(strings = {"{\n\"text\":\"invalid\nstring\"}", "{\"text\":\"invalid\rstring\"}", "{\n\"value\":}"})
     void rejectsInvalidJsonBeforeNormalizingLineBreaks(String source) {
         assertThrows(SourceFormat.InvalidDocumentSourceException.class, () -> BulkNdjson.encodeRaw(doc("d1", source), "idx", false, MAPPER));
+    }
+
+    @Test
+    void rawSourcePreparationLeavesInvalidSourceForItsLaneToRecord() {
+        var invalid = doc("d1", "{\"value\":}");
+        var valid = doc("d1", "{\"value\":1}");
+        var sink = sink(null, Integer.MAX_VALUE, 1024);
+
+        var prepared = assertDoesNotThrow(() -> sink.prepareSourceDocument("idx", valid));
+        var invalidPrepared = assertDoesNotThrow(() -> sink.prepareSourceDocument("idx", invalid));
+
+        assertEquals(serialized(List.of(valid)).length, prepared.sizeBytes());
+        assertEquals(invalid.sourceLength(), invalidPrepared.sizeBytes());
+        org.junit.jupiter.api.Assertions.assertNull(invalidPrepared.preparation());
+    }
+
+    @Test
+    void rawSourceSizingDoesNotRetainDocumentsInTheSink() throws Exception {
+        var sink = sink(null, Integer.MAX_VALUE, 1024);
+
+        sink.prepareSourceDocument("idx", doc("d1", "{\"value\":1}"));
+
+        int retainedDocuments;
+        try {
+            var field = OpenSearchDocumentSink.class.getDeclaredField("preparedRawDocuments");
+            field.setAccessible(true);
+            retainedDocuments = ((Map<?, ?>) field.get(sink)).size();
+        } catch (NoSuchFieldException e) {
+            retainedDocuments = 0;
+        }
+        assertEquals(0, retainedDocuments, "Source sizing must carry preparation with the document");
     }
 
     @Test
@@ -243,6 +288,135 @@ class OpenSearchDocumentSinkBatchingTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    void repacksTransformedOutputAcrossSourceBatchesWithoutChangingTransformBatchSize() throws Exception {
+        var docs = List.of(doc("d1", "{\"x\":1}"), doc("d2", "{\"x\":1}"),
+            doc("d3", "{\"x\":1}"), doc("d4", "{\"x\":1}"));
+        var transformedBatchSizes = new CopyOnWriteArrayList<Integer>();
+        IJsonTransformer transform = input -> {
+            transformedBatchSizes.add(((List<Map<String, Object>>) input).size());
+            return input;
+        };
+        var sink = sink(transform, Integer.MAX_VALUE, serialized(docs.subList(0, 2)).length);
+        var partition = new EsShardPartition("snapshot", "idx", 0);
+        var source = mock(DocumentSource.class);
+        when(source.readDocuments(partition, 0)).thenReturn(Flux.fromIterable(docs));
+
+        var cursors = new DocumentMigrationPipeline(source, sink, 1, 1000)
+            .migratePartition(partition, "idx", 0).collectList().block(Duration.ofSeconds(10));
+
+        assertEquals(List.of(1, 1, 1, 1), transformedBatchSizes);
+        assertEquals(List.of(2, 2), requestCounts());
+        assertNotNull(cursors);
+        assertEquals(1, cursors.size());
+        assertEquals(4, cursors.get(0).nextPosition());
+    }
+
+    @Test
+    void transformsSourceBatchesInParallelAndRetainsTheirOrder() throws Exception {
+        var transformationsStarted = new CountDownLatch(2);
+        var releaseTransformations = new CountDownLatch(1);
+        var nextTransformer = new AtomicInteger();
+        var sink = sinkFromSupplier(() -> {
+            int transformerNumber = nextTransformer.getAndIncrement();
+            return input -> {
+                transformationsStarted.countDown();
+                try {
+                    if (!releaseTransformations.await(30, TimeUnit.SECONDS)) {
+                        throw new AssertionError("Timed out waiting to release transformations");
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new AssertionError(e);
+                }
+                @SuppressWarnings("unchecked")
+                var operations = (List<Map<String, Object>>) input;
+                operations.forEach(operation -> operation.put("document",
+                    Map.of("transformer", transformerNumber)));
+                return operations;
+            };
+        }, Integer.MAX_VALUE, 1_000_000, Retry.max(0));
+        var batches = List.of(
+            List.of(doc("d1", "{\"x\":1}")),
+            List.of(doc("d2", "{\"x\":1}"))
+        );
+        var preparedBatches = batches.stream()
+            .map(batch -> batch.stream()
+                .map(document -> sink.prepareSourceDocument("idx", document))
+                .toList())
+            .toList();
+
+        var result = CompletableFuture.supplyAsync(() ->
+            sink.writePreparedBatchGroup("idx", preparedBatches, 2).block(Duration.ofSeconds(30)));
+        boolean transformationsOverlapped = transformationsStarted.await(10, TimeUnit.SECONDS);
+        releaseTransformations.countDown();
+        assertNotNull(result.get(30, TimeUnit.SECONDS));
+
+        assertTrue(transformationsOverlapped, "Both transformations should start before either is released");
+        assertEquals(List.of("d1", "d2"), sentIds());
+    }
+
+    @Test
+    void rawPipelineKeepsAtMostOnePartialRequestPerPersistentLane() {
+        var fixture = rawBatchFixture();
+        int totalDocs = fixture.sourceDocsPerBatch() * 16;
+        var docs = fixture.documents().subList(0, totalDocs);
+        var partition = new EsShardPartition("snapshot", "idx", 0);
+        var source = mock(DocumentSource.class);
+        when(source.readDocuments(partition, 0)).thenReturn(Flux.fromIterable(docs));
+
+        new DocumentMigrationPipeline(source, sink(null, Integer.MAX_VALUE, fixture.requestLimit()),
+            Integer.MAX_VALUE, fixture.requestLimit(), 1, 10)
+            .migratePartition(partition, "idx", 0).blockLast(Duration.ofSeconds(20));
+
+        var counts = requestCounts();
+        assertEquals(totalDocs, counts.stream().mapToInt(Integer::intValue).sum());
+        assertTrue(counts.stream().allMatch(count -> count >= 1 && count <= 3),
+            "Every request must respect the exact request limit: " + counts);
+        long partiallyFilled = counts.stream().filter(count -> count < 3).count();
+        int persistentLanes = Math.min(10, Math.max(1, Runtime.getRuntime().availableProcessors()));
+        assertTrue(partiallyFilled <= persistentLanes,
+            "Each persistent lane may flush at most one partially filled request: " + counts);
+    }
+
+    @Test
+    void rawPipelineRefillsConcurrencyWithoutWaitingForARequestGroupTail() throws Exception {
+        var docs = IntStream.range(0, 16)
+            .mapToObj(i -> doc("d%03d".formatted(i), "{\"x\":\"" + "x".repeat(200) + "\"}"))
+            .toList();
+        long requestLimit = serialized(docs.subList(0, 1)).length;
+        assertTrue(2L * docs.get(0).sourceLength() > requestLimit,
+            "The source pipeline must make one source batch per document");
+        var completions = IntStream.range(0, docs.size()).mapToObj(i -> Sinks.<HttpResponse>one()).toList();
+        var starts = IntStream.range(0, docs.size()).mapToObj(i -> new CountDownLatch(1)).toList();
+        var requestNumber = new AtomicInteger();
+        var sink = sink(null, Integer.MAX_VALUE, requestLimit);
+        doAnswer(invocation -> {
+            int number = requestNumber.getAndIncrement();
+            requests.add(invocation.getArgument(1));
+            starts.get(number).countDown();
+            return completions.get(number).asMono();
+        }).when(transport).postAsyncBytes(any(), any(), any(), any());
+        var partition = new EsShardPartition("snapshot", "idx", 0);
+        var source = mock(DocumentSource.class);
+        when(source.readDocuments(partition, 0)).thenReturn(Flux.fromIterable(docs));
+        var subscription = new DocumentMigrationPipeline(source, sink, Integer.MAX_VALUE, requestLimit, 1, 3)
+            .migratePartition(partition, "idx", 0).subscribe();
+        try {
+            for (int i = 0; i < 3; i++) {
+                assertTrue(starts.get(i).await(10, TimeUnit.SECONDS));
+            }
+            for (int i = 0; i < 6; i++) {
+                completions.get(i).tryEmitValue(OK);
+                assertTrue(starts.get(i + 3).await(1, TimeUnit.SECONDS),
+                    "Completing request " + (i + 1) + " did not immediately start request " + (i + 4));
+            }
+        } finally {
+            subscription.dispose();
+        }
+    }
+
+    @Test
     void splitRequestsCompleteInOrderBeforeTheSourceCheckpointAdvances() throws Exception {
         var docs = List.of(doc("d1", "{\"x\":1}"), doc("d2", "{\"x\":1}"));
         var sink = sink(null, Integer.MAX_VALUE, serialized(docs).length - 1L);
@@ -275,6 +449,32 @@ class OpenSearchDocumentSinkBatchingTest {
         assertEquals(1, cursors.size());
         assertEquals(2, cursors.get(0).nextPosition());
         assertEquals(2, cursors.get(0).metrics().requests().total());
+    }
+
+    @Test
+    void aPlainText429OnALaterSplitIsRetriedWithIdenticalBytesBeforeTheCheckpointAdvances() throws Exception {
+        var docs = List.of(doc("d1", "{\"x\":1}"), doc("d2", "{\"x\":1}"));
+        var sink = sink(null, Integer.MAX_VALUE, serialized(docs).length - 1L, Retry.fixedDelay(3, Duration.ofMillis(1)));
+        var throttled = new HttpResponse(429, "Too Many Requests", Map.of("content-type", "text/plain"),
+            "429 Too Many Requests");
+        doAnswer(invocation -> {
+            requests.add(invocation.getArgument(1));
+            return Mono.just(requests.size() == 2 ? throttled : OK);
+        }).when(transport).postAsyncBytes(any(), any(), any(), any());
+        var partition = new EsShardPartition("snapshot", "idx", 0);
+        var source = mock(DocumentSource.class);
+        when(source.readDocuments(partition, 0)).thenReturn(Flux.fromIterable(docs));
+
+        var cursors = new DocumentMigrationPipeline(source, sink, 10, 1000)
+            .migratePartition(partition, "idx", 0).collectList().block(Duration.ofSeconds(10));
+
+        assertEquals(3, requests.size());
+        assertEquals(List.of("d1", "d2", "d2"), sentIds());
+        org.junit.jupiter.api.Assertions.assertArrayEquals(requests.get(1), requests.get(2));
+        assertEquals(1, cursors.size());
+        assertEquals(2, cursors.get(0).nextPosition());
+        assertEquals(3, cursors.get(0).metrics().requests().total());
+        assertEquals(1, cursors.get(0).metrics().requests().retries());
     }
 
     @Test
@@ -344,6 +544,23 @@ class OpenSearchDocumentSinkBatchingTest {
     private static byte[] serialized(List<Document> docs) {
         return BulkNdjson.toRawNdjsonBytes(docs, "idx", false, MAPPER);
     }
+
+    private static RawBatchFixture rawBatchFixture() {
+        for (int padding = 50; padding <= 500; padding++) {
+            int bodyPadding = padding;
+            var documents = IntStream.range(0, 100)
+                .mapToObj(i -> doc("d%03d".formatted(i), "{\"x\":\"" + "x".repeat(bodyPadding) + "\"}"))
+                .toList();
+            long requestLimit = serialized(documents.subList(0, 3)).length;
+            int sourceDocsPerBatch = Math.toIntExact(requestLimit / documents.get(0).sourceLength());
+            if (sourceDocsPerBatch > 3 && sourceDocsPerBatch * 8 % 3 != 0) {
+                return new RawBatchFixture(documents, requestLimit, sourceDocsPerBatch);
+            }
+        }
+        throw new AssertionError("Unable to construct the source/target batch-size fixture");
+    }
+
+    private record RawBatchFixture(List<Document> documents, long requestLimit, int sourceDocsPerBatch) {}
 
     private List<Integer> requestCounts() {
         return requests.stream().map(bytes -> new String(bytes, StandardCharsets.UTF_8).split("\n").length / 2).toList();

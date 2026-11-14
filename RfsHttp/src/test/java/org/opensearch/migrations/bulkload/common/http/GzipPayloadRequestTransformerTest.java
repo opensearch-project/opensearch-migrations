@@ -1,9 +1,11 @@
 package org.opensearch.migrations.bulkload.common.http;
 
+import java.io.ByteArrayInputStream;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.List;
+import java.util.zip.GZIPInputStream;
 
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Mono;
@@ -65,6 +67,19 @@ class GzipPayloadRequestTransformerTest {
         byte[] bytes = new byte[output.remaining()];
         output.get(bytes);
         assertArrayEquals(gzipPayload, bytes);
+    }
+
+    @Test
+    void severalBuffersAreCompressedAsOneContinuousBody() throws Exception {
+        var compressed = GzipPayloadRequestTransformer.gzip(new ByteBuffer[] {
+            ByteBuffer.wrap("hello ".getBytes(StandardCharsets.UTF_8)),
+            ByteBuffer.wrap("pooled ".getBytes(StandardCharsets.UTF_8)),
+            ByteBuffer.wrap("world".getBytes(StandardCharsets.UTF_8))
+        });
+
+        try (var input = new GZIPInputStream(new ByteArrayInputStream(compressed))) {
+            assertEquals("hello pooled world", new String(input.readAllBytes(), StandardCharsets.UTF_8));
+        }
     }
 
     @Test

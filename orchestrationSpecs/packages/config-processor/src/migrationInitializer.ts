@@ -27,6 +27,12 @@ type MigrationRunOptions = {
     timestamp?: Date;
 };
 
+// Kubernetes still resolves YAML 1.1 boolean spellings such as "on" and "off". Generate manifests with the same
+// schema so the serializer quotes those strings instead of allowing the API server to change their types.
+export function stringifyKubernetesManifest(resource: unknown): string {
+    return stringify(resource, {schema: 'yaml-1.1'});
+}
+
 // const a: KafkaClusterConfig = { vers };
 // const b: WorkflowConfig = { snapshotMigrations: [{ label: "" }] }
 //const b: KafkaClusterConfig = { kafkaClusters: [{ version2: "" }] }
@@ -148,7 +154,7 @@ export class MigrationInitializer {
             const filename = `${String(idx).padStart(3, '0')}-${kind.toLowerCase()}-${name}.yaml`;
             // Write resource without status (status must be patched separately via subresource)
             const { status, ...resourceWithoutStatus } = item;
-            await fs.writeFile(path.join(resourcesDir, filename), stringify(resourceWithoutStatus));
+            await fs.writeFile(path.join(resourcesDir, filename), stringifyKubernetesManifest(resourceWithoutStatus));
             entries.push({ file: filename, kind, name, category, hasStatus: status !== undefined });
             idx++;
         }
@@ -156,7 +162,7 @@ export class MigrationInitializer {
             const name = item.metadata.name;
             const kind = item.kind;
             const filename = `${String(idx).padStart(3, '0')}-${kind.toLowerCase()}-${name}.yaml`;
-            await fs.writeFile(path.join(resourcesDir, filename), stringify(item));
+            await fs.writeFile(path.join(resourcesDir, filename), stringifyKubernetesManifest(item));
             entries.push({ file: filename, kind, name, category: 'configmap', hasStatus: false });
             idx++;
         }

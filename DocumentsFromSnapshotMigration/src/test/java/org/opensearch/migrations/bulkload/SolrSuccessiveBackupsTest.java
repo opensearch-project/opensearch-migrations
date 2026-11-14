@@ -430,6 +430,7 @@ public class SolrSuccessiveBackupsTest {
         int exitCode = SourceTestBase.runProcessAgainstTarget(new String[]{
             "--source-version", "SOLR_" + solrVersion.tag(),
             "--snapshot-local-dir", backupRoot.toString(),
+            "--disable-failed-document-stream",
             "--snapshot-name", "solr-successive",
             "--target-host", target.getUrl(),
             "--coordinator-host", target.getUrl(),

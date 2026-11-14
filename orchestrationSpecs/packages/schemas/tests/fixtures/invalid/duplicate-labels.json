@@ -22,7 +22,7 @@
       "toTarget": "target",
       "perSnapshotConfig": {
         "snap1": [
-          { "label": "dup", "documentBackfillConfig": {} },
+          { "label": "dup", "documentBackfillConfig": { "disableFailedDocumentStream": true } },
           { "label": "dup", "metadataMigrationConfig": {} }
         ]
       }

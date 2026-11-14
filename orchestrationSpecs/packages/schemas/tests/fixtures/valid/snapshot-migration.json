@@ -34,7 +34,7 @@
         "snap1": [
           {
             "label": "docs",
-            "documentBackfillConfig": {}
+            "documentBackfillConfig": { "disableFailedDocumentStream": true }
           }
         ]
       }

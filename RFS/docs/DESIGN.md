@@ -1,6 +1,6 @@
 # RFS High Level Design
 
-**LAST UPDATED: March 2026**
+**LAST UPDATED: October 2026**
 
 ## Table of Contents
 - [RFS High Level Design](#rfs-high-level-design)
@@ -150,6 +150,12 @@ sequenceDiagram
 
 In this section, we describe in a high-level, narrative manner how the RFS Worker operates.
 
+> **Note:** This narrative is the original design. In the current implementation, snapshot creation (`CreateSnapshot`)
+> and metadata migration (`MetadataMigration`) are separate tools, run before the backfill (by the migration workflow,
+> for example); the RFS worker (`DocumentsFromSnapshotMigration`) performs Phase 4 only, one shard work item per
+> process. Leases and checkpoints are described above, and bulk pacing and failure handling in
+> [Bulk Traffic Control and Failure Handling in RFS](./BULK_TRAFFIC_CONTROL.md).
+
 ### RFS Worker threads
 
 The RFS Worker’s running process has at least two running threads:
@@ -222,11 +228,11 @@ The process is the same as 3.1 - Setup, with the exception that the RFS Worker t
 
 The goal of this sub-phase is to migrate all the Elasticsearch Documents from the source cluster to the target cluster.  This means recreating all the Documents in the source cluster onto the target cluster.  We exit the sub-phase when we find every Shard has been processed (successfully, or unsuccessfully).
 
-Each RFS Worker asks the CMS for a single, random Shard Work Entry that either has not been started or has an expired work lease (see [Work leases](#work-leases), [Work lease backoff](#work-lease-backoff)).  When then attempt to acquire the lease on that Entry.  If we fail, we ask the CMS for another Entry.  If we succeed, we check the number of times this Entry has been attempted.  If over the threshold, we mark it as failed and emit a notification event if not already done so then skip it.  If not over the threshold, we download the Shard’s files from the Snapshot, unpack them, read them as a Lucene Index, extract the original Elasticsearch Documents from them, and HTTP PUT those Documents against the target cluster.  When performing the PUT, we use the Document’s original ID from the source cluster and overwrite any Document on the target cluster’s corresponding Elasticsearch Index that has the same ID  (see [Overwrite documents by ID](#overwrite-documents-by-id)).  Once all Documents in the Shard have been processed, we mark the Shard Work Entry as completed and ask for another entry.
+Each RFS Worker asks the CMS for a single, random Shard Work Entry that either has not been started or has an expired work lease (see [Work leases](#work-leases), [Work lease backoff](#work-lease-backoff)).  When then attempt to acquire the lease on that Entry.  If we fail, we ask the CMS for another Entry.  If we succeed, we download the Shard’s files from the Snapshot, unpack them, read them as a Lucene Index, extract the original Elasticsearch Documents from them, and HTTP PUT those Documents against the target cluster.  When performing the PUT, we use the Document’s original ID from the source cluster and overwrite any Document on the target cluster’s corresponding Elasticsearch Index that has the same ID  (see [Overwrite documents by ID](#overwrite-documents-by-id)).  Once all Documents in the Shard have been processed, we mark the Shard Work Entry as completed and ask for another entry.
 
 If no Entry is returned, we know that this sub-phase is complete and attempt to update the CMS’s status for the Documents Migration phase to be complete.
 
-The work lease for this sub-phase is on the Shard (ensuring every Elasticsearch Document in that Shard has been processed).  We log/emit metrics to indicate how many Documents are successfully and unsuccessfully migrated but we don’t consider the Shard Work Entry to have failed if some (or even all) of the Documents in it are unsuccessfully migrated.  We only retry the Shard Work Entry when an RFS Worker fails to process every Document within the lease window.  These retries are relatively time consuming, but safe because we overwrite any partial work performed by a previous RFS Worker. 
+The work lease for this sub-phase is on the Shard (ensuring every Elasticsearch Document in that Shard has been processed).  A Document the target refuses on its own is recorded in the failed document stream and counted in the work item's committed metrics, and the Shard Work Entry still completes; we don't consider it to have failed if some (or even all) of its Documents failed.  A target that is throttling or unavailable never fails a Document: the worker waits for it.  We only retry the Shard Work Entry when an RFS Worker fails to process every Document within the lease window.  These retries are relatively time consuming, but safe because we overwrite any partial work performed by a previous RFS Worker.  How bulk requests are paced, retried and given up on is specified in [Bulk Traffic Control and Failure Handling in RFS](./BULK_TRAFFIC_CONTROL.md); stopping a Shard whose failures exceed an allowance is planned there. 
 
 ### Notes on Reindexing Behavior
 
@@ -286,9 +292,10 @@ DocumentMigrationBootstrap (DI wiring)
 | Code | Meaning |
 |---|---|
 | 0 | Success — work completed |
-| 2 | Process timed out |
+| 2 | Lease-timeout handoff: progress checkpointed to a successor work item |
 | 3 | No work left at all |
 | 4 | Work exists but none available to this worker (all leased by others) |
+| 5 | The snapshot couldn't be read (not retriable) |
 
 Exit code 4 prevents Kubernetes from rapid-cycling pods when all work is leased by other workers.
 

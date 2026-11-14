@@ -444,6 +444,9 @@ function prepareMetadataConfig(
     const generatedConfig = lowerTransformPipeline(metadataTransforms, fileSourceRegistry);
     return ARGO_METADATA_OPTIONS.parse({
         ...rest,
+        logLevels: {
+            root: rest.logLevels?.root ?? "info",
+        },
         resources: rest.resources,
         skipEvaluateApproval: rest.skipEvaluateApproval ?? skipApprovals,
         skipMigrateApproval: rest.skipMigrateApproval ?? skipApprovals,
@@ -520,6 +523,11 @@ function prepareDocumentBackfillConfig(
     const generatedConfig = lowerTransformPipeline(documentTransforms, fileSourceRegistry);
     return ARGO_RFS_OPTIONS.parse({
         ...rest,
+        logLevels: {
+            root: rest.logLevels?.root ?? "info",
+            bulkRequestTrace: rest.logLevels?.bulkRequestTrace ?? "off",
+            failedRequests: rest.logLevels?.failedRequests ?? "warn",
+        },
         ...resolveFailedDocumentStreamS3(rest, repoConfig, deploymentDefaults),
         skipApproval: rest.skipApproval ?? skipApprovals,
         ...fileSourceRegistry.resolvedFields,
@@ -531,6 +539,7 @@ function prepareDocumentBackfillConfig(
 function prepareReplayerConfig(
     config: NonNullable<NonNullable<z.infer<typeof OVERALL_MIGRATION_CONFIG>["traffic"]>["replayers"][string]["replayerConfig"]> | undefined
 ) {
+    const configuredLogLevels = config && "logLevels" in config ? config.logLevels : undefined;
     const {requestTransforms, tupleTransforms, ...rest} = config ?? {};
     const fileSourceRegistry = new FileSourceRegistry();
     const generatedRequestConfig = lowerTransformPipeline(requestTransforms, fileSourceRegistry);
@@ -538,6 +547,9 @@ function prepareReplayerConfig(
 
     return ARGO_REPLAYER_OPTIONS.parse({
         ...rest,
+        logLevels: {
+            root: configuredLogLevels?.root ?? "info",
+        },
         ...fileSourceRegistry.resolvedFields,
         ...(generatedRequestConfig === undefined ? {} : {transformerConfig: generatedRequestConfig}),
         ...(generatedTupleConfig === undefined ? {} : {tupleTransformerConfig: generatedTupleConfig}),
@@ -549,6 +561,9 @@ function prepareProxyConfig(
 ) {
     const fileSourceRegistry = new FileSourceRegistry();
     const tls = config.tls;
+    const logLevels = {
+        root: config.logLevels?.root ?? "info",
+    };
 
     if (tls !== undefined && "clientAuth" in tls && tls.clientAuth !== undefined) {
         const {clientAuth} = tls;
@@ -562,6 +577,7 @@ function prepareProxyConfig(
             };
         return ARGO_PROXY_OPTIONS.parse({
             ...config,
+            logLevels,
             ...trustCertConfig,
             requireClientAuth: clientAuth.required ?? true,
             ...fileSourceRegistry.resolvedFields,
@@ -570,6 +586,7 @@ function prepareProxyConfig(
 
     return ARGO_PROXY_OPTIONS.parse({
         ...config,
+        logLevels,
         ...fileSourceRegistry.resolvedFields,
     });
 }

@@ -57,7 +57,10 @@ public class RestClient {
     // This is important for worker coordination (upper bound on valid request of 15 seconds)
     // and to a lesser degree SigV4 signed requests.
     private static final Duration DEFAULT_CONNECT_TIMEOUT = Duration.ofSeconds(5);
-    // Longer than the default OpenSearch request timeout of 1 minute
+    // How long a response may go unread once the request is sent (a read-idle timer that starts after the body is
+    // written). Short, for the same clock-skew reason as the connect timeout. It isn't tied to any server-side
+    // limit: the bulk API's own timeout parameter only bounds waits for shards and mappings, not the whole request.
+    // Bulk writes set a longer timeout per request; see asyncRequestBytes.
     private static final Duration DEFAULT_REQUEST_TIMEOUT = Duration.ofSeconds(65);
 
     private static final String USER_AGENT_HEADER_NAME = HttpHeaderNames.USER_AGENT.toString();
@@ -85,6 +88,11 @@ public class RestClient {
     }
 
     protected RestClient(ConnectionContext connectionContext, HttpClient httpClient) {
+        this(connectionContext, httpClient, DEFAULT_REQUEST_TIMEOUT);
+    }
+
+    /** @param responseTimeout how long to wait for a response after the request is sent */
+    protected RestClient(ConnectionContext connectionContext, HttpClient httpClient, Duration responseTimeout) {
         this.connectionContext = connectionContext;
         TlsCredentialsProvider tlsCredentialsProvider = connectionContext.getTlsCredentialsProvider();
 
@@ -103,7 +111,7 @@ public class RestClient {
             .baseUrl(connectionContext.getUri().toString())
             .disableRetry(false) // Enable one retry on connection reset with no delay
             .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, (int) DEFAULT_CONNECT_TIMEOUT.toMillis())
-            .responseTimeout(DEFAULT_REQUEST_TIMEOUT)
+            .responseTimeout(responseTimeout)
             .keepAlive(true);
         this.defaultHeaders = Map.of();
     }
@@ -155,6 +163,16 @@ public class RestClient {
 
     public Mono<HttpResponse> asyncRequestBytes(HttpMethod method, String path, byte[] body, Map<String, List<String>> additionalHeaders,
                                                 @Nullable IRfsContexts.IRequestContext context) {
+        return asyncRequestBytes(method, path, body, additionalHeaders, context, null);
+    }
+
+    /**
+     * @param responseTimeout how long to wait for a response once this request is sent, instead of the client's
+     *                        timeout; null for the client's
+     */
+    public Mono<HttpResponse> asyncRequestBytes(HttpMethod method, String path, byte[] body, Map<String, List<String>> additionalHeaders,
+                                                @Nullable IRfsContexts.IRequestContext context,
+                                                @Nullable Duration responseTimeout) {
         assert connectionContext.getUri() != null;
         Map<String, List<String>> headers = new HashMap<>();
         headers.put(USER_AGENT_HEADER_NAME, List.of(USER_AGENT));
@@ -182,7 +200,12 @@ public class RestClient {
                 .map(ByteBuffer::wrap)
             )
             .flatMap(transformedRequest ->
-                client.doOnRequest((r, conn) -> contextCleanupRef.set(addSizeMetricsHandlersAndGetCleanup(context).apply(r, conn)))
+                client.doOnRequest((r, conn) -> {
+                    if (responseTimeout != null) {
+                        r.responseTimeout(responseTimeout);
+                    }
+                    contextCleanupRef.set(addSizeMetricsHandlersAndGetCleanup(context).apply(r, conn));
+                })
                 .headers(h -> transformedRequest.getHeaders().forEach(h::add))
                 .compress(hasGzipResponseHeaders(transformedRequest.getHeaders()))
                 .request(method)
@@ -260,6 +283,17 @@ public class RestClient {
         IRfsContexts.IRequestContext context
     ) {
         return asyncRequestBytes(HttpMethod.POST, path, body, additionalHeaders, context);
+    }
+
+    /** As above, waiting up to {@code responseTimeout} for the response instead of the client's timeout. */
+    public Mono<HttpResponse> postAsyncBytes(
+        String path,
+        byte[] body,
+        Map<String, List<String>> additionalHeaders,
+        IRfsContexts.IRequestContext context,
+        Duration responseTimeout
+    ) {
+        return asyncRequestBytes(HttpMethod.POST, path, body, additionalHeaders, context, responseTimeout);
     }
 
     public Mono<HttpResponse> postAsync(String path, String body, IRfsContexts.IRequestContext context) {

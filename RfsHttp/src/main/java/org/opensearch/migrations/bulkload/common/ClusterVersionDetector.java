@@ -24,11 +24,13 @@ public class ClusterVersionDetector {
     private static final Duration VERSION_DETECTION_REQUEST_TIMEOUT = Duration.ofSeconds(30);
     private static final Retry RETRY_STRATEGY = Retry.backoff(MAX_VERSION_DETECTION_RETRIES, Duration.ofSeconds(1))
         .maxBackoff(Duration.ofSeconds(5))
-        .filter(ClusterVersionDetector::isRetryable)
+        .filter(HttpRetryClassifier::isRetryable)
         .doBeforeRetry(retrySignal -> log.atWarn()
             .setCause(retrySignal.failure())
-            .setMessage("Cluster version detection failed; retrying attempt {} of {}")
-            .addArgument(retrySignal.totalRetries() + 1)
+            .setMessage("Cluster version detection failed ({}); retrying attempt {} of {}")
+            .addArgument(HttpRetryClassifier.describe(retrySignal.failure()))
+            // totalRetries is zero-based and counts retries already completed; the next execution is attempt 2 first.
+            .addArgument(retrySignal.totalRetries() + 2)
             .addArgument(MAX_VERSION_DETECTION_RETRIES + 1)
             .log());
 
@@ -104,12 +106,6 @@ public class ClusterVersionDetector {
         return operation
             .timeout(requestTimeout)
             .retryWhen(retryStrategy);
-    }
-
-    private static boolean isRetryable(Throwable throwable) {
-        return !(throwable instanceof UnexpectedStatusCode &&
-            ((UnexpectedStatusCode) throwable).response.statusCode >= 400 &&
-            ((UnexpectedStatusCode) throwable).response.statusCode < 500);
     }
 
     private static Mono<Version> detectSolrVersion(RestClient client) {
@@ -210,12 +206,17 @@ public class ClusterVersionDetector {
         }
     }
 
-    public static class UnexpectedStatusCode extends RuntimeException {
+    public static class UnexpectedStatusCode extends RuntimeException implements HttpRetryClassifier.StatusCodeFailure {
         public final transient HttpResponse response;
 
         public UnexpectedStatusCode(HttpResponse response) {
             super("Unexpected status code: " + response.statusCode);
             this.response = response;
+        }
+
+        @Override
+        public int statusCode() {
+            return response.statusCode;
         }
     }
 }

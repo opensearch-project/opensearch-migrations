@@ -269,6 +269,7 @@ function makeProxyDeploymentManifest(args: {
     kafkaCaSecretName: BaseExpression<string>,
     tlsSecretName?: BaseExpression<string>,
     sslTrustCertPem: BaseExpression<string>,
+    rootLogLevel: BaseExpression<string>,
     fileSourceVolumes: BaseExpression<any[]>,
     fileSourceVolumeMounts: BaseExpression<any[]>,
     ownerUid: BaseExpression<string>,
@@ -313,6 +314,10 @@ function makeProxyDeploymentManifest(args: {
             {
                 name: CAPTURE_PROXY_SSL_TRUST_CERT_PEM_ENV_VAR,
                 value: makeStringTypeProxy(args.sslTrustCertPem)
+            },
+            {
+                name: "MIGRATIONS_ROOT_LOG_LEVEL",
+                value: makeStringTypeProxy(args.rootLogLevel)
             }
         ],
         volumeMounts: [
@@ -517,6 +522,7 @@ export const SetupCapture = WorkflowBuilder.create({
         .addInputsFromRecord(POD_REPLICAS_INPUTS)
         .addRequiredInput("resources", typeToken<ResourceRequirementsType>())
         .addRequiredInput("sslTrustCertPem", typeToken<string>())
+        .addRequiredInput("rootLogLevel", typeToken<string>())
         .addRequiredInput("fileSourceVolumes", typeToken<z.infer<typeof ARGO_FILE_SOURCE_VOLUME>[]>())
         .addRequiredInput("fileSourceVolumeMounts", typeToken<z.infer<typeof ARGO_FILE_SOURCE_VOLUME_MOUNT>[]>())
         .addRequiredInput("ownerUid", typeToken<string>())
@@ -545,6 +551,7 @@ export const SetupCapture = WorkflowBuilder.create({
                     kafkaSecretName: b.inputs.kafkaSecretName,
                     kafkaCaSecretName: b.inputs.kafkaCaSecretName,
                     sslTrustCertPem: b.inputs.sslTrustCertPem,
+                    rootLogLevel: b.inputs.rootLogLevel,
                     fileSourceVolumes: expr.deserializeRecord(b.inputs.fileSourceVolumes),
                     fileSourceVolumeMounts: expr.deserializeRecord(b.inputs.fileSourceVolumeMounts),
                     ownerUid: b.inputs.ownerUid,
@@ -571,6 +578,7 @@ export const SetupCapture = WorkflowBuilder.create({
         .addInputsFromRecord(POD_REPLICAS_INPUTS)
         .addRequiredInput("resources", typeToken<ResourceRequirementsType>())
         .addRequiredInput("sslTrustCertPem", typeToken<string>())
+        .addRequiredInput("rootLogLevel", typeToken<string>())
         .addRequiredInput("fileSourceVolumes", typeToken<z.infer<typeof ARGO_FILE_SOURCE_VOLUME>[]>())
         .addRequiredInput("fileSourceVolumeMounts", typeToken<z.infer<typeof ARGO_FILE_SOURCE_VOLUME_MOUNT>[]>())
         .addRequiredInput("tlsSecretName", typeToken<string>())
@@ -600,6 +608,7 @@ export const SetupCapture = WorkflowBuilder.create({
                     kafkaCaSecretName: b.inputs.kafkaCaSecretName,
                     tlsSecretName: b.inputs.tlsSecretName,
                     sslTrustCertPem: b.inputs.sslTrustCertPem,
+                    rootLogLevel: b.inputs.rootLogLevel,
                     fileSourceVolumes: expr.deserializeRecord(b.inputs.fileSourceVolumes),
                     fileSourceVolumeMounts: expr.deserializeRecord(b.inputs.fileSourceVolumeMounts),
                     ownerUid: b.inputs.ownerUid,
@@ -823,6 +832,7 @@ export const SetupCapture = WorkflowBuilder.create({
                                 ),
                                 resources: expr.serialize(expr.get(proxyOpts, "resources")),
                                 sslTrustCertPem: expr.dig(proxyOpts, ["sslTrustCertPem"], ""),
+                                rootLogLevel: expr.getLoose(expr.getLoose(proxyOpts, "logLevels"), "root"),
                                 fileSourceVolumes: expr.serialize(expr.dig(proxyOpts, ["fileSourceVolumes"], [])),
                                 fileSourceVolumeMounts: expr.serialize(expr.dig(proxyOpts, ["fileSourceVolumeMounts"], [])),
                                 ownerUid: b.inputs.ownerUid,
@@ -858,6 +868,7 @@ export const SetupCapture = WorkflowBuilder.create({
                                 resources: expr.serialize(expr.get(proxyOpts, "resources")),
                                 tlsSecretName: tlsSecretName,
                                 sslTrustCertPem: expr.dig(proxyOpts, ["sslTrustCertPem"], ""),
+                                rootLogLevel: expr.getLoose(expr.getLoose(proxyOpts, "logLevels"), "root"),
                                 fileSourceVolumes: expr.serialize(expr.dig(proxyOpts, ["fileSourceVolumes"], [])),
                                 fileSourceVolumeMounts: expr.serialize(expr.dig(proxyOpts, ["fileSourceVolumeMounts"], [])),
                                 ownerUid: b.inputs.ownerUid,

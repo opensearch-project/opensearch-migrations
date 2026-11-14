@@ -238,6 +238,9 @@ function buildMetadataContainer<
         .addEnvVar("JDK_JAVA_OPTIONS",
             expr.dig(expr.deserializeRecord(inputs.metadataMigrationConfig), ["jvmArgs"], "")
         )
+        .addEnvVar("MIGRATIONS_ROOT_LOG_LEVEL",
+            expr.getLoose(expr.getLoose(expr.deserializeRecord(inputs.metadataMigrationConfig), "logLevels"), "root")
+        )
         .addEnvVarsFromRecord(getTargetHttpAuthCreds(getHttpAuthSecretName(inputs.targetConfig)))
         .addEnvVarsFromRecord(getAzureStorageCreds(
             expr.dig(expr.deserializeRecord(inputs.snapshotConfig), ["repoConfig", "azureCredentialsSecretName"], "")))
