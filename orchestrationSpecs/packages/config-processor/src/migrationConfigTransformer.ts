@@ -1047,7 +1047,9 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                     configChecksum: proxyChecksumForSnapshot.get(dep.name) ?? '',
                 }));
                 const sourceConnectionIdentity =
-                    MigrationConfigTransformer.clusterConnectionIdentity(s.sourceConfig as Record<string, unknown>);
+                    MigrationConfigTransformer.sourceClusterConnectionIdentity(
+                        s.sourceConfig as Record<string, unknown>
+                    );
                 const repoIdentity = MigrationConfigTransformer.repoIdentity(item.repo as Record<string, unknown>);
                 return {
                     ...item,
@@ -1216,7 +1218,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                 throw new Error(`Proxy '${proxyName}' references unknown source cluster '${proxy.source}'`);
             }
             const topic = proxy.kafkaTopic || proxyName;
-            const sourceConnectionIdentity = MigrationConfigTransformer.clusterConnectionIdentity({
+            const sourceConnectionIdentity = MigrationConfigTransformer.sourceClusterConnectionIdentity({
                 ...sourceCluster,
                 label: proxy.source,
             });
@@ -1308,7 +1310,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                     createConfigs.push({
                         label: snapshotName,
                         snapshotPrefix: snapshotConfig.createSnapshotConfig.snapshotPrefix || snapshotName,
-                        sourceConnectionIdentity: MigrationConfigTransformer.clusterConnectionIdentity({
+                        sourceConnectionIdentity: MigrationConfigTransformer.sourceClusterConnectionIdentity({
                             ...sourceCluster,
                             label: sourceName,
                         }),
@@ -1327,7 +1329,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                     createConfigs.push({
                         label: snapshotName,
                         snapshotPrefix: snapshotName,
-                        sourceConnectionIdentity: MigrationConfigTransformer.clusterConnectionIdentity({
+                        sourceConnectionIdentity: MigrationConfigTransformer.sourceClusterConnectionIdentity({
                             ...sourceCluster,
                             label: sourceName,
                         }),
@@ -1430,11 +1432,11 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                     const solrCollectionAllowlist = isSolrSourceVersion(sourceCluster.version)
                         ? solrCollectionAllowlistForSnapshot(snapshotDef)
                         : [];
-                    const sourceConnectionIdentity = MigrationConfigTransformer.clusterConnectionIdentity({
+                    const sourceConnectionIdentity = MigrationConfigTransformer.sourceClusterConnectionIdentity({
                         ...sourceCluster,
                         label: fromSource,
                     });
-                    const targetConnectionIdentity = MigrationConfigTransformer.clusterConnectionIdentity({
+                    const targetConnectionIdentity = MigrationConfigTransformer.targetClusterConnectionIdentity({
                         ...targetCluster,
                         label: toTarget,
                     });
@@ -1513,7 +1515,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             const replayerConfig = prepareReplayerConfig(
                 replayer.replayerConfig
             );
-            const targetConnectionIdentity = MigrationConfigTransformer.clusterConnectionIdentity({
+            const targetConnectionIdentity = MigrationConfigTransformer.targetClusterConnectionIdentity({
                 ...targetCluster,
                 label: replayer.toTarget,
             });
@@ -1644,15 +1646,24 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
         };
     }
 
-    static clusterConnectionIdentity(clusterConfig: Record<string, unknown>): Record<string, unknown> {
+    static targetClusterConnectionIdentity(clusterConfig: Record<string, unknown>): Record<string, unknown> {
         const authIdentity = MigrationConfigTransformer.authIdentity(clusterConfig.authConfig as ClusterAuthConfig);
         return {
             label: clusterConfig.label,
-            version: clusterConfig.version ?? "",
             endpoint: clusterConfig.endpoint ?? "",
             allowInsecure: clusterConfig.allowInsecure ?? false,
             solrContextPath: clusterConfig.solrContextPath ?? "",
             ...authIdentity,
+        };
+    }
+
+    static sourceClusterConnectionIdentity(clusterConfig: Record<string, unknown>): Record<string, unknown> {
+        const {label, ...identityWithoutVersion} =
+            MigrationConfigTransformer.targetClusterConnectionIdentity(clusterConfig);
+        return {
+            label,
+            version: clusterConfig.version ?? "",
+            ...identityWithoutVersion,
         };
     }
 
