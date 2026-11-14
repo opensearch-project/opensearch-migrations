@@ -28,9 +28,15 @@ function sequenceConfig() {
             toTarget: "target",
             snapshotSequence: ["first", "second", "third"],
             perSnapshotConfig: {
-                first: [{metadataMigrationConfig: {}, documentBackfillConfig: {skipApproval: false, disableFailedDocumentStream: true}}],
-                second: [{metadataMigrationConfig: {}, documentBackfillConfig: {skipApproval: false, disableFailedDocumentStream: true}}],
-                third: [{metadataMigrationConfig: {}, documentBackfillConfig: {skipApproval: false, disableFailedDocumentStream: true}}],
+                first: [{metadataMigrationConfig: {}, documentBackfillConfig: {
+                    skipApproval: false, failedDocumentStream: {type: "disabled"},
+                }}],
+                second: [{metadataMigrationConfig: {}, documentBackfillConfig: {
+                    skipApproval: false, failedDocumentStream: {type: "disabled"},
+                }}],
+                third: [{metadataMigrationConfig: {}, documentBackfillConfig: {
+                    skipApproval: false, failedDocumentStream: {type: "disabled"},
+                }}],
             },
         }],
     };

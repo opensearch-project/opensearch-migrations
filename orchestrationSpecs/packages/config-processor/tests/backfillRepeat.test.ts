@@ -25,7 +25,7 @@ function policyConfig(maxRuns = 3, snapshotLag?: string) {
             backfill: {
                 snapshot: {repoName: "repo", createSnapshotConfig: {indexAllowlist: ["orders"]}},
                 metadataMigrationConfig: {},
-                documentBackfillConfig: {indexAllowlist: ["orders"], disableFailedDocumentStream: true},
+                documentBackfillConfig: {indexAllowlist: ["orders"], failedDocumentStream: {type: "disabled"}},
                 repeat: {maxRuns, ...(snapshotLag ? {until: {snapshotLag}} : {})},
             },
         }],
@@ -51,6 +51,50 @@ describe("declarative repeated backfills", () => {
         expect(once.snapshotSequences![0].steps).toHaveLength(1);
         expect(more.snapshotMigrations[0]).toEqual(once.snapshotMigrations[0]);
         expect(more.snapshots[0].createSnapshotConfig[0]).toEqual(once.snapshots[0].createSnapshotConfig[0]);
+    });
+
+    it("resolves the shared failed-document destination for every generated phase", async () => {
+        const config = policyConfig();
+        const migration = config.snapshotMigrationConfigs[0];
+        const output = await new MigrationConfigTransformer().processFromObject({
+            ...config,
+            snapshotMigrationConfigs: [{
+                ...migration,
+                backfill: {
+                    ...migration.backfill,
+                    documentBackfillConfig: {
+                        ...migration.backfill.documentBackfillConfig,
+                        failedDocumentStream: {
+                            type: "s3",
+                            bucket: "migration-failures",
+                            prefix: "repeated-backfill/",
+                        },
+                    },
+                },
+            }],
+        });
+        expect(output.snapshotMigrations).toHaveLength(5);
+        for (const phase of output.snapshotMigrations) {
+            expect(phase.documentBackfillConfig).toMatchObject({
+                disableFailedDocumentStream: false,
+                failedDocumentStreamS3Bucket: "migration-failures",
+                failedDocumentStreamS3Prefix: "repeated-backfill/",
+                failedDocumentStreamS3Region: "us-east-1",
+            });
+            expect(phase.documentBackfillConfig).not.toHaveProperty("failedDocumentStream");
+        }
+    });
+
+    it.each([undefined, {}])("requires an explicit failed-document choice for repeated backfills: %p", async options => {
+        const config = policyConfig();
+        const migration = config.snapshotMigrationConfigs[0];
+        await expect(new MigrationConfigTransformer().processFromObject({
+            ...config,
+            snapshotMigrationConfigs: [{
+                ...migration,
+                backfill: {...migration.backfill, documentBackfillConfig: options},
+            }],
+        })).rejects.toThrow(/documentBackfillConfig/);
     });
 
     it("preserves shared collection routing through every generated metadata and document phase", async () => {

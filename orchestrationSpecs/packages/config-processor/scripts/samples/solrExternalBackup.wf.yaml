@@ -27,4 +27,4 @@ snapshotMigrationConfigs:
     perSnapshotConfig:
       customerBackup:
         - metadataMigrationConfig: {}
-          documentBackfillConfig: { disableFailedDocumentStream: true }
+          documentBackfillConfig: { failedDocumentStream: { type: disabled } }

@@ -89,7 +89,7 @@ class Test0090SuccessiveSnapshotBackfills(MATestBase):
         }
         backfill = {
             "skipApproval": False,
-            "disableFailedDocumentStream": True,
+            "failedDocumentStream": {"type": "disabled"},
             "podReplicas": 2,
             "documentsPerBulkRequest": 1,
             "maxConnections": 4,

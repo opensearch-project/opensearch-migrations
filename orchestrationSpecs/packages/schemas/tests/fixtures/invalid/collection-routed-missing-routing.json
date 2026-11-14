@@ -42,7 +42,7 @@
           {
             "label": "docs",
             "metadataMigrationConfig": {},
-            "documentBackfillConfig": {}
+            "documentBackfillConfig": { "failedDocumentStream": { "type": "disabled" } }
           }
         ]
       }

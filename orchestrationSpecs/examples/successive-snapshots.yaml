@@ -23,7 +23,9 @@ snapshotMigrationConfigs:
       metadataMigrationConfig: {}
       documentBackfillConfig:
         indexAllowlist: [orders]
-        failedDocumentStreamS3Bucket: migration-failures
+        failedDocumentStream:
+          type: s3
+          bucket: migration-failures
       repeat:
         maxRuns: 3
         until:

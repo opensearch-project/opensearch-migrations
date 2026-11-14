@@ -23,7 +23,9 @@ snapshotMigrationConfigs:
       metadataMigrationConfig: {}
       documentBackfillConfig:
         indexAllowlist: [orders]
-        failedDocumentStreamS3Bucket: migration-failures
+        failedDocumentStream:
+          type: s3
+          bucket: migration-failures
       repeat:
         maxRuns: 3
         until:
@@ -33,9 +35,10 @@ snapshotMigrationConfigs:
 `repoName` refers to `sourceClusters.source.snapshotInfo.repos.migration`. No
 snapshot names or `perSnapshotConfig` entries are needed.
 
-Set `failedDocumentStreamS3Bucket` to record documents that cannot be written.
-Alternatively, explicitly set `disableFailedDocumentStream: true` to log and
-count failures without storing them. Configure exactly one of these options.
+Set `failedDocumentStream.type: s3` and provide a `bucket` to persist documents
+that cannot be written. To disable this stream, explicitly use
+`failedDocumentStream: {type: disabled}`. Every document backfill configuration
+must select a destination or disable the stream.
 
 - `maxRuns` includes the initial full backfill. Later rounds apply deltas.
   Without `until`, the workflow performs exactly that many rounds.
@@ -82,15 +85,21 @@ snapshotMigrationConfigs:
       baseline:
         - metadataMigrationConfig: {}
           documentBackfillConfig:
-            failedDocumentStreamS3Bucket: migration-failures
+            failedDocumentStream:
+              type: s3
+              bucket: migration-failures
       catchup:
         - metadataMigrationConfig: {}
           documentBackfillConfig:
-            failedDocumentStreamS3Bucket: migration-failures
+            failedDocumentStream:
+              type: s3
+              bucket: migration-failures
       final:
         - metadataMigrationConfig: {}
           documentBackfillConfig:
-            failedDocumentStreamS3Bucket: migration-failures
+            failedDocumentStream:
+              type: s3
+              bucket: migration-failures
 ```
 
 The labels must also exist in `sourceClusters.source.snapshotInfo.snapshots`.
