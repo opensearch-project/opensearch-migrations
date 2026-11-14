@@ -46,6 +46,9 @@ The Reindex-From-Snapshot and Replayer services are deployed (if enabled) by the
 
 Documents that fail terminally during a Reindex-from-Snapshot backfill are written to a failed document stream, which is durably persisted to S3. You can inspect it from the Migration Console. See [Failed Document Stream](failedDocumentStream.md).
 
+Replay result tuples can also be persisted to S3 and inspected from the Migration Console.
+See [Replay Tuple Output](tupleOutput.md).
+
 #### Shared Logs Volume
 
 In an AWS deployment, the Shared Logs Volume is an EFS volume that's mounted to the Migration Console task, as well as the Replayer task (if deployed).  In a Docker deployment, it's a shared volume between those containers. In both cases, logs are written to the volume from the Replayer (in the form of tuples) and processes on the Migration Console (specifically Metadata Migration). These logs can be accessed directly by the user (e.g. with shell commands `ls`, `cat`, `jq`, etc.) or, in the case of tuples, manipulated using Migration Console CLI commands.

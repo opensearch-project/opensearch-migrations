@@ -1,37 +1,60 @@
-# Replay tuple output
+# Replay Tuple Output
 
-Configure persisted replay result tuples under `traffic.replayers.<name>.replayerConfig.tupleOutput`.
-The destination uses the same `type: s3` or `type: disabled` choice as the failed-document stream.
-S3 is the supported object store; Azure Blob Storage and GCS destinations are not accepted.
+The traffic replayer writes one result tuple per replayed request, with the source request and response
+alongside the target's. Tuples can be persisted to S3 as gzip-compressed JSON lines and inspected from
+the Migration Console.
+
+## Inspecting from the Migration Console
+
+Run this from a Migration Console shell. When more than one replayer exists, add `--replayer <name>`
+to choose one.
+
+```
+console tuples show --limit 5 --pretty
+```
+
+## Configuration
+
+Set `tupleOutput.type` to `s3` to persist replay result tuples, or to `disabled` to use the configured
+tuple logger without S3 persistence. Omitting `tupleOutput` also uses the configured tuple logger.
+
+> **Upgrading:** the tuple output configuration under `replayerConfig` has changed. Replace
+> `tupleS3Bucket`, `tupleS3Prefix`, `tupleS3Region`, and `tupleS3Endpoint` with a `tupleOutput` object.
+> Set its `type` to `s3` and move the bucket, prefix, region, and endpoint into that object.
+> The former flat fields are no longer accepted.
+
+The destination is set under a replayer's `traffic.replayers.<name>.replayerConfig`:
 
 ```yaml
 replayerConfig:
   tupleOutput:
     type: s3
-    bucket: my-tuple-results
-    prefix: tuples/
+    bucket: my-tuple-results-bucket
     region: us-east-1
-    # endpoint: http://localhost:4566
-  tupleMaxBufferSeconds: 60
-  tupleMaxFileSizeMb: 256
-  tupleMaxPerFile: 0
 ```
 
-The bucket and region are required when `type` is `s3`. The prefix defaults to `tuples/`.
-The optional endpoint accepts an HTTP(S) URL. Tuple rotation settings belong to `replayerConfig`.
+or, to opt out:
 
-Omit `tupleOutput`, or select `tupleOutput: {type: disabled}`, to use the configured tuple logger
-without S3 persistence. This differs from `failedDocumentStream`, where an explicit choice is required.
+```yaml
+replayerConfig:
+  tupleOutput:
+    type: disabled
+```
 
-Replace the former flat user fields as follows:
+Changing the tuple output bucket on a running replay needs `workflow approve change`.
 
-| Former field | Replacement |
-|---|---|
-| `tupleS3Bucket` | `tupleOutput.bucket` with `tupleOutput.type: s3` |
-| `tupleS3Region` | `tupleOutput.region` |
-| `tupleS3Prefix` | `tupleOutput.prefix` |
-| `tupleS3Endpoint` | `tupleOutput.endpoint` |
+| Option                  | Default   | Description                                                       |
+| ----------------------- | --------- | ----------------------------------------------------------------- |
+| `tupleOutput.type`      | none      | Required when `tupleOutput` is set: `s3` or `disabled`.           |
+| `tupleOutput.bucket`    | none      | Required when `type` is `s3`; bucket for replay result tuples.    |
+| `tupleOutput.prefix`    | `tuples/` | S3 key prefix for tuple objects.                                  |
+| `tupleOutput.region`    | none      | Required when `type` is `s3`; region for the bucket.              |
+| `tupleOutput.endpoint`  | none      | HTTP(S) endpoint override (for example, LocalStack).              |
+| `tupleMaxBufferSeconds` | `60`      | Max seconds before rotating and uploading a tuple file.           |
+| `tupleMaxFileSizeMb`    | `256`     | Max uncompressed file size in MB before rotating to a new object. |
+| `tupleMaxPerFile`       | `0`       | Max tuples per object. `0` disables the count limit.              |
 
-The config processor resolves the destination into the existing flat workflow, TrafficReplay CRD,
-and replayer options. Direct replayer CLI flags and console tuple inspection keep their existing
-interfaces. Destination changes retain the existing workflow approval requirements.
+The rotation settings belong directly to `replayerConfig`, alongside `tupleOutput`.
+The bucket and region must be set explicitly for an S3 destination.
+
+Tuple persistence supports S3. Native GCS and Azure Blob Storage destinations are not accepted.

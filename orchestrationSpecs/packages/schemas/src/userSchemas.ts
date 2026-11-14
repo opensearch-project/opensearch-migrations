@@ -812,20 +812,20 @@ export const TUPLE_OUTPUT_CONFIG = z.discriminatedUnion("type", [
         type: z.literal("s3")
             .describe("Persist replay result tuples to S3."),
         bucket: z.string().trim().min(1)
-            .describe("S3 bucket for replay result tuples."),
+            .describe("S3 bucket where replay result tuples are recorded."),
         prefix: z.string().default("tuples/").optional()
-            .describe("S3 key prefix for tuple objects."),
+            .describe("S3 key prefix for tuple objects. Defaults to 'tuples/'."),
         region: z.string().trim().min(1)
-            .describe("AWS region of the tuple output bucket. Must be specified explicitly."),
+            .describe("AWS region for the S3 bucket. Must be set explicitly for tuple output."),
         endpoint: z.string().regex(new RegExp(OPTIONAL_HTTP_ENDPOINT_PATTERN)).default("").optional()
-            .describe("Optional HTTP(S) endpoint override for tuple uploads."),
+            .describe("Optional S3 endpoint override (for example, LocalStack). Must be an HTTP(S) URL."),
     }).strict(),
     z.object({
         type: z.literal("disabled")
-            .describe("Disable S3 tuple persistence. Tuples continue to use the configured tuple logger."),
+            .describe("Run without persisting replay result tuples to S3. Tuples continue to use the configured tuple logger."),
     }).strict(),
-]).describe("Destination for persisted replay result tuples. Select S3 storage or disable S3 persistence. " +
-    "Omitting tupleOutput retains the existing tuple logger.");
+]).describe("Optional destination for replay result tuples. Select S3 storage or explicitly disable S3 " +
+    "persistence. Omit tupleOutput to use the configured tuple logger.");
 
 export const USER_REPLAYER_PROCESS_OPTIONS = withOtelExportOptions(z.object({
     kafkaTrafficEnableMSKAuth: z.boolean().default(false).optional()

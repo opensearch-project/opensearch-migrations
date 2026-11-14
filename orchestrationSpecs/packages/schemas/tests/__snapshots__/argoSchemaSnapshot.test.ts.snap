@@ -7415,23 +7415,23 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "bucket": {
                             "type": "string",
                             "minLength": 1,
-                            "description": "S3 bucket for replay result tuples."
+                            "description": "S3 bucket where replay result tuples are recorded."
                           },
                           "prefix": {
                             "type": "string",
                             "default": "tuples/",
-                            "description": "S3 key prefix for tuple objects."
+                            "description": "S3 key prefix for tuple objects. Defaults to 'tuples/'."
                           },
                           "region": {
                             "type": "string",
                             "minLength": 1,
-                            "description": "AWS region of the tuple output bucket. Must be specified explicitly."
+                            "description": "AWS region for the S3 bucket. Must be set explicitly for tuple output."
                           },
                           "endpoint": {
                             "type": "string",
                             "pattern": "^(?:https?:\\\\/\\\\/[^:\\\\/\\\\s]+(?::(?:[1-9]\\\\d{0,3}|[1-5]\\\\d{4}|6[0-4]\\\\d{3}|65[0-4]\\\\d{2}|655[0-2]\\\\d|6553[0-5]))?(?:\\\\/)?)?$",
                             "default": "",
-                            "description": "Optional HTTP(S) endpoint override for tuple uploads."
+                            "description": "Optional S3 endpoint override (for example, LocalStack). Must be an HTTP(S) URL."
                           }
                         },
                         "required": [
@@ -7449,7 +7449,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                             "enum": [
                               "disabled"
                             ],
-                            "description": "Disable S3 tuple persistence. Tuples continue to use the configured tuple logger."
+                            "description": "Run without persisting replay result tuples to S3. Tuples continue to use the configured tuple logger."
                           }
                         },
                         "required": [
@@ -7458,7 +7458,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "additionalProperties": false
                       }
                     ],
-                    "description": "Destination for persisted replay result tuples. Select S3 storage or disable S3 persistence. Omitting tupleOutput retains the existing tuple logger.",
+                    "description": "Optional destination for replay result tuples. Select S3 storage or explicitly disable S3 persistence. Omit tupleOutput to use the configured tuple logger.",
                     "changeRestriction": "gated"
                   },
                   "tupleMaxBufferSeconds": {
