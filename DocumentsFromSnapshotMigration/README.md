@@ -98,7 +98,12 @@ To see the default shard size, use the `--help` CLI option:
 | --target-password                 | The password for target cluster authentication                                                                                                           |
 | --target-aws-region               | The AWS region for the target cluster. Required if using SigV4 authentication                                                                            |
 | --target-aws-service-signing-name | The AWS service signing name (e.g. 'es' for Amazon OpenSearch Service, 'aoss' for Amazon OpenSearch Serverless). Required if using SigV4 authentication  |
+<<<<<<< HEAD
 | --documents-size-per-bulk-request | Optional. Maximum bulk request body size in bytes, including action metadata and newlines. A document exceeding the limit by itself is sent alone. 5–15 MB works well; keep it at or under the largest request the target accepts: its `http.max_content_length`, or a smaller limit set in front of it. Default: 10 MiB |
+=======
+| --collection-routing              | Optional. JSON object mapping source indices to Serverless collections, e.g. '{"staticCollectionRouting": [{"sourceIndex": "shared-config", "collection": "common"}], "regexCollectionRouting": [{"sourceIndex": "(.+)-\\d{4}", "collection": "$1"}]}'. Requires SigV4 auth with service `aoss` |
+| --documents-size-per-bulk-request | Optional. Maximum bulk request body size in bytes, including action metadata and newlines. A document exceeding the limit by itself is sent alone. Default: 10 MiB |
+>>>>>>> 9286873def0859f36e6130924db91513861af4ed
 | --allowed-doc-exception-types     | Optional. Comma-separated list of document-level exception types to treat as successful operations. Enables idempotent migrations by allowing specific errors (e.g., 'version_conflict_engine_exception') to be treated as success. Default: none |
 
 ## Advanced Arguments

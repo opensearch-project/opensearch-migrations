@@ -125,9 +125,11 @@ function stableEqual(left: unknown, right: unknown): boolean {
 const CREATE_SNAPSHOT_EMPTY_STRING_DEFAULT_FIELDS =
     ["otelTraceCollectorEndpoint", "otelMetricsCollectorEndpoint"] as const;
 const METADATA_EMPTY_STRING_DEFAULT_FIELDS =
-    ["otelTraceCollectorEndpoint", "otelMetricsCollectorEndpoint", "transformerConfig", "transformerConfigFile"] as const;
+    ["otelTraceCollectorEndpoint", "otelMetricsCollectorEndpoint", "transformerConfig", "transformerConfigFile",
+        "collectionRouting"] as const;
 const DOCUMENT_BACKFILL_EMPTY_STRING_DEFAULT_FIELDS =
-    ["otelTraceCollectorEndpoint", "otelMetricsCollectorEndpoint", "docTransformerConfig", "docTransformerConfigFile"] as const;
+    ["otelTraceCollectorEndpoint", "otelMetricsCollectorEndpoint", "docTransformerConfig", "docTransformerConfigFile",
+        "collectionRouting"] as const;
 
 function withEmptyStringDefaults(
     value: Record<string, unknown> | undefined,

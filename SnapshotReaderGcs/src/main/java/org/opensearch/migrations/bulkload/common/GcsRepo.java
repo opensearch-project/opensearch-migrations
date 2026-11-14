@@ -2,6 +2,7 @@ package org.opensearch.migrations.bulkload.common;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -136,11 +137,25 @@ public class GcsRepo implements SourceRepo {
         log.atInfo()
             .setMessage("Downloading file from GCS: {} to {}").addArgument(gcsUri.uri).addArgument(localPath).log();
 
-        Blob blob = storageClient.get(BlobId.of(gcsUri.bucketName, gcsUri.key));
-        if (blob == null) {
-            throw new CouldNotReadFromGcs(gcsUri.bucketName, gcsUri.key);
+        // Open the file here so local I/O errors are not wrapped as StorageException by the client.
+        try (OutputStream out = Files.newOutputStream(localPath)) {
+            storageClient.downloadTo(BlobId.of(gcsUri.bucketName, gcsUri.key), out);
+        } catch (StorageException e) {
+            deletePartialDownload(localPath);
+            throw new CouldNotReadFromGcs(gcsUri.bucketName, gcsUri.key, e);
+        } catch (IOException e) {
+            deletePartialDownload(localPath);
+            throw new CantWriteLocalFile(localPath, e);
         }
-        blob.downloadTo(localPath);
+    }
+
+    // A file left behind would be treated as already downloaded on the next read.
+    private static void deletePartialDownload(Path localPath) {
+        try {
+            Files.deleteIfExists(localPath);
+        } catch (IOException e) {
+            log.atWarn().setCause(e).setMessage("Failed to delete partial download: {}").addArgument(localPath).log();
+        }
     }
 
     protected GcsUri makeGcsUri(Path filePath) {
@@ -239,9 +254,15 @@ public class GcsRepo implements SourceRepo {
         }
     }
 
+    public static class CantWriteLocalFile extends RfsException {
+        public CantWriteLocalFile(Path localPath, Throwable cause) {
+            super("Failed to write the GCS download to a local file: " + localPath, cause);
+        }
+    }
+
     public static class CouldNotReadFromGcs extends RfsException implements SnapshotReadFailure {
-        public CouldNotReadFromGcs(String bucket, String key) {
-            super("Failed to read object from GCS bucket: " + bucket + ", key: " + key);
+        public CouldNotReadFromGcs(String bucket, String key, Throwable cause) {
+            super("Failed to read object from GCS bucket: " + bucket + ", key: " + key, cause);
         }
     }
 }

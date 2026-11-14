@@ -201,8 +201,12 @@ exports[`resolved migration resources extracts resolved resource parameters from
       ],
       "documentBackfillAllowLooseVersionMatching": true,
       "documentBackfillAllowedDocExceptionTypes": [],
+<<<<<<< HEAD
       "documentBackfillBulkRequestTraceMaxBytes": 1048576,
       "documentBackfillBulkResponseTimeout": "PT310S",
+=======
+      "documentBackfillCollectionRouting": "",
+>>>>>>> 9286873def0859f36e6130924db91513861af4ed
       "documentBackfillCoordinatorRetryInitialDelayMs": 1000,
       "documentBackfillCoordinatorRetryMaxDelayMs": 64000,
       "documentBackfillCoordinatorRetryMaxRetries": 7,
@@ -254,6 +258,7 @@ exports[`resolved migration resources extracts resolved resource parameters from
       "externalSnapshotName": "",
       "metadataMigrationAllowLooseVersionMatching": true,
       "metadataMigrationClusterAwarenessAttributes": 1,
+      "metadataMigrationCollectionRouting": "",
       "metadataMigrationComponentTemplateAllowlist": [],
       "metadataMigrationEnableSourcelessMigrations": false,
       "metadataMigrationFileSourceVolumeMounts": [],

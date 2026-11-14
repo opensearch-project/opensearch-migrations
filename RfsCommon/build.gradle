@@ -53,6 +53,8 @@ dependencies {
     implementation libs.jackson.core
     implementation libs.jackson.annotations
     implementation libs.jackson.dataformat.smile
+    implementation libs.jackson.dataformat.cbor
+    implementation libs.jackson.dataformat.yaml
 
     compileOnly libs.jcommander
     implementation libs.slf4j.api

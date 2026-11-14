@@ -11,8 +11,10 @@ from console_link.models.cluster import AuthMethod, Cluster, HttpMethod
 from console_link.models.command_result import CommandResult
 from console_link.models.factories import (UnsupportedSnapshotError,
                                            get_snapshot)
-from console_link.models.snapshot import (FailedToCreateSnapshot, FileSystemSnapshot, GcsSnapshot,
-                                          S3Snapshot, Snapshot)
+from console_link.models.snapshot import (AzureSnapshot, AzureSnapshotSource, FailedToCreateSnapshot,
+                                          FileSystemSnapshot, FileSystemSnapshotSource, GcsSnapshot,
+                                          GcsSnapshotSource, S3Snapshot, S3SnapshotSource, Snapshot,
+                                          SnapshotConfig)
 from tests.utils import create_valid_cluster
 
 mock_snapshot_api_response = {
@@ -88,6 +90,17 @@ def gcs_snapshot(mock_cluster):
     return GcsSnapshot(config, mock_cluster)
 
 
+@pytest.fixture
+def azure_snapshot(mock_cluster):
+    config = {
+        "snapshot_name": "test_snapshot",
+        "azure": {
+            "repo_uri": "azure://testaccount/test-container/test-path",
+        }
+    }
+    return AzureSnapshot(config, mock_cluster)
+
+
 def snapshot_404_response():
     mock_response = mock.Mock(spec=Response)
     mock_response.status_code = 404
@@ -151,7 +164,7 @@ def snapshot_delete_response():
     return mock_response
 
 
-@pytest.mark.parametrize("snapshot_fixture", ['s3_snapshot', 'fs_snapshot', 'gcs_snapshot'])
+@pytest.mark.parametrize("snapshot_fixture", ['s3_snapshot', 'fs_snapshot', 'gcs_snapshot', 'azure_snapshot'])
 def test_snapshot_status(request, snapshot_fixture):
     snapshot = request.getfixturevalue(snapshot_fixture)
     source_cluster = snapshot.source_cluster
@@ -169,7 +182,7 @@ def test_snapshot_status(request, snapshot_fixture):
     )
 
 
-@pytest.mark.parametrize("snapshot_fixture", ['s3_snapshot', 'fs_snapshot', 'gcs_snapshot'])
+@pytest.mark.parametrize("snapshot_fixture", ['s3_snapshot', 'fs_snapshot', 'gcs_snapshot', 'azure_snapshot'])
 def test_snapshot_status_full(request, snapshot_fixture):
     snapshot = request.getfixturevalue(snapshot_fixture)
     source_cluster = snapshot.source_cluster
@@ -391,6 +404,142 @@ def test_gcs_snapshot_create_calls_subprocess_run_with_correct_args(mocker):
                                   "--no-wait",
                                   "--max-snapshot-rate-mb-per-node", str(max_snapshot_rate),
                                   ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
+
+
+def test_azure_snapshot_init_succeeds():
+    config = {
+        "snapshot": {
+            "snapshot_name": "reindex_from_snapshot",
+            "azure": {
+                "repo_uri": "azure://myaccount/my-container/path",
+            },
+        }
+    }
+    snapshot = AzureSnapshot(config['snapshot'], create_valid_cluster())
+    assert isinstance(snapshot, Snapshot)
+    assert snapshot.azure_repo_uri == "azure://myaccount/my-container/path"
+
+
+def test_get_snapshot_for_azure_config():
+    config = {
+        "snapshot": {
+            "snapshot_name": "reindex_from_snapshot",
+            "azure": {
+                "repo_uri": "azure://myaccount/my-container/path",
+            },
+        }
+    }
+    snapshot = get_snapshot(config["snapshot"], create_valid_cluster())
+    assert isinstance(snapshot, AzureSnapshot)
+
+
+def test_azure_snapshot_rejects_endpoint_in_config():
+    # CreateSnapshot registers the repository on the source cluster, and repository-azure
+    # has no repository-level endpoint setting, so an endpoint on an azure:// repo would be
+    # silently dropped. The azure config block therefore has no `endpoint` field and
+    # supplying one must be rejected rather than accepted and ignored.
+    config = {
+        "snapshot": {
+            "snapshot_name": "reindex_from_snapshot",
+            "azure": {
+                "repo_uri": "azure://myaccount/my-container/path",
+                "endpoint": "http://azurite:10000",
+            },
+        }
+    }
+    with pytest.raises(ValueError) as excinfo:
+        AzureSnapshot(config['snapshot'], create_valid_cluster())
+    # args[0] is a constant message, so assert on the cerberus error dict in args[1]. Otherwise
+    # this passes for any validation failure, including the azure block going missing entirely.
+    assert 'endpoint' in str(excinfo.value.args[1])
+
+
+def test_azure_snapshot_create_calls_subprocess_run(mocker):
+    config = {
+        "snapshot": {
+            "otel_trace_endpoint": "http://otel-traces:1111",
+            "otel_metrics_endpoint": "http://otel-metrics:2222",
+            "snapshot_name": "reindex_from_snapshot",
+            "azure": {
+                "repo_uri": "azure://myaccount/my-container/path",
+            },
+        }
+    }
+    source = create_valid_cluster(auth_type=AuthMethod.NO_AUTH)
+    snapshot = AzureSnapshot(config["snapshot"], source)
+
+    mocker.patch("sys.stdout.write")
+    mocker.patch("sys.stderr.write")
+    mock_run = mocker.patch("subprocess.run")
+    snapshot.create()
+    mock_run.assert_called_once()
+
+
+def test_azure_snapshot_create_calls_subprocess_run_with_correct_args(mocker):
+    config = {
+        "snapshot": {
+            "otel_trace_endpoint": "http://otel-traces:1111",
+            "otel_metrics_endpoint": "http://otel-metrics:2222",
+            "snapshot_name": "reindex_from_snapshot",
+            "azure": {
+                "repo_uri": "azure://myaccount/my-container/path",
+            },
+        }
+    }
+    max_snapshot_rate = 100
+    source = create_valid_cluster(auth_type=AuthMethod.NO_AUTH)
+    snapshot = AzureSnapshot(config["snapshot"], source)
+
+    mocker.patch("sys.stdout.write")
+    mocker.patch("sys.stderr.write")
+    mock = mocker.patch("subprocess.run")
+    snapshot.create(max_snapshot_rate_mb_per_node=max_snapshot_rate)
+
+    mock.assert_called_once_with(["/root/createSnapshot/bin/CreateSnapshot",
+                                  "--snapshot-name", config["snapshot"]["snapshot_name"],
+                                  '--snapshot-repo-name', snapshot.snapshot_repo_name,
+                                  "--source-host", source.endpoint,
+                                  "--source-insecure",
+                                  "--otel-trace-collector-endpoint", config["snapshot"]["otel_trace_endpoint"],
+                                  "--otel-metrics-collector-endpoint", config["snapshot"]["otel_metrics_endpoint"],
+                                  "--repo-uri", config["snapshot"]["azure"]["repo_uri"],
+                                  "--no-wait",
+                                  "--max-snapshot-rate-mb-per-node", str(max_snapshot_rate),
+                                  ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
+    # CreateSnapshot ignores --endpoint for azure:// repos, so it is never emitted here.
+    assert "--endpoint" not in mock.call_args.args[0]
+
+
+def test_azure_snapshot_create_honors_configured_solr_collections(mocker):
+    # AzureSnapshot must honor an explicitly configured solr_collections/solr_topology
+    # instead of always querying the cluster, matching S3Snapshot and FileSystemSnapshot.
+    # This is parity, not a working path: SolrBackupStrategy.validateSolrRepoSupported rejects
+    # azure:// for Solr sources, so the command built here would fail at argument validation.
+    # The branch exists so that lifting that restriction does not also require fixing this
+    # method, the way GcsSnapshot.create would need fixing today.
+    config = {
+        "snapshot": {
+            "snapshot_name": "reindex_from_snapshot",
+            "solr_collections": ["books", "movies"],
+            "solr_topology": "standalone",
+            "azure": {
+                "repo_uri": "azure://myaccount/my-container/path",
+            },
+        }
+    }
+    source = create_valid_cluster(auth_type=AuthMethod.NO_AUTH, version="SOLR_8_11")
+    snapshot = AzureSnapshot(config["snapshot"], source)
+    collection_lookup = mocker.patch.object(snapshot, "_get_solr_collections")
+
+    mocker.patch("sys.stdout.write")
+    mocker.patch("sys.stderr.write")
+    mock = mocker.patch("subprocess.run")
+    snapshot.create()
+
+    collection_lookup.assert_not_called()
+    actual_args = mock.call_args.args[0]
+    assert actual_args[actual_args.index("--solr-collections") + 1] == "books,movies"
+    assert actual_args[actual_args.index("--solr-topology") + 1] == "standalone"
 
 
 def test_fs_snapshot_create_calls_subprocess_run_with_correct_args(mocker):
@@ -728,7 +877,7 @@ def test_fs_snapshot_create_works_for_clusters_with_sigv4(mocker):
                                   ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
 
 
-@pytest.mark.parametrize("snapshot_fixture", ['s3_snapshot', 'fs_snapshot', 'gcs_snapshot'])
+@pytest.mark.parametrize("snapshot_fixture", ['s3_snapshot', 'fs_snapshot', 'gcs_snapshot', 'azure_snapshot'])
 def test_snapshot_delete(request, snapshot_fixture):
     snapshot = request.getfixturevalue(snapshot_fixture)
     source_cluster = snapshot.source_cluster
@@ -746,7 +895,7 @@ def test_snapshot_delete(request, snapshot_fixture):
     ])
 
 
-@pytest.mark.parametrize("snapshot_fixture", ['s3_snapshot', 'fs_snapshot', 'gcs_snapshot'])
+@pytest.mark.parametrize("snapshot_fixture", ['s3_snapshot', 'fs_snapshot', 'gcs_snapshot', 'azure_snapshot'])
 def test_snapshot_delete_all_snapshots_single_snapshot(request, snapshot_fixture):
     snapshot = request.getfixturevalue(snapshot_fixture)
     source_cluster = snapshot.source_cluster
@@ -766,7 +915,7 @@ def test_snapshot_delete_all_snapshots_single_snapshot(request, snapshot_fixture
     ])
 
 
-@pytest.mark.parametrize("snapshot_fixture", ['s3_snapshot', 'fs_snapshot', 'gcs_snapshot'])
+@pytest.mark.parametrize("snapshot_fixture", ['s3_snapshot', 'fs_snapshot', 'gcs_snapshot', 'azure_snapshot'])
 def test_snapshot_delete_all_snapshots_multiple_snapshots(request, snapshot_fixture, caplog):
     snapshot = request.getfixturevalue(snapshot_fixture)
     source_cluster = snapshot.source_cluster
@@ -795,7 +944,7 @@ def test_snapshot_delete_all_snapshots_multiple_snapshots(request, snapshot_fixt
     ])
 
 
-@pytest.mark.parametrize("snapshot_fixture", ['s3_snapshot', 'fs_snapshot', 'gcs_snapshot'])
+@pytest.mark.parametrize("snapshot_fixture", ['s3_snapshot', 'fs_snapshot', 'gcs_snapshot', 'azure_snapshot'])
 def test_snapshot_delete_repo(request, snapshot_fixture):
     snapshot = request.getfixturevalue(snapshot_fixture)
     source_cluster = snapshot.source_cluster
@@ -806,7 +955,7 @@ def test_snapshot_delete_repo(request, snapshot_fixture):
                                                raise_error=True)
 
 
-@pytest.mark.parametrize("snapshot_fixture", ['s3_snapshot', 'fs_snapshot', 'gcs_snapshot'])
+@pytest.mark.parametrize("snapshot_fixture", ['s3_snapshot', 'fs_snapshot', 'gcs_snapshot', 'azure_snapshot'])
 def test_snapshot_create_catches_error(mocker, request, snapshot_fixture):
     snapshot = request.getfixturevalue(snapshot_fixture)
     fake_command = ["/root/createSnapshot/bin/CreateSnapshot", "--snapshot_name=reindex_from_snapshot"]
@@ -819,7 +968,7 @@ def test_snapshot_create_catches_error(mocker, request, snapshot_fixture):
     mock.assert_called_once()
 
 
-@pytest.mark.parametrize("snapshot_fixture", ['s3_snapshot', 'fs_snapshot', 'gcs_snapshot'])
+@pytest.mark.parametrize("snapshot_fixture", ['s3_snapshot', 'fs_snapshot', 'gcs_snapshot', 'azure_snapshot'])
 def test_handling_extra_args(mocker, request, snapshot_fixture):
     snapshot = request.getfixturevalue(snapshot_fixture)
     mocker.patch("sys.stdout.write")
@@ -834,7 +983,7 @@ def test_handling_extra_args(mocker, request, snapshot_fixture):
     assert all([arg in mock.call_args.args[0] for arg in extra_args])
 
 
-@pytest.mark.parametrize("snapshot_fixture", ['s3_snapshot', 'fs_snapshot', 'gcs_snapshot'])
+@pytest.mark.parametrize("snapshot_fixture", ['s3_snapshot', 'fs_snapshot', 'gcs_snapshot', 'azure_snapshot'])
 def test_delete_all_snapshots_repository_missing(request, snapshot_fixture, caplog):
     snapshot = request.getfixturevalue(snapshot_fixture)
     source_cluster = snapshot.source_cluster
@@ -1088,3 +1237,33 @@ def test_solr_collections_discovery_uses_configured_context_path():
     source.call_api = fake_call_api
     assert snapshot._get_solr_collections() == ["products"]
     assert requested_paths == ["/tenant-a/solr/admin/collections?action=LIST&wt=json"]
+
+
+@pytest.mark.parametrize("source,expected_class", [
+    ({"type": "azure", "uri": "azure://myaccount/my-container/path"}, AzureSnapshotSource),
+    ({"type": "gcs", "uri": "gs://my-bucket/path"}, GcsSnapshotSource),
+    ({"type": "s3", "uri": "s3://my-bucket/path", "region": "us-east-1"}, S3SnapshotSource),
+    ({"type": "filesytem", "path": "/snapshots"}, FileSystemSnapshotSource),
+])
+def test_snapshot_config_source_resolves_to_the_tagged_member(source, expected_class):
+    # AzureSnapshotSource and GcsSnapshotSource declare identical fields, so the union has to
+    # discriminate on `type`. Left untagged it resolves structurally and an azure source comes
+    # back as a GcsSnapshotSource.
+    config = SnapshotConfig.model_validate({
+        "snapshot_name": "snapshot",
+        "repository_name": "repo",
+        "index_allow": [],
+        "source": source,
+    })
+    assert type(config.source) is expected_class
+
+
+def test_snapshot_config_rejects_unknown_source_type():
+    with pytest.raises(ValueError) as excinfo:
+        SnapshotConfig.model_validate({
+            "snapshot_name": "snapshot",
+            "repository_name": "repo",
+            "index_allow": [],
+            "source": {"type": "ftp", "uri": "ftp://host/path"},
+        })
+    assert "union_tag_invalid" in str(excinfo.value)

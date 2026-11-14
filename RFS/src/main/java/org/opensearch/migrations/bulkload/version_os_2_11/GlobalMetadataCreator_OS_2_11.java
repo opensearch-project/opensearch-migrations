@@ -166,6 +166,12 @@ public class GlobalMetadataCreator_OS_2_11 implements GlobalMetadataCreator {
                 return creationResult.failureType(CreationFailureType.SKIPPED_DUE_TO_FILTER).build();
             }
 
+            // Templates don't belong to one index, so a collection-routed target has no single collection for them
+            if (client.isCollectionRouted()) {
+                log.atWarn().setMessage("Template {} was skipped because the target is collection-routed").addArgument(templateName).log();
+                return creationResult.failureType(CreationFailureType.SKIPPED_ON_COLLECTION_ROUTED_TARGET).build();
+            }
+
             log.info("Creating {}: {}", templateType, templateName);
             try {
                 if (mode == MigrationMode.SIMULATE) {
