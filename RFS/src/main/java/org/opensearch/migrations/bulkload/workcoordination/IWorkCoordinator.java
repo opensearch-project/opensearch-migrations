@@ -81,8 +81,9 @@ public interface IWorkCoordinator extends AutoCloseable {
      * to work on it.  There is no way to extend a lease.  After the caller has completed the work,
      * completeWorkItem should be called.  If completeWorkItem isn't called and the lease expires, the
      * caller must ensure that no more work will be undertaken for this work item and the work item
-     * itself will be leased out to a future caller of acquireNextWorkItem.  Each subsequent time that
-     * a lease is acquired for a work item, the lease period will be doubled.
+     * itself will be leased out to a future caller of acquireNextWorkItem. After a timeout, the next
+     * lease period doubles up to the coordinator's configured limit. An early voluntary release
+     * preserves the duration that was appropriate when the lease was acquired.
      * @param leaseDuration
      * @return
      * @throws IOException
@@ -110,17 +111,35 @@ public interface IWorkCoordinator extends AutoCloseable {
         Supplier<IWorkCoordinationContexts.ICompleteWorkItemContext> contextSupplier
     ) throws IOException, InterruptedException;
 
+    enum LeaseReleaseReason {
+        EARLY_EXIT,
+        LEASE_TIMEOUT
+    }
+
     /**
      * Release the lease on a work item without marking it complete, so that another worker can
      * pick it up immediately.  Intended for the case where the current worker is shutting down
      * before any progress (i.e. no checkpoint cursor) has been made on the item — staying on the
      * lease until natural expiration would needlessly block the work.  This is a no-op if the
      * work item is already completed or if the lease has already rolled to a different worker.
-     * The lease exponent is intentionally left untouched: a release implies the work hasn't
-     * been done yet and the next acquirer should still benefit from any prior backoff signal.
+     *
+     * <p>This compatibility overload treats the release as an early voluntary exit.
+     */
+    default void releaseWorkItem(
+        String workItemId,
+        Supplier<IWorkCoordinationContexts.IReleaseWorkItemContext> contextSupplier
+    ) throws IOException, InterruptedException {
+        releaseWorkItem(workItemId, LeaseReleaseReason.EARLY_EXIT, contextSupplier);
+    }
+
+    /**
+     * Release the lease for {@code reason}. An early exit before expiration restores the exponent
+     * used for this acquisition. A lease timeout retains the acquisition's increase so the next
+     * worker receives a longer lease, up to the configured maximum.
      */
     void releaseWorkItem(
         String workItemId,
+        LeaseReleaseReason reason,
         Supplier<IWorkCoordinationContexts.IReleaseWorkItemContext> contextSupplier
     ) throws IOException, InterruptedException;
 

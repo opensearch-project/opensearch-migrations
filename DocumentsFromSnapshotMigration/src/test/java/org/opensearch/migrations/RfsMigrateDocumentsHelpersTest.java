@@ -798,6 +798,36 @@ class RfsMigrateDocumentsHelpersTest {
     // ---- executeCleanShutdownProcess --------------------------------------
 
     @Test
+    void shutdownWithoutProgressUsesEarlyReleaseSemantics() throws Exception {
+        var workItem = new IWorkCoordinator.WorkItemAndDuration.WorkItem("movies", 2, 0L);
+        var coordinator = mock(IWorkCoordinator.class);
+        var cleanShutdownCompleted = new java.util.concurrent.atomic.AtomicBoolean();
+
+        RfsMigrateDocuments.executeCleanShutdownProcess(
+            new java.util.concurrent.atomic.AtomicReference<>(
+                new IWorkCoordinator.WorkItemAndDuration(Instant.now().plusSeconds(60), workItem)
+            ),
+            new java.util.concurrent.atomic.AtomicReference<>(),
+            coordinator,
+            cleanShutdownCompleted,
+            new org.opensearch.migrations.bulkload.workcoordination.WorkItemTimeProvider(),
+            Duration.ofMinutes(1),
+            Duration.ofDays(1),
+            () -> null,
+            () -> null,
+            null,
+            (w, c) -> java.util.Map.of()
+        );
+
+        verify(coordinator).releaseWorkItem(
+            org.mockito.ArgumentMatchers.eq(workItem.toString()),
+            org.mockito.ArgumentMatchers.eq(IWorkCoordinator.LeaseReleaseReason.EARLY_EXIT),
+            any()
+        );
+        assertThat(cleanShutdownCompleted.get(), is(true));
+    }
+
+    @Test
     void shutdownSizesTheSuccessorsLeaseFromThisLeaseAndShardSetupTime() throws Exception {
         var initialLease = Duration.ofMinutes(1);
         // The lease had doubled six times (64 min) to fit a slow shard; setup this time took 30 s of it, under the

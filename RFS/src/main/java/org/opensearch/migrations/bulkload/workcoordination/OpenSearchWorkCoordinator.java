@@ -82,14 +82,49 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
     public static final String EXPIRATION_WINDOW_TEMPLATE = "{EXPIRATION_WINDOW}";
     public static final String MAX_EXPIRATION_WINDOW_TEMPLATE = "{MAX_EXPIRATION_WINDOW}";
     /**
-     * Painless fragment shared by both acquisition scripts: the lease doubles per prior acquisition
-     * ({@code 2^nextAcquisitionLeaseExponent * expirationWindow}), capped at {@code maxExpirationWindow} when that
-     * is positive. {@code leaseCapped} tells the caller not to grow the exponent any further.
+     * Painless fragment shared by both acquisition scripts. It doubles iteratively so a legacy
+     * exponent cannot overflow before the configured maximum is applied. The effective exponent
+     * is also recorded, repairing values larger than needed to reach the configured maximum.
      */
     private static final String LEASE_SECONDS_SCRIPT =
-        "      long leaseSeconds = ((long)Math.pow(2, ctx._source.nextAcquisitionLeaseExponent)) * params.expirationWindow;"
-            + "      boolean leaseCapped = params.maxExpirationWindow > 0 && leaseSeconds >= params.maxExpirationWindow;"
-            + "      if (leaseCapped) { leaseSeconds = params.maxExpirationWindow; }";
+        "      long requestedLeaseExponent = ctx._source.nextAcquisitionLeaseExponent == null"
+            + "          ? 0L : (long)ctx._source.nextAcquisitionLeaseExponent;"
+            + "      requestedLeaseExponent = requestedLeaseExponent < 0 ? 0 : requestedLeaseExponent;"
+            + "      long leaseExponent = 0L;"
+            + "      long leaseSeconds = params.expirationWindow;"
+            + "      if (leaseSeconds < 0) {"
+            + "        throw new IllegalArgumentException(\\\"Lease duration must not be negative\\\");"
+            + "      }"
+            + "      long maxLeaseSeconds = params.maxExpirationWindow;"
+            + "      boolean hasLeaseCap = maxLeaseSeconds > 0;"
+            + "      boolean leaseCapped = hasLeaseCap && leaseSeconds >= maxLeaseSeconds;"
+            + "      if (leaseCapped) { leaseSeconds = maxLeaseSeconds; }"
+            + "      while (leaseExponent < requestedLeaseExponent && !leaseCapped && leaseSeconds > 0) {"
+            + "        if (hasLeaseCap && leaseSeconds > maxLeaseSeconds / 2) {"
+            + "          leaseSeconds = maxLeaseSeconds;"
+            + "          leaseExponent += 1;"
+            + "          leaseCapped = true;"
+            + "        } else {"
+            + "          if (leaseSeconds > 4611686018427387903L) {"
+            + "            throw new IllegalArgumentException("
+            + "\\\"Lease duration overflow; configure maxLeaseDuration\\\");"
+            + "          }"
+            + "          leaseSeconds *= 2;"
+            + "          leaseExponent += 1;"
+            + "          if (hasLeaseCap && leaseSeconds >= maxLeaseSeconds) {"
+            + "            leaseSeconds = maxLeaseSeconds;"
+            + "            leaseCapped = true;"
+            + "          }"
+            + "        }"
+            + "      }"
+            + "      if (leaseSeconds > 9223372036854775807L - params.clientTimestamp) {"
+            + "        throw new IllegalArgumentException("
+            + "\\\"Lease expiration overflow; reduce maxLeaseDuration\\\");"
+            + "      }";
+    private static final String RECORD_LEASE_EXPONENT_SCRIPT =
+        "          ctx._source.acquisitionLeaseExponent = leaseExponent;"
+            + "          ctx._source.nextAcquisitionLeaseExponent = leaseCapped"
+            + "              ? leaseExponent : leaseExponent + 1;";
     public static final String CLOCK_DEVIATION_SECONDS_THRESHOLD_TEMPLATE = "{CLOCK_DEVIATION_SECONDS_THRESHOLD}";
     public static final String OLD_EXPIRATION_THRESHOLD_TEMPLATE = "{OLD_EXPIRATION_THRESHOLD}";
     public static final String SUCCESSOR_WORK_ITEM_IDS_TEMPLATE = "{SUCCESSOR_WORK_ITEM_IDS}";
@@ -207,9 +242,9 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
     }
 
     /**
-     * Cap every lease at {@code maxLeaseDuration} (null or zero: no cap). A lease doubles on each acquisition of
-     * an expired work item; once the doubled lease would reach the cap it is set to the cap and the work item's
-     * exponent stops growing.
+     * Cap every lease at {@code maxLeaseDuration} (null or zero: no cap). A lease doubles on each
+     * acquisition of an expired work item; once the doubled lease would reach the cap it is set to
+     * the cap and the work item's exponent stops growing.
      *
      * <p>This changes only how a new expiration is computed, not what the working-state documents hold, so
      * {@link #SCRIPT_VERSION} is unchanged and workers with and without the cap can share a coordinator index.
@@ -439,7 +474,7 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
             "                     ctx._source." + EXPIRATION_FIELD_NAME + " < newExpiration) {" +      // sanity check
             "            ctx._source." + EXPIRATION_FIELD_NAME + " = newExpiration;"
             + "          ctx._source." + LEASE_HOLDER_ID_FIELD_NAME + " = params.workerId;"
-            + "          if (!leaseCapped) { ctx._source.nextAcquisitionLeaseExponent += 1; }"
+            + RECORD_LEASE_EXPONENT_SCRIPT
             + "        } else {"
             + "          ctx.op = \\\"noop\\\";"
             + "        }"
@@ -810,6 +845,7 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
     @Override
     public void releaseWorkItem(
         String workItemId,
+        LeaseReleaseReason reason,
         Supplier<IWorkCoordinationContexts.IReleaseWorkItemContext> contextSupplier
     ) throws InterruptedException {
         try (var ctx = contextSupplier.get()) {
@@ -818,7 +854,7 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
             // retry fails — the lease will still expire naturally.  Using the same retry shape
             // as completeWorkItem keeps behavior consistent under coordinator-side load.
             retryWithExponentialBackoff(
-                () -> releaseWorkItemWithoutRetry(workItemId),
+                () -> releaseWorkItemWithoutRetry(workItemId, reason),
                 completionRetryConfig.maxRetries(),
                 completionRetryConfig.initialDelayMs(),
                 completionRetryConfig.maxDelayMs(),
@@ -833,19 +869,22 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
         }
     }
 
-    private void releaseWorkItemWithoutRetry(String workItemId) throws IOException {
+    private void releaseWorkItemWithoutRetry(String workItemId, LeaseReleaseReason reason) throws IOException {
         // Painless script:
         //   - throws on scriptVersion mismatch (matches the rest of the coordinator contract)
         //   - no-op when the work is already completed (don't clobber a completion)
         //   - no-op when the lease has rolled to another worker (don't clobber the new owner)
         //   - otherwise: clear expiration to 0 and leaseHolderId to null so the next
-        //     acquireNextWorkItem call can pick this item up immediately.  We intentionally
-        //     leave nextAcquisitionLeaseExponent as-is — releasing the lease means the work
-        //     hasn't been done, so any prior bump in the exponent is still meaningful.
+        //     acquireNextWorkItem call can pick this item up immediately.
+        // Restore the acquisition's exponent only on an early exit before expiration. Storing
+        // it explicitly preserves prior timeout increases, including at the saturation boundary.
+        // Timeout releases and late callbacks retain the increase. The ownership check makes a
+        // repeated release a no-op after the first clears the owner.
         final var releaseLeaseBodyTemplate = "{\n"
             + "  \"script\": {\n"
             + "    \"lang\": \"painless\",\n"
             + "    \"params\": { \n"
+            + "      \"earlyExit\": " + (reason == LeaseReleaseReason.EARLY_EXIT) + ",\n"
             + "      \"workerId\": \"" + WORKER_ID_TEMPLATE + "\"\n"
             + "    },\n"
             + "    \"source\": \""
@@ -857,6 +896,11 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
             + "      } else if (ctx._source." + LEASE_HOLDER_ID_FIELD_NAME + " != params.workerId) {"
             + "        ctx.op = \\\"noop\\\";"
             + "      } else {"
+            + "        if (params.earlyExit && ctx._source." + EXPIRATION_FIELD_NAME
+            + " > System.currentTimeMillis() / 1000"
+            + "            && ctx._source.acquisitionLeaseExponent != null) {"
+            + "          ctx._source.nextAcquisitionLeaseExponent = ctx._source.acquisitionLeaseExponent;"
+            + "        }"
             + "        ctx._source." + EXPIRATION_FIELD_NAME + " = 0;"
             + "        ctx._source." + LEASE_HOLDER_ID_FIELD_NAME + " = null;"
             + "      }"
@@ -991,7 +1035,7 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
             "          ctx._source." + EXPIRATION_FIELD_NAME + " < newExpiration) {" +        // sanity check
             "        ctx._source." + EXPIRATION_FIELD_NAME + " = newExpiration;"
             + "        ctx._source." + LEASE_HOLDER_ID_FIELD_NAME + " = params.workerId;"
-            + "        if (!leaseCapped) { ctx._source.nextAcquisitionLeaseExponent += 1; }"
+            + RECORD_LEASE_EXPONENT_SCRIPT
             + "      } else {"
             + "        ctx.op = \\\"noop\\\";"
             + "      }"
@@ -1552,4 +1596,5 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
             }
         }
     }
+
 }
