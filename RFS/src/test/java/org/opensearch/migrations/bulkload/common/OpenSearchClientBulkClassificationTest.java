@@ -292,6 +292,8 @@ class OpenSearchClientBulkClassificationTest {
             BulkRequestGenerator.bulkItemResponse(true, List.of(BulkRequestGenerator.itemEntryFailure("a"))))));
         assertEquals(AdaptiveLimit.Signal.OTHER_FAILURE,
             OpenSearchClient.limitSignal(new HttpResponse(503, "", Map.of(), "")));
+        assertEquals(AdaptiveLimit.Signal.TIMEOUT,
+            OpenSearchClient.limitSignal(new HttpResponse(504, "", Map.of(), "")));
         assertEquals(AdaptiveLimit.Signal.TIMEOUT, OpenSearchClient.limitSignal(
             new OpenSearchClient.NoResponseException(io.netty.handler.timeout.ReadTimeoutException.INSTANCE)));
         assertEquals(AdaptiveLimit.Signal.OTHER_FAILURE, OpenSearchClient.limitSignal(

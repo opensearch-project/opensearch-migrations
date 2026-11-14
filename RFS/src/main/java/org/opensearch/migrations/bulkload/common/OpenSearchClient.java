@@ -858,13 +858,15 @@ public abstract class OpenSearchClient {
                 }
                 traceRequest(indexName, attempt, pendingOps.size(), bodyBytes, sentBytes.length, gzipBulkBodies());
                 return postBulkRequest(indexName, sentBytes, context)
-                    .doOnSuccess(response -> {
+                    .map(response -> {
                         totals.lastAttemptEndNanos = System.nanoTime();
                         long elapsed = System.nanoTime() - start;
                         totals.durationNanos += elapsed;
                         traceResponse(indexName, attempt, response, elapsed);
-                        bulkFlowMetrics.onAttempt(attemptOutcome(response), attempt > 1,
+                        var assessed = assessResponse(response);
+                        bulkFlowMetrics.onAttempt(attemptOutcome(assessed), attempt > 1,
                             Duration.ofNanos(elapsed).toMillis());
+                        return assessed;
                     })
                     .doOnError(error -> {
                         totals.lastAttemptEndNanos = System.nanoTime();
@@ -876,7 +878,8 @@ public abstract class OpenSearchClient {
                     })
                     .onErrorMap(error -> new NoResponseException(error, Duration.ofNanos(System.nanoTime() - start)));
             })
-                .flatMap(response -> classifyResponse(indexName, pendingOps, totals, response, context, allowlist))
+                .flatMap(assessed -> classifyResponse(
+                    indexName, pendingOps, totals, assessed.response(), assessed.errorClass(), context, allowlist))
                 .onErrorResume(NoResponseException.class, error -> classifyNoResponse(indexName, pendingOps, totals, error));
         })
         .retryWhen(getBulkRetryStrategy(retryState))
@@ -976,7 +979,8 @@ public abstract class OpenSearchClient {
         record Exhausted(Throwable error, BulkFlowMetrics.GiveUpReason reason) implements AttemptOutcome {}
     }
 
-    /** No HTTP response was received for a bulk attempt (timeout, connection reset, premature close). */
+    private record AssessedResponse(HttpResponse response, BulkErrorClass errorClass) {}
+
     /** The target refused the worker's credentials (401 or 403): the worker stops; no document is given up. */
     public static class TargetAuthenticationFailed extends RuntimeException {
         public TargetAuthenticationFailed(int statusCode, OperationFailed failure) {
@@ -984,6 +988,7 @@ public abstract class OpenSearchClient {
         }
     }
 
+    /** No HTTP response was received for a bulk attempt (timeout, connection reset, premature close). */
     public static class NoResponseException extends RuntimeException {
         /** How long the attempt ran before it failed. */
         public final Duration elapsed;
@@ -1013,10 +1018,10 @@ public abstract class OpenSearchClient {
         List<PreparedOperation> pendingOps,
         RequestTotals totals,
         HttpResponse response,
+        BulkErrorClass errorClass,
         IRfsContexts.IRequestContext context,
         DocumentExceptionAllowlist allowlist
     ) {
-        var errorClass = BulkErrorClass.of(response);
         boolean success = response.statusCode >= 200 && response.statusCode < 300;
         // Any response ends a no-response streak; a 2xx, or a response that blames the target, ends the others.
         totals.consecutiveNoResponses = 0;
@@ -1403,7 +1408,7 @@ public abstract class OpenSearchClient {
      * Run one bulk HTTP attempt while holding a slot of the in-flight limit, if one is installed, and tell the limit
      * how it went. The slot is held only for the attempt, so a batch waiting to retry holds none.
      */
-    private Mono<HttpResponse> withBulkSlot(Supplier<Mono<HttpResponse>> attempt) {
+    private Mono<AssessedResponse> withBulkSlot(Supplier<Mono<AssessedResponse>> attempt) {
         var limit = bulkInFlightLimit;
         if (limit == null) {
             return Mono.defer(attempt);
@@ -1413,23 +1418,35 @@ public abstract class OpenSearchClient {
             return limit.acquire()
                 .doOnNext(slot -> bulkFlowMetrics.onSlotWait(Duration.ofNanos(System.nanoTime() - waitStart).toMillis()));
         }).flatMap(slot -> Mono.defer(attempt)
-            .doOnNext(response -> slot.release(limitSignal(response)))
+            .doOnNext(assessed -> slot.release(limitSignal(assessed)))
             .doOnError(error -> slot.release(limitSignal(error)))
             // Release is idempotent; this covers cancellation (lease lost, shutdown).
             .doFinally(signal -> slot.release(AdaptiveLimit.Signal.CANCELLED)));
     }
 
+    private static AssessedResponse assessResponse(HttpResponse response) {
+        return new AssessedResponse(response, BulkErrorClass.of(response));
+    }
+
     static AdaptiveLimit.Signal limitSignal(HttpResponse response) {
+        return limitSignal(assessResponse(response));
+    }
+
+    private static AdaptiveLimit.Signal limitSignal(AssessedResponse assessed) {
+        var response = assessed.response();
         // Blocked writes and unavailable shards aren't load: they neither cut the limit nor grow it.
         if (BulkErrorClass.isClusterBlock(response) || ((response.statusCode == 200 || response.statusCode == 201)
-            && BulkErrorClass.of(response) == BulkErrorClass.UNAVAILABLE)) {
+            && assessed.errorClass() == BulkErrorClass.UNAVAILABLE)) {
             return AdaptiveLimit.Signal.OTHER_FAILURE;
         }
         if (response.statusCode == 429) {
             return AdaptiveLimit.Signal.THROTTLED_429;
         }
-        if (BulkErrorClass.isThrottle(response)) {
+        if (assessed.errorClass() == BulkErrorClass.THROTTLE) {
             return AdaptiveLimit.Signal.ADMISSION_REJECTED;
+        }
+        if (response.statusCode == HttpURLConnection.HTTP_GATEWAY_TIMEOUT) {
+            return AdaptiveLimit.Signal.TIMEOUT;
         }
         return response.statusCode == HttpURLConnection.HTTP_OK || response.statusCode == HttpURLConnection.HTTP_CREATED
             ? AdaptiveLimit.Signal.SUCCESS
@@ -1443,9 +1460,14 @@ public abstract class OpenSearchClient {
     }
 
     static BulkFlowMetrics.AttemptOutcome attemptOutcome(HttpResponse response) {
+        return attemptOutcome(assessResponse(response));
+    }
+
+    private static BulkFlowMetrics.AttemptOutcome attemptOutcome(AssessedResponse assessed) {
+        var response = assessed.response();
         int status = response.statusCode;
         if (status == HttpURLConnection.HTTP_OK || status == HttpURLConnection.HTTP_CREATED) {
-            if (BulkErrorClass.isThrottle(response)) {
+            if (assessed.errorClass() == BulkErrorClass.THROTTLE) {
                 return BulkFlowMetrics.AttemptOutcome.ADMISSION_REJECTED;
             }
             return new BulkResponse(status, null, null, response.body).reportsNoFailedOperations()

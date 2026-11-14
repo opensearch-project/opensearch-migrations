@@ -27,8 +27,8 @@ import org.opensearch.migrations.bulkload.version_os_2_11.OpenSearchClient_OS_2_
 import org.opensearch.migrations.reindexer.FailedRequestsLogger;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 
-import io.opentelemetry.sdk.metrics.data.MetricData;
 import io.opentelemetry.api.common.AttributeKey;
+import io.opentelemetry.sdk.metrics.data.MetricData;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Flux;

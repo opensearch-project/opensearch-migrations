@@ -289,12 +289,12 @@ Each attempt is classified by its outcome, first match wins (`BulkErrorClass`):
 | 2xx, some items failed | by its items: throttle if any is a throttle; else transient if any is unknown; else unavailable | Succeeded and document-error items leave the batch; the rest are retried | cut if any item is a throttle; unchanged if all are unavailable; may grow otherwise | 5, 10 or 5 |
 | Not 2xx, body reports `cluster_block_exception` (403 for a read-only index or cluster, 429 at the disk flood stage) | unavailable | Retried | unchanged | 5 |
 | 429 | throttle | Retried | cut | 5 |
-| 503 | unavailable | Retried | unchanged | 5 |
+| 502, 503 | unavailable | Retried | unchanged | 5 |
 | 400, 413 | | The request itself is wrong: the batch is halved; a single document is recorded (`NON_RETRYABLE`) | unchanged | not retried |
 | 401, 403 | auth | The worker stops ([below](#credentials-the-target-refuses)) | unchanged | not retried |
 | No response: the connection was refused, reset or closed | unavailable | Retried | unchanged | 5 |
 | No response within `--bulk-response-timeout` | transient | Retried; may split or give up | cut | 10 |
-| Any other status (408, 500, 502, 504, other 4xx, …) | transient | Retried; may split or give up | unchanged | 10 |
+| Any other status (408, 500, 504, other 4xx, …) | transient | Retried; may split or give up | unchanged, except 504 cuts it as a timeout | 10 |
 
 *Target state* means throttle or unavailable: the target, not a document, is why the attempt failed, so it never
 counts against a document, ends the batch's streaks (below), shows in the `bulkDocsWaitingOnTarget` gauge, and is

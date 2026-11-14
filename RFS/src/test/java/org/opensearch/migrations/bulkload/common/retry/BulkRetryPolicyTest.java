@@ -158,7 +158,8 @@ class BulkRetryPolicyTest {
     @Test
     void classifiesFailures() {
         Assertions.assertEquals(BulkErrorClass.THROTTLE, BulkErrorClass.of(failed(429)));
-        // The target can't take writes: a 503, or blocked writes, whatever the status says.
+        // The target can't take writes: a 502/503, or blocked writes, whatever the status says.
+        Assertions.assertEquals(BulkErrorClass.UNAVAILABLE, BulkErrorClass.of(failed(502)));
         Assertions.assertEquals(BulkErrorClass.UNAVAILABLE, BulkErrorClass.of(failed(503)));
         var blocked = "{\"error\":{\"type\":\"cluster_block_exception\",\"reason\":\"index read-only\"}}";
         Assertions.assertEquals(BulkErrorClass.UNAVAILABLE, BulkErrorClass.of(failed(403, Map.of(), blocked)));

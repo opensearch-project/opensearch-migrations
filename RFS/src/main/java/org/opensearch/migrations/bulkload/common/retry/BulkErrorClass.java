@@ -1,5 +1,6 @@
 package org.opensearch.migrations.bulkload.common.retry;
 
+import java.net.HttpURLConnection;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZonedDateTime;
@@ -20,9 +21,9 @@ import org.opensearch.migrations.parsing.BulkResponseParser;
  *       (a read-only index or cluster is 403, the disk flood stage 429).</li>
  *   <li>{@link #THROTTLE} if there is a response whose status is 429, or 200 or 201 with at least one item of kind
  *       {@link BulkItemErrorKind#THROTTLE}.</li>
- *   <li>{@link #UNAVAILABLE} if there is a response whose status is 503, or 200 or 201 whose failed items are all of
- *       kind {@link BulkItemErrorKind#UNAVAILABLE}; or no response because the connection couldn't be made or was
- *       reset or closed.</li>
+ *   <li>{@link #UNAVAILABLE} if there is a response whose status is 502 or 503, or 200 or 201 whose failed items are
+ *       all of kind {@link BulkItemErrorKind#UNAVAILABLE}; or no response because the connection couldn't be made
+ *       or was reset or closed.</li>
  *   <li>{@link #AUTH} if there is a response whose status is 401 or 403.</li>
  *   <li>{@link #TRANSIENT} otherwise: no response within the response timeout, any other status, or a 2xx with an
  *       item of kind {@link BulkItemErrorKind#UNKNOWN}.</li>
@@ -85,7 +86,8 @@ public enum BulkErrorClass {
             return THROTTLE;
         }
         int status = response.statusCode;
-        if (status == 503) {
+        if (status == HttpURLConnection.HTTP_BAD_GATEWAY
+            || status == HttpURLConnection.HTTP_UNAVAILABLE) {
             return UNAVAILABLE;
         }
         if (status == 401 || status == 403) {
