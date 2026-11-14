@@ -976,6 +976,7 @@ public abstract class OpenSearchClient {
             })
                 .flatMap(assessed -> classifyWithMetrics(
                     true,
+                    assessed.assessmentNanos(),
                     () -> classifyResponse(
                         indexName,
                         pendingOps,
@@ -988,6 +989,7 @@ public abstract class OpenSearchClient {
                 ))
                 .onErrorResume(NoResponseException.class, error -> classifyWithMetrics(
                     false,
+                    0,
                     () -> classifyNoResponse(indexName, pendingOps, totals, error)
                 ));
         })
@@ -1021,13 +1023,14 @@ public abstract class OpenSearchClient {
 
     private Mono<AttemptOutcome> classifyWithMetrics(
         boolean responseReceived,
+        long assessmentNanos,
         Supplier<Mono<AttemptOutcome>> classification
     ) {
         return Mono.defer(() -> {
             long startedNanos = System.nanoTime();
             return classification.get().doFinally(signal -> bulkFlowMetrics.onResponseClassified(
                 responseReceived,
-                (System.nanoTime() - startedNanos) / 1_000_000.0
+                (assessmentNanos + System.nanoTime() - startedNanos) / 1_000_000.0
             ));
         });
     }
@@ -1137,7 +1140,7 @@ public abstract class OpenSearchClient {
         record Exhausted(Throwable error, BulkFlowMetrics.GiveUpReason reason) implements AttemptOutcome {}
     }
 
-    private record AssessedResponse(HttpResponse response, BulkErrorClass errorClass) {}
+    private record AssessedResponse(HttpResponse response, BulkErrorClass errorClass, long assessmentNanos) {}
 
     /** The target refused the worker's credentials (401 or 403): the worker stops; no document is given up. */
     public static class TargetAuthenticationFailed extends RuntimeException {
@@ -1583,7 +1586,9 @@ public abstract class OpenSearchClient {
     }
 
     private static AssessedResponse assessResponse(HttpResponse response) {
-        return new AssessedResponse(response, BulkErrorClass.of(response));
+        long startedNanos = System.nanoTime();
+        var errorClass = BulkErrorClass.of(response);
+        return new AssessedResponse(response, errorClass, System.nanoTime() - startedNanos);
     }
 
     static AdaptiveLimit.Signal limitSignal(HttpResponse response) {
