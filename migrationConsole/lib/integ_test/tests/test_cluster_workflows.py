@@ -3,9 +3,8 @@ from pathlib import Path
 import yaml
 
 
-CLUSTER_WORKFLOWS = (
-    Path(__file__).resolve().parents[1]
-    / "testWorkflows/clusterWorkflows.yaml"
+CLUSTER_WORKFLOWS = Path(__file__).resolve().parents[1].joinpath(
+    "testWorkflows/clusterWorkflows.yaml"
 )
 
 

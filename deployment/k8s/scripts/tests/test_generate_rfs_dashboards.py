@@ -13,13 +13,11 @@ GENERATOR = Path(os.environ.get(
 ))
 K8S_DIRECTORY = Path(__file__).resolve().parents[2]
 CHART_DIRECTORY = K8S_DIRECTORY / "charts/aggregates/migrationAssistantWithArgo"
-COMMITTED_CLOUDWATCH_DASHBOARD = (
-    CHART_DIRECTORY
-    / "files/cloudwatch-dashboards/reindex-from-snapshot-dashboard.json"
+COMMITTED_CLOUDWATCH_DASHBOARD = CHART_DIRECTORY.joinpath(
+    "files/cloudwatch-dashboards/reindex-from-snapshot-dashboard.json"
 )
-COMMITTED_GRAFANA_DASHBOARD = (
-    CHART_DIRECTORY
-    / "templates/resources/rfsGrafanaDashboard.yaml"
+COMMITTED_GRAFANA_DASHBOARD = CHART_DIRECTORY.joinpath(
+    "templates/resources/rfsGrafanaDashboard.yaml"
 )
 SPEC = importlib.util.spec_from_file_location("generate_rfs_dashboards", GENERATOR)
 dashboard_generator = importlib.util.module_from_spec(SPEC)
