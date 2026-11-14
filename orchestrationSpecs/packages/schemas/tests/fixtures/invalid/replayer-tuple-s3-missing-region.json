@@ -25,7 +25,10 @@
         "fromCapturedTraffic": "proxy1",
         "toTarget": "target",
         "replayerConfig": {
-          "tupleS3Bucket": "tuple-output"
+          "tupleOutput": {
+            "type": "s3",
+            "bucket": "tuple-output"
+          }
         }
       }
     }

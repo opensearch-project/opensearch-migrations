@@ -805,7 +805,7 @@ load. Field definitions are in `orchestrationSpecs/packages/schemas/src/userSche
 | `targetRetryMaxDelayMs` | 30000 | Cap on jittered exponential retry backoff. |
 | `targetRetryBudgetRatio` / `targetRetryBudgetFloorPerSecond` | 0.2 / 50 | Retry budget, so a sick target isn't overwhelmed. |
 | `targetConnectionInitialRate` | 200 | Initial new-connection rate for the adaptive limiter. 0 disables it. |
-| `tupleS3Bucket` / `tupleS3Region` / `tupleS3Prefix` | — / — / `tuples/` | Where result tuples go. |
+| `tupleOutput` | omitted | Tuple destination: `{type: s3, bucket: ..., region: ..., prefix: tuples/}` or `{type: disabled}`. |
 
 Removed: `lookaheadTimeSeconds`, `observedPacketConnectionTimeout` and `quiescentPeriodMs` are now
 rejected.

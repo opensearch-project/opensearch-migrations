@@ -807,6 +807,26 @@ export const USER_REPLAYER_WORKFLOW_OPTIONS = withScalableServiceValidation(z.ob
 }))
     .describe("Kubernetes deployment-level options for the traffic replayer.");
 
+export const TUPLE_OUTPUT_CONFIG = z.discriminatedUnion("type", [
+    z.object({
+        type: z.literal("s3")
+            .describe("Persist replay result tuples to S3."),
+        bucket: z.string().trim().min(1)
+            .describe("S3 bucket for replay result tuples."),
+        prefix: z.string().default("tuples/").optional()
+            .describe("S3 key prefix for tuple objects."),
+        region: z.string().trim().min(1)
+            .describe("AWS region of the tuple output bucket. Must be specified explicitly."),
+        endpoint: z.string().regex(new RegExp(OPTIONAL_HTTP_ENDPOINT_PATTERN)).default("").optional()
+            .describe("Optional HTTP(S) endpoint override for tuple uploads."),
+    }).strict(),
+    z.object({
+        type: z.literal("disabled")
+            .describe("Disable S3 tuple persistence. Tuples continue to use the configured tuple logger."),
+    }).strict(),
+]).describe("Destination for persisted replay result tuples. Select S3 storage or disable S3 persistence. " +
+    "Omitting tupleOutput retains the existing tuple logger.");
+
 export const USER_REPLAYER_PROCESS_OPTIONS = withOtelExportOptions(z.object({
     kafkaTrafficEnableMSKAuth: z.boolean().default(false).optional()
         .describe("Enable SASL/IAM authentication for the replayer's Kafka consumer when connecting to Amazon MSK. Uses the pod's IAM role via EKS Pod Identity.")
@@ -895,17 +915,7 @@ export const USER_REPLAYER_PROCESS_OPTIONS = withOtelExportOptions(z.object({
     tupleTransforms: TRANSFORM_PIPELINE.optional()
         .describe("Tuple transform pipeline. Generates the existing tupleTransformerConfig inline JSON option.")
         .changeRestriction('gated'),
-    tupleS3Bucket: z.string().optional()
-        .describe("S3 bucket for tuple output. When set, tuples are written directly to S3.")
-        .changeRestriction('gated'),
-    tupleS3Region: z.string().optional()
-        .describe("AWS region for the tuple S3 bucket. Required when tupleS3Bucket is set.")
-        .changeRestriction('gated'),
-    tupleS3Prefix: z.string().default("tuples/").optional()
-        .describe("S3 key prefix for tuple objects.")
-        .changeRestriction('gated'),
-    tupleS3Endpoint: z.string().regex(new RegExp(OPTIONAL_HTTP_ENDPOINT_PATTERN)).default("").optional()
-        .describe("Custom S3 endpoint URL for tuple output.")
+    tupleOutput: TUPLE_OUTPUT_CONFIG.optional()
         .changeRestriction('gated'),
     tupleMaxBufferSeconds: z.number().default(60).optional()
         .describe("Maximum seconds before rotating/uploading a tuple file to S3.")
@@ -938,14 +948,6 @@ export const USER_REPLAYER_OPTIONS = withOtelExportOptions(z.object({
         "tupleTransformerConfigBase64",
         "tupleTransformerConfigFile"
     ]);
-    if (hasConfiguredString(data.tupleS3Bucket) && !hasConfiguredString(data.tupleS3Region)) {
-        ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            message: "'tupleS3Region' is required when 'tupleS3Bucket' is configured.",
-            path: ["tupleS3Region"]
-        });
-    }
-
 }));
 
 // Internal (glue-layer) field: the config transformer folds the user-facing Solr

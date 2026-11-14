@@ -544,13 +544,19 @@ function prepareReplayerConfig(
     config: NonNullable<NonNullable<z.infer<typeof OVERALL_MIGRATION_CONFIG>["traffic"]>["replayers"][string]["replayerConfig"]> | undefined
 ) {
     const configuredLogLevels = config && "logLevels" in config ? config.logLevels : undefined;
-    const {requestTransforms, tupleTransforms, ...rest} = config ?? {};
+    const {requestTransforms, tupleTransforms, tupleOutput, ...rest} = config ?? {};
     const fileSourceRegistry = new FileSourceRegistry();
     const generatedRequestConfig = lowerTransformPipeline(requestTransforms, fileSourceRegistry);
     const generatedTupleConfig = lowerTransformPipeline(tupleTransforms, fileSourceRegistry);
 
     return ARGO_REPLAYER_OPTIONS.parse({
         ...rest,
+        ...(tupleOutput?.type === "s3" ? {
+            tupleS3Bucket: tupleOutput.bucket,
+            tupleS3Region: tupleOutput.region,
+            tupleS3Prefix: tupleOutput.prefix,
+            tupleS3Endpoint: tupleOutput.endpoint,
+        } : {}),
         logLevels: {
             root: configuredLogLevels?.root ?? "info",
         },
