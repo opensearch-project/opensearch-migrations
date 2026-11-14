@@ -1380,7 +1380,8 @@ public class RfsMigrateDocuments {
             // successful bulk batch — see DocumentMigrationBootstrap), so there is nothing to
             // checkpoint and we can't seed a successor.  Releasing the lease here lets another
             // worker retry the same item immediately instead of waiting for natural expiration.
-            releaseLeaseWithoutProgress(workItemAndDuration, coordinator, releaseContextSupplier);
+            releaseLeaseWithoutProgress(workItemAndDuration, coordinator,
+                IWorkCoordinator.LeaseReleaseReason.EARLY_EXIT, releaseContextSupplier);
             cleanShutdownCompleted.set(true);
             return;
         }
@@ -1466,13 +1467,15 @@ public class RfsMigrateDocuments {
     private static void releaseLeaseWithoutProgress(
             IWorkCoordinator.WorkItemAndDuration workItemAndDuration,
             IWorkCoordinator coordinator,
+            IWorkCoordinator.LeaseReleaseReason reason,
             Supplier<IWorkCoordinationContexts.IReleaseWorkItemContext> releaseContextSupplier
     ) throws IOException, InterruptedException {
         var workItemId = workItemAndDuration.getWorkItem().toString();
-        log.atWarn().setMessage("Releasing lease for work item {} because no progress was made before shutdown — letting another worker retry immediately rather than waiting for natural lease expiration.")
+        log.atWarn().setMessage("Releasing lease for work item {} after {} with no progress; another worker can retry immediately.")
                 .addArgument(workItemId)
+                .addArgument(reason)
                 .log();
-        coordinator.releaseWorkItem(workItemId, releaseContextSupplier);
+        coordinator.releaseWorkItem(workItemId, reason, releaseContextSupplier);
     }
 
     @SneakyThrows
@@ -1544,7 +1547,8 @@ public class RfsMigrateDocuments {
                         "downloading and unpacking shard takes longer than the lease.").log();
                 var workItemAndDuration = workItemRef.get();
                 if (workItemAndDuration != null) {
-                    releaseLeaseWithoutProgress(workItemAndDuration, coordinator, releaseContextSupplier);
+                    releaseLeaseWithoutProgress(workItemAndDuration, coordinator,
+                        IWorkCoordinator.LeaseReleaseReason.LEASE_TIMEOUT, releaseContextSupplier);
                 } else {
                     log.atWarn().setMessage("No work item reference available; skipping lease release.").log();
                 }
