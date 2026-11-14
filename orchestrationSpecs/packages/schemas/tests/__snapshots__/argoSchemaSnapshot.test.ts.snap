@@ -2730,9 +2730,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "label": {
                       "type": "string"
                     },
-                    "version": {
-                      "type": "string"
-                    },
                     "endpoint": {
                       "type": "string"
                     },
@@ -2763,7 +2760,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                   },
                   "required": [
                     "label",
-                    "version",
                     "endpoint",
                     "allowInsecure",
                     "solrContextPath",
@@ -3637,9 +3633,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "label": {
                       "type": "string"
                     },
-                    "version": {
-                      "type": "string"
-                    },
                     "endpoint": {
                       "type": "string"
                     },
@@ -3670,7 +3663,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                   },
                   "required": [
                     "label",
-                    "version",
                     "endpoint",
                     "allowInsecure",
                     "solrContextPath",

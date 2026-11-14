@@ -26,7 +26,6 @@ import {
     ARGO_PROXY_CR_OMITTED_KEYS,
     ARGO_REPLAYER_OPTIONS,
     ARGO_REPLAYER_WORKFLOW_OPTION_KEYS,
-    CLUSTER_CONNECTION_IDENTITY,
     DEFAULT_RESOURCES,
     DENORMALIZED_PROXY_CONFIG,
     DENORMALIZED_PROXY_SETUP_CONFIG,
@@ -34,6 +33,7 @@ import {
     NAMED_KAFKA_CLUSTER_CONFIG,
     PER_SOURCE_CREATE_SNAPSHOTS_CONFIG,
     SNAPSHOT_MIGRATION_CONFIG,
+    TARGET_CLUSTER_CONNECTION_IDENTITY,
 } from '@opensearch-migrations/schemas';
 import {CommonWorkflowParameters, workflowScriptCommand, workflowScriptRootEnvVars} from "./commonUtils/workflowParameters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
@@ -497,7 +497,7 @@ function makeTrafficReplayManifest(
     replayerOptions: BaseExpression<Serialized<z.infer<typeof ARGO_REPLAYER_OPTIONS>>>,
     sourceLabel: BaseExpression<string>,
     targetLabel: BaseExpression<string>,
-    targetConnectionIdentity: BaseExpression<Serialized<z.infer<typeof CLUSTER_CONNECTION_IDENTITY>>>,
+    targetConnectionIdentity: BaseExpression<Serialized<z.infer<typeof TARGET_CLUSTER_CONNECTION_IDENTITY>>>,
 ) {
     const opts = expr.deserializeRecord(replayerOptions);
     const targetIdentity = expr.deserializeRecord(targetConnectionIdentity);
@@ -748,7 +748,10 @@ export const ResourceManagement = WorkflowBuilder.create({
         .addRequiredInput("replayerOptions", typeToken<z.infer<typeof ARGO_REPLAYER_OPTIONS>>())
         .addRequiredInput("sourceLabel", typeToken<string>())
         .addRequiredInput("targetLabel", typeToken<string>())
-        .addRequiredInput("targetConnectionIdentity", typeToken<z.infer<typeof CLUSTER_CONNECTION_IDENTITY>>())
+        .addRequiredInput(
+            "targetConnectionIdentity",
+            typeToken<z.infer<typeof TARGET_CLUSTER_CONNECTION_IDENTITY>>()
+        )
         .addResourceTask(b => b
             .setDefinition({
                 action: "apply",
@@ -1211,7 +1214,10 @@ export const ResourceManagement = WorkflowBuilder.create({
         .addRequiredInput("replayerOptions", typeToken<z.infer<typeof ARGO_REPLAYER_OPTIONS>>())
         .addRequiredInput("sourceLabel", typeToken<string>())
         .addRequiredInput("targetLabel", typeToken<string>())
-        .addRequiredInput("targetConnectionIdentity", typeToken<z.infer<typeof CLUSTER_CONNECTION_IDENTITY>>())
+        .addRequiredInput(
+            "targetConnectionIdentity",
+            typeToken<z.infer<typeof TARGET_CLUSTER_CONNECTION_IDENTITY>>()
+        )
         .addRequiredInput("configChecksum", typeToken<string>())
         .addRequiredInput("retryGateName", typeToken<string>())
         .addOptionalInput("retryGroupName_view", c => "Apply")
