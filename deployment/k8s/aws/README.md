@@ -3,75 +3,100 @@
 Deploy the Migration Assistant to a new or existing EKS cluster, then run
 your migration from a console pod inside the cluster.
 
-This page is for **operators** running a deploy. The architecture and
-build details for the CLI itself live in [`cli/README.md`](cli/README.md).
-For a high-level overview of all Kubernetes deployment options see the
-[K8s README](../README.md). For broader Migration Assistant documentation
-see the [project wiki](https://github.com/opensearch-project/opensearch-migrations/wiki).
+`aws-bootstrap.sh` is the single entry point for the CloudFormation-based AWS
+deployment. For a high-level overview of all Kubernetes deployment options,
+see the [K8s README](../README.md). For broader Migration Assistant
+documentation, see the
+[project wiki](https://github.com/opensearch-project/opensearch-migrations/wiki).
 
 To provision equivalent EKS infrastructure without CloudFormation, use the
 additive [AWS Terraform module](../../terraform/aws/README.md). The Terraform
-module leaves this CloudFormation workflow intact and can optionally install the
-same Helm chart directly.
+module leaves the `aws-bootstrap.sh` workflow intact and can optionally install
+the same Helm chart directly.
 
 ## What you get
 
-A single command:
-
-```bash
-./deployment/k8s/aws/cli/bin/migration-assistant
-```
-
-…brings up a CloudFormation stack (EKS cluster, ECR, IAM, VPC), mirrors
-the chart's images to your private ECR, installs the Migration Assistant
-helm chart, waits for everything to be Ready, and drops you into the
-`migration-console-0` pod where the migration itself runs.
-
-Re-running the same command on a partially-completed deploy resumes from
-the last successful step (state lives at
-`~/.opensearch-migrate/<stage>/state.env`). Re-running once everything's
-deployed drops you straight back into the console.
+The bootstrap script can create or reuse the Migration Assistant
+CloudFormation stack, configure EKS access, mirror the chart's images to a
+private ECR registry, install the Helm chart, wait for the deployment, and open
+the `migration-console-0` pod.
 
 ## Prerequisites
 
 - [AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html)
   with credentials authorized for CloudFormation, EKS, ECR, and IAM
-- `curl`, `jq`, `tar` (the CLI auto-installs `kubectl`, `helm`, and
-  `crane` if missing)
-- ~15 minutes for the CloudFormation stack to come up
+- [kubectl](https://kubernetes.io/docs/tasks/tools/)
+- `curl`, `jq`, and `tar`
+- Helm and `crane`; the bootstrap script installs them when needed
+- About 15 minutes for a new CloudFormation stack to come up
 
 ## Quick start
 
-```bash
-./deployment/k8s/aws/cli/bin/migration-assistant
-```
-
-The CLI is interactive on first run: it prompts for stage name, image
-mirroring, and Migration Assistant version, then deploys.
-
-If you have an existing `MigrationAssistant-*` CloudFormation stack
-(deployed previously, or via Terraform / external CDK) the CLI offers
-to adopt it instead of asking for a stage name. CFN is skipped in that
-case and the CLI goes straight to helm.
-
-To deploy without a repo checkout, use the curl-pipe shim from any
-release:
+From a repository checkout, deploy the latest release into a new VPC:
 
 ```bash
-curl -fsSL https://github.com/opensearch-project/opensearch-migrations/releases/latest/download/aws-bootstrap.sh \
-  | bash
+./deployment/k8s/aws/aws-bootstrap.sh \
+  --deploy-create-vpc-cfn \
+  --stack-name MA-Dev \
+  --stage dev \
+  --region us-east-2
 ```
 
-The shim is a 30-line script that downloads the CLI tarball into
-`~/.opensearch-migrate/cli/<version>/` and execs the unpacked binary.
-The Rust CLI is the operator-oriented entry point. Developers who need to
-build and deploy the currently checked-out source should use
-`aws-bootstrap.sh` directly, as described below.
+To deploy without a repository checkout, download the released bootstrap
+script and invoke it with the same options:
+
+```bash
+curl -fsSL \
+  https://github.com/opensearch-project/opensearch-migrations/releases/latest/download/aws-bootstrap.sh \
+  -o aws-bootstrap.sh
+chmod +x aws-bootstrap.sh
+./aws-bootstrap.sh \
+  --deploy-create-vpc-cfn \
+  --stack-name MA-Dev \
+  --stage dev \
+  --region us-east-2
+```
+
+By default, the script resolves the latest release and mirrors its images to
+the deployment's private ECR registry. Use `--version <tag>` to select a
+specific release, or `--use-public-images` when the cluster can pull directly
+from the public registries.
 
 For an end-to-end walkthrough that builds from source, creates a self-managed
 Elasticsearch source and an Amazon OpenSearch Service domain or Serverless
 collection target, runs a backfill plus capture and replay, and observes it, see
 [Quick start: self-managed Elasticsearch to Amazon OpenSearch](quickstarts/selfManagedEsToAmazonOpenSearch/README.md).
+
+## Deploy into an existing VPC
+
+```bash
+./deployment/k8s/aws/aws-bootstrap.sh \
+  --deploy-import-vpc-cfn \
+  --stack-name MA-Production \
+  --stage prod \
+  --vpc-id vpc-0abc123 \
+  --subnet-ids subnet-111,subnet-222 \
+  --region us-east-2
+```
+
+Add `--create-vpc-endpoints` when the selected private subnets need the
+bootstrap script to create the AWS service endpoints required by the
+deployment.
+
+## Use an existing Migration Assistant stack
+
+When the CloudFormation stack was deployed separately, including by Terraform
+or external CDK, skip the CloudFormation step:
+
+```bash
+./deployment/k8s/aws/aws-bootstrap.sh \
+  --skip-cfn-deploy \
+  --stage prod \
+  --region us-east-2
+```
+
+The script resolves the cluster and other resources from the Migration
+Assistant CloudFormation exports for the selected stage.
 
 ## Build and deploy the current checkout
 
@@ -84,7 +109,6 @@ In addition to the general prerequisites above, this workflow requires:
 
 - Java 21
 - Docker with the Buildx plugin
-- `kubectl` and Helm
 - Network access from the EKS build nodes to the public base-image registries
 
 To create a development EKS deployment in a new VPC, run this from the
@@ -102,10 +126,10 @@ repository root:
 
 To rebuild and reinstall the current checkout on an existing Migration
 Assistant CloudFormation/EKS deployment, first remove the installed release.
-The script only installs: it stops if a release named after `--namespace`
-already exists. `helm uninstall` runs the chart's pre-delete hook, which stops
-and deletes migration workflows and resources and empties the deployment's S3
-bucket, so finish or save anything you need first.
+The script only installs unless `--helm-upgrade` is selected. `helm uninstall`
+runs the chart's pre-delete hook, which stops and deletes migration workflows
+and resources and empties the deployment's S3 bucket, so finish or save
+anything you need first.
 
 ```bash
 helm uninstall ma -n ma
@@ -122,8 +146,7 @@ helm uninstall ma -n ma
 
 Use the same `--stage` and `--region` values as the existing deployment so the
 script resolves the correct CloudFormation exports. `--build` and `--version`
-are mutually exclusive. Run `./deployment/k8s/aws/aws-bootstrap.sh --help` for
-the existing-VPC and other deployment options.
+are mutually exclusive.
 
 ## Configuring workload NodePools
 
@@ -162,16 +185,19 @@ benchmark SKU. It demonstrates these fields:
 
 `workloadsNodePool.mode` selects the data-plane placement model:
 
-- `shared` keeps RFS workers, Kafka, capture proxies, and replayers together on `general-work-pool`.
-- `isolated` gives RFS workers, Kafka, capture proxies, and replayers separate tainted NodePools.
+- `shared` keeps RFS workers, Kafka, capture proxies, and replayers together on
+  `general-work-pool`.
+- `isolated` gives RFS workers, Kafka, capture proxies, and replayers separate
+  tainted NodePools.
 
 `isolated` is the default for EKS deployments. Set the mode to `shared` to
-consolidate RFS workers, Kafka, capture proxies, and replayers onto `general-work-pool`.
+consolidate RFS workers, Kafka, capture proxies, and replayers onto
+`general-work-pool`.
 
 The optional k6 load generator uses a separate tainted pool in both modes.
 Generated pods carry a required node selector as well as the matching
-toleration, so a toleration cannot accidentally allow them to fall back onto
-a different pool.
+toleration, so a toleration cannot accidentally allow them to fall back onto a
+different pool.
 
 Isolation does not require `NodePool.spec.limits`. Limits are optional total
 capacity ceilings for cost or quota control. Per-pool limits and instance
@@ -204,9 +230,10 @@ interruption is not acceptable.
 
 Values files follow normal Helm merge behavior: map fields merge by key, scalar
 conflicts are resolved by the later source, and list fields replace the full
-default list. For example, overriding `workloadsNodePool.disruption.consolidateAfter`
-alone keeps the default `consolidationPolicy`, while overriding `instanceSizes`
-requires supplying the full desired size list.
+default list. For example, overriding
+`workloadsNodePool.disruption.consolidateAfter` alone keeps the default
+`consolidationPolicy`, while overriding `instanceSizes` requires supplying the
+full desired size list.
 
 The pools have no `limits` by default, so their size is bounded only by the
 account's EC2 vCPU quotas. Set `workloadsNodePool.limits.cpu` and/or
@@ -226,142 +253,73 @@ with it. The script runs `helm lint` and prints the NodePools that would be
 rendered. It only needs `helm`. The bootstrap itself checks that each
 `--helm-values` file exists before doing anything else. Once the cluster
 exists, and before it mirrors or builds images, it also renders the workload
-NodePools from those files and validates them against the cluster's
-NodePool CRD with a server-side dry run, which catches values EKS would reject
-(for example an invalid `consolidateAfter`). The dry run is skipped with
-`--use-general-node-pool`, which does not create the pool.
-
-## Common subcommands
-
-```bash
-migration-assistant                # deploy / resume
-migration-assistant console        # exec into migration-console-0 (skip the deploy flow)
-migration-assistant diag           # full diagnostics dump
-migration-assistant cleanup        # tear down a deploy + archive state
-migration-assistant version
-migration-assistant help
-```
-
-## Common flags
-
-```bash
---stage NAME                      # stage name (default "ma"). Used as the
-                                  # helm release, k8s namespace, and CFN
-                                  # stack suffix.
---region REGION                   # AWS region (default us-east-1)
---version VER                     # pin Migration Assistant artifact version
---use-public-images               # skip image mirror; pull from public.ecr.aws
---non-interactive, -y             # accept all defaults; for Jenkins / CI
---verbose, -v                     # mirror logs to stderr live
---switch                          # re-prompt the deploy wizard
-```
-
-`--non-interactive` plus `--stage <name>` plus `--region <region>` is
-the typical CI invocation. `--skip-console-exec` keeps the run
-non-interactive (no console handoff).
-
-Run `migration-assistant help` for the complete list of accepted flags. Some
-`aws-bootstrap.sh` functionality is not implemented by this CLI, including
-`--build`, `--tls-mode`, `--deploy-import-vpc-cfn`, `--vpc-id`,
-`--subnet-ids`, and `--use-general-node-pool`. The CLI warns and ignores these
-flags. Use `aws-bootstrap.sh` directly when you need that functionality.
+NodePools from those files and validates them against the cluster's NodePool
+CRD with a server-side dry run, which catches values EKS would reject. The dry
+run is skipped with `--use-general-node-pool`, which does not create the pool.
 
 ## Tagging everything the deployment creates
 
 ```bash
-./aws-bootstrap.sh --deploy-create-vpc-cfn --stack-name MA-Dev --stage dev \
-  --region us-east-1 --tags CostCenter=1234,Owner=platform-team
+./deployment/k8s/aws/aws-bootstrap.sh \
+  --deploy-create-vpc-cfn \
+  --stack-name MA-Dev \
+  --stage dev \
+  --region us-east-1 \
+  --tags CostCenter=1234,Owner=platform-team
 ```
 
-`--tags` covers two separate mechanisms, because AWS has no single one:
+`--tags` covers two separate mechanisms:
 
-- **CloudFormation stack tags.** Identical to filling in the console's
-  Tags step. CloudFormation copies them onto every taggable resource it
-  creates.
-- **EKS Auto Mode resources.** Nodes, EBS volumes, ENIs and load
-  balancers are created *after* the stack, by Auto Mode, so stack tags
-  never reach them. Auto Mode reads the tags to apply from in-cluster
-  objects instead, so `aws-bootstrap.sh` also:
-  - creates a custom `NodeClass` carrying the tags (the built-in
-    `default` NodeClass is owned by EKS and cannot be edited) and
-    disables the built-in `system`/`general-purpose` NodePools, whose
-    nodes are hard-wired to it;
-  - sets `tagSpecification_N` parameters on the `auto-ebs-sc`
-    StorageClass so provisioned volumes are tagged;
-  - emits load balancer tag annotations for any Service or Ingress the
-    chart creates.
+- **CloudFormation stack tags.** CloudFormation copies them onto every
+  taggable resource it creates.
+- **EKS Auto Mode resources.** Nodes, EBS volumes, ENIs, and load balancers are
+  created after the stack, so stack tags never reach them. `aws-bootstrap.sh`
+  creates a custom `NodeClass` carrying the tags, disables the built-in
+  `system` and `general-purpose` NodePools that use the untaggable default
+  `NodeClass`, sets `tagSpecification_N` parameters on the `auto-ebs-sc`
+  `StorageClass`, and adds load-balancer tag annotations to Services and
+  Ingresses.
 
-This requires the cluster IAM role to permit user-defined tags on Auto
-Mode resources. The solution CloudFormation template declares that
-policy, and `aws-bootstrap.sh --tags` also ensures the same named inline
-policy so older, adopted, and hand-built clusters need no manual IAM
-changes. The caller needs `iam:PutRolePolicy` on the cluster role;
-without it, adding a tag turns every `RunInstances` into `AccessDenied`.
+This requires the cluster IAM role to permit user-defined tags on Auto Mode
+resources. The solution CloudFormation template declares that policy, and
+`aws-bootstrap.sh --tags` also ensures it for older, adopted, and hand-built
+clusters. The caller needs `iam:PutRolePolicy` on the cluster role.
 
-Two caveats: `--tags` is incompatible with `--use-general-node-pool`
-(it deletes that pool), and StorageClass `parameters` are immutable, so
-changing the tag set on an existing release means deleting
-`auto-ebs-sc` first. The script checks for both and tells you.
-
-## Adopting a stack you deployed elsewhere
-
-If you provisioned the CFN stack with Terraform, CDK, or a previous
-hand-run of `aws cloudformation deploy`, the CLI's discovery step finds
-all `MigrationAssistant-*` stacks in the configured account/region.
-On a fresh stage with no prior state, it offers:
-
-- exactly one stack found → "Adopt `<stack>`?" (Y/n)
-- multiple found → numbered picker
-- none found → standard fresh-deploy prompts
-
-You can also bypass discovery and force adoption:
-
-```bash
-migration-assistant \
-  --skip-cfn-deploy \
-  --stack-name MigrationAssistant-prod \
-  --stage prod \
-  --region us-east-2
-```
-
-## Resuming after Ctrl-C
-
-State persists between runs. After a Ctrl-C, just re-run the same
-command (no flags needed, no re-prompting through the wizard). The CLI
-detects the stage's prior progress (`crane_done`, `helm_done`, etc.)
-and continues from there.
-
-If a previous helm install left a stuck release (`pending-install`,
-`pending-upgrade`, `failed`), the CLI reports the exact failure cause
-(failed Job name, console pod readiness) and offers rollback /
-uninstall / abort. Choose abort to investigate without destroying a
-working deploy.
+Two caveats: `--tags` is incompatible with `--use-general-node-pool`, and
+StorageClass parameters are immutable, so changing the tag set on an existing
+release requires deleting `auto-ebs-sc` first. The script checks both cases and
+reports the required correction.
 
 ## Diagnostics
 
+If installation fails, `aws-bootstrap.sh` prints Helm status, pods, jobs,
+events, logs, and pod descriptions. For an existing deployment, collect the
+same first-line diagnostics with:
+
 ```bash
-migration-assistant diag
+helm status ma -n ma
+kubectl get pods -n ma -o wide
+kubectl get events -n ma --sort-by=.lastTimestamp
 ```
-
-Dumps `helm status`, `kubectl get pods -o wide`, `kubectl describe`
-for any unhealthy pod, sorted events, and the install-notes
-ConfigMap to `~/.opensearch-migrate/<stage>/log/migrate.log`.
-
-The same dump runs automatically on a failed `helm upgrade --install`.
 
 ## Cleanup
 
+Remove the Helm release before deleting the CloudFormation stack:
+
 ```bash
-migration-assistant cleanup --stage prod
+helm uninstall ma -n ma
+aws cloudformation delete-stack \
+  --stack-name MA-Dev \
+  --region us-east-2
 ```
 
-Helm-uninstalls the release, deletes the CFN stack, and archives state
-to `~/.opensearch-migrate/<stage>/archive/<timestamp>/`.
+The Helm pre-delete hook stops workflows, deletes dashboards, and empties the
+deployment's S3 bucket.
 
 ## See also
 
-- [`cli/README.md`](cli/README.md) — CLI architecture, lib layout, tests.
+- Run `./deployment/k8s/aws/aws-bootstrap.sh --help` for the complete option
+  list.
 - [Project wiki](https://github.com/opensearch-project/opensearch-migrations/wiki)
-  — full Migration Assistant documentation including deploy-from-AWS
-  options that don't require a repo checkout.
-- [`../README.md`](../README.md) — overall K8s deployment project.
+  for full Migration Assistant documentation.
+- [`../README.md`](../README.md) for the overall Kubernetes deployment project.

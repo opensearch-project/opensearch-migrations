@@ -33,11 +33,9 @@ sequenceDiagram
 
 The EKS solution has a simpler initial configuration surface.  A user deploys an
 EKS cluster via one of the vended CloudFormation templates.  Once deployed, the
-user runs the migration-assistant CLI (legacy entry-point: `aws-bootstrap.sh`,
-which is now a thin shim that execs the CLI with the same flags). The CLI can
-be downloaded directly from GitHub and run as-is. Both of these commands can be
-run from an AWS CloudShell or from anywhere else with credentials and network
-access.  
+user runs `aws-bootstrap.sh`, which can be downloaded directly from GitHub and
+run as-is. The CloudFormation deployment and the bootstrap script can be run
+from AWS CloudShell or from anywhere else with credentials and network access.
 
 See [here](../k8s/aws/README.md) for a quick-start to setup and EKS cluster 
 and deploy the Migration Assistant to it.
@@ -67,4 +65,3 @@ While using EC2 in the ECS solution, we have run into issues with AMI's being re
 * Test the project `npm run build`
 * Create the deployment artifacts `npm run synth`
 * Deploy with the default AWS credentials to the default region `npm run deploy`
-* 
