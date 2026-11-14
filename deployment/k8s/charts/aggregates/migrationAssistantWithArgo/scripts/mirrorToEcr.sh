@@ -13,6 +13,13 @@
 # =============================================================================
 set -euo pipefail
 
+if ! type mirror_image_is_current >/dev/null 2>&1; then
+  _mirror_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  # shellcheck source=mirrorToEcrUtils.sh
+  . "${_mirror_script_dir}/mirrorToEcrUtils.sh"
+  unset _mirror_script_dir
+fi
+
 default_private_ecr_manifest() {
   local script_dir
   script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -118,13 +125,16 @@ copy_image() {
     done
   ;; esac
 
-  aws ecr create-repository --repository-name "$ecr_repo" --region "$region" 2>/dev/null || true
-
   # Prepend pull-through cache source if available (fastest path — same-region ECR to ECR)
   local ptc_src
   ptc_src=$(ptc_rewrite "$ptc" "$image") && sources="$ptc_src ${sources}"
 
   for src in $sources; do
+    if mirror_image_is_current "$src" "$dest"; then
+      [ "$src" != "$image" ] && echo "  ℹ️  $image (via $src)"
+      echo "  ✅ $image (already mirrored)"
+      return 0
+    fi
     for attempt in 1 2 3 4 5; do
       if crane copy "$src" "$dest" 2>/dev/null; then
         [ "$src" != "$image" ] && echo "  ℹ️  $image (via $src)"
@@ -162,10 +172,14 @@ mirror_images_to_ecr() {
 
   echo ""
   echo "=== Mirroring container images ==="
-  local _imglist _max_jobs=4 _failfile
+  local _imglist _max_jobs _failfile _image_count
   _imglist=$(mktemp)
   _failfile=$(mktemp)
   echo "$images" | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//' | grep -v '^#' | grep -v '^$' > "$_imglist"
+  ensure_mirror_ecr_repositories "$region" "$(cat "$_imglist")"
+  _image_count=$(wc -l < "$_imglist" | tr -d ' ')
+  _max_jobs=$(mirror_copy_concurrency "$_image_count")
+  echo "Using $_max_jobs concurrent image copies (set MIRROR_CONCURRENCY to override)."
   while IFS= read -r image; do
     # Throttle to $_max_jobs concurrent copies
     while [ "$(jobs -rp | wc -l)" -ge "$_max_jobs" ]; do
@@ -216,6 +230,11 @@ mirror_charts_to_ecr() {
     version="${version#"${version%%[![:space:]]*}"}"; version="${version%"${version##*[![:space:]]}"}"
     repo="${repo#"${repo%%[![:space:]]*}"}"; repo="${repo%"${repo##*[![:space:]]}"}"
     [ -z "$name" ] && continue
+
+    if mirror_ecr_tag_exists "$region" "charts/${name}" "$version"; then
+      echo "  ✅ $name $version (already mirrored)"
+      continue
+    fi
 
     echo "  Pulling $name $version from $repo..."
     # Retry transient pull failures (DNS, github.io 5xx, OCI registry blip)

@@ -62,6 +62,11 @@ the deployment's private ECR registry. Use `--version <tag>` to select a
 specific release, or `--use-public-images` when the cluster can pull directly
 from the public registries.
 
+On subsequent runs, mirroring skips image tags whose source and destination
+digests already match, skips Helm chart versions already present in ECR, and
+avoids recreating existing repositories. Image copies use up to six workers by
+default; set `MIRROR_CONCURRENCY` to a positive integer to tune that limit.
+
 For an end-to-end walkthrough that builds from source, creates a self-managed
 Elasticsearch source and an Amazon OpenSearch Service domain or Serverless
 collection target, runs a backfill plus capture and replay, and observes it, see

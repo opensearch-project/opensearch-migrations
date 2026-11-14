@@ -1825,10 +1825,13 @@ fi
 
 
 # --- source helper scripts (inlined by assemble-bootstrap.sh for release) ---
+# @source deployment/k8s/charts/aggregates/migrationAssistantWithArgo/scripts/mirrorToEcrUtils.sh
 # @source deployment/k8s/charts/aggregates/migrationAssistantWithArgo/scripts/mirrorToEcr.sh
 # @source deployment/k8s/charts/aggregates/migrationAssistantWithArgo/scripts/generatePrivateEcrValues.sh
 _bootstrap_source_helpers() {
   local scripts_dir="${base_dir}/deployment/k8s/charts/aggregates/migrationAssistantWithArgo/scripts"
+  # shellcheck source=../../../charts/aggregates/migrationAssistantWithArgo/scripts/mirrorToEcrUtils.sh
+  . "$scripts_dir/mirrorToEcrUtils.sh"
   # shellcheck source=../../../charts/aggregates/migrationAssistantWithArgo/scripts/mirrorToEcr.sh
   . "$scripts_dir/mirrorToEcr.sh"
   # shellcheck source=../../../charts/aggregates/migrationAssistantWithArgo/scripts/generatePrivateEcrValues.sh
@@ -1873,6 +1876,10 @@ if [[ "$push_images_to_ecr" == "true" ]]; then
     crane_copy_retry() {
       local src="$1" dst="$2"
       local attempt
+      if mirror_image_is_current "$src" "$dst"; then
+        echo "  ✅ already mirrored: $dst"
+        return 0
+      fi
       for attempt in 1 2 3 4 5; do
         if crane copy "$src" "$dst" 2>&1 | tail -1; then
           return 0
