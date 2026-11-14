@@ -221,7 +221,7 @@ function getRfsDeploymentManifest
         env: [
             ...getTargetHttpAuthCredsEnvVars(args.targetBasicCredsSecretNameOrEmpty),
             ...getCoordinatorHttpAuthCredsEnvVars(args.coordinatorBasicCredsSecretNameOrEmpty),
-<<<<<<< HEAD
+            ...getAzureStorageCredsEnvVars(args.azureCredsSecretNameOrEmpty),
             // Log levels from documentBackfillConfig.logLevels, read by RFS's log4j2.properties. Terminal
             // document failures go to the durable S3 failed document stream; the pod-local FailedRequests log
             // defaults to WARN as a local-dev safety net.
@@ -233,16 +233,6 @@ function getRfsDeploymentManifest
                 name: "BULK_REQUEST_TRACE_LOG_LEVEL",
                 value: makeStringTypeProxy(args.bulkRequestTraceLogLevel)
             },
-=======
-            ...getAzureStorageCredsEnvVars(args.azureCredsSecretNameOrEmpty),
-            // Terminal RFS document failures go to a durable S3 failed document stream
-            // (see RFS/.../reindexer/faileddocumentstream). The previous OFF override turned off the
-            // pod-local FailedRequests log because no durable replacement existed; we can now keep the
-            // in-pod logger at WARN as a local-dev safety net. The S3 sink is enabled via the
-            // --failed-document-stream-s3-* args, which the config processor resolves (including the
-            // deployment default) before submission — RFS no longer reads any S3 default from the pod
-            // environment. Per-pod session id comes from the workflow.
->>>>>>> 9286873def0859f36e6130924db91513861af4ed
             {
                 name: "FAILED_REQUESTS_LOGGER_LEVEL",
                 value: makeStringTypeProxy(args.failedRequestsLogLevel)

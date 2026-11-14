@@ -48,7 +48,9 @@
               }
             ],
             "metadataMigrationConfig": {},
-            "documentBackfillConfig": {}
+            "documentBackfillConfig": {
+              "disableFailedDocumentStream": true
+            }
           }
         ]
       }

@@ -165,15 +165,17 @@ class OpenSearchDocumentSinkBatchingTest {
     }
 
     @Test
-    void rawSourcePreparationValidatesBeforeEnteringTheSendPath() {
+    void rawSourcePreparationLeavesInvalidSourceForItsLaneToRecord() {
         var invalid = doc("d1", "{\"value\":}");
         var valid = doc("d1", "{\"value\":1}");
         var sink = sink(null, Integer.MAX_VALUE, 1024);
 
         var prepared = assertDoesNotThrow(() -> sink.prepareSourceDocument("idx", valid));
+        var invalidPrepared = assertDoesNotThrow(() -> sink.prepareSourceDocument("idx", invalid));
 
         assertEquals(serialized(List.of(valid)).length, prepared.sizeBytes());
-        assertThrows(IOException.class, () -> sink.prepareSourceDocument("idx", invalid));
+        assertEquals(invalid.sourceLength(), invalidPrepared.sizeBytes());
+        org.junit.jupiter.api.Assertions.assertNull(invalidPrepared.preparation());
     }
 
     @Test

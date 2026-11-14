@@ -237,14 +237,10 @@ function validateOptionalDefaultConsistency<T extends z.ZodTypeAny>(
 
 export const OPTIONAL_STORAGE_ENDPOINT_PATTERN = /^(?:(?:https?|localstacks?):\/\/[^/]+\/?)?$/;
 
-<<<<<<< HEAD
 // An assumable IAM role ARN in any partition (aws, aws-cn, aws-us-gov, aws-iso-b, ...), with an optional
 // IAM path (role/service-role/Name). Only roles can be assumed, so users, groups, and policies are rejected.
 export const S3_ROLE_ARN_PATTERN = /^(arn:aws(-[a-z]+)*:iam::\d{12}:role(\/[\w+=,.@-]+)*\/[\w+=,.@-]+)?$/;
 
-// Provider-agnostic repository config. The URI scheme (s3:// or gs://) determines the backend.
-// S3 bucket names: 3-63 chars; GCS bucket names: up to 220 chars including dotted segments.
-=======
 // Name lengths: S3 bucket 3-63, GCS bucket 3-222 (dotted names), Azure account 3-24, Azure container 3-63.
 const S3_BUCKET_PATTERN = "[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]";
 const GCS_BUCKET_PATTERN = "[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]";
@@ -256,7 +252,6 @@ const REPO_PATH_URI_PATTERN = new RegExp(
     `^(?:s3:\\/\\/${S3_BUCKET_PATTERN}|gs:\\/\\/${GCS_BUCKET_PATTERN}` +
     `|azure:\\/\\/${AZURE_ACCOUNT_PATTERN}\\/${AZURE_CONTAINER_PATTERN})${REPO_SUBPATH_PATTERN}$`);
 
->>>>>>> 9286873def0859f36e6130924db91513861af4ed
 export const REPO_CONFIG = z.object({
     repoPathUri: z.string().regex(REPO_PATH_URI_PATTERN)
         .describe("Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH', 'gs://BUCKET_NAME/OPTIONAL_PATH', " +
@@ -269,27 +264,19 @@ export const REPO_CONFIG = z.object({
     endpoint: z.string().regex(OPTIONAL_STORAGE_ENDPOINT_PATTERN).default("").optional()
         .describe("Override the storage endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. " +
             "LocalStack endpoints are automatically resolved to IP addresses during config transformation. " +
-<<<<<<< HEAD
-            "Used for S3 (LocalStack) or GCS (fake-gcs-server) testing."),
-    s3RoleArn: z.string().regex(S3_ROLE_ARN_PATTERN).default("").optional()
-        .describe("IAM role ARN that the source cluster will assume to read/write snapshots to S3 " +
-            "(e.g. 'arn:aws:iam::123456789012:role/service-role/SnapshotRole'). " +
-            "Used for s3:// URIs only; ignored for gs://. " +
-            "Leave empty if the cluster's own IAM role already has S3 access.")
-=======
             "Used for S3 (LocalStack), GCS (fake-gcs-server), or Azure (Azurite) testing. " +
             "Honored by the tools that read a snapshot repository directly, for every scheme. " +
             "Snapshot creation registers the repository on the cluster instead, and only repository-s3 " +
             "has a repository-level endpoint setting, so creation ignores this for gs:// and azure://."),
-    s3RoleArn: z.string().regex(/^(arn:aws(-[a-z]+)*:iam::\d{12}:(user|role|group|policy)\/[a-zA-Z0-9+=,.@_-]+)?$/).default("").optional()
-        .describe("IAM role ARN that the source cluster will assume to read/write snapshots to S3. " +
+    s3RoleArn: z.string().regex(S3_ROLE_ARN_PATTERN).default("").optional()
+        .describe("IAM role ARN that the source cluster will assume to read/write snapshots to S3 " +
+            "(e.g. 'arn:aws:iam::123456789012:role/service-role/SnapshotRole'). " +
             "Used for s3:// URIs only; ignored for gs:// and azure://. " +
             "Leave empty if the cluster's own IAM role already has S3 access."),
     azureCredentialsSecretName: z.string().regex(/^(?:[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*)?$/).default("").optional()
         .describe("Name of a Kubernetes Secret holding either an 'accountKey' or a 'sasToken' key, used by the " +
             "migration tools to read an azure:// repository. Used for azure:// URIs only; ignored otherwise. " +
             "Leave empty to use the ambient Azure identity.")
->>>>>>> 9286873def0859f36e6130924db91513861af4ed
 }).describe("Configuration for a snapshot repository used by the source cluster. " +
     "The URI scheme in repoPathUri determines whether the backend is S3, GCS, or Azure Blob Storage. " +
     "For GCS, authentication is expected to be provided to the source cluster out-of-band " +
