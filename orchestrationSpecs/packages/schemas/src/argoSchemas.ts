@@ -122,6 +122,13 @@ export const ARGO_FILE_SOURCE_VOLUME_MOUNT = z.object({
     readOnly: z.literal(true).default(true).optional()
 }).strict();
 
+// The routing table travels to the Java tools as a JSON string; the arg parser drops arrays of objects
+const COLLECTION_ROUTING_RESOLVED_FIELDS = {
+    collectionRouting: z.string().optional()
+        .describe("JSON object holding the staticCollectionRouting and regexCollectionRouting lists for a collection-routed OpenSearch Serverless target.")
+        .changeRestriction('impossible'),
+} as const;
+
 const FILE_SOURCE_RESOLVED_FIELDS = {
     fileSourceVolumes: z.array(ARGO_FILE_SOURCE_VOLUME).default([]).optional(),
     fileSourceVolumeMounts: z.array(ARGO_FILE_SOURCE_VOLUME_MOUNT).default([]).optional(),
@@ -156,9 +163,7 @@ export const DENORMALIZED_REPO_CONFIG =
         repoName: z.string(),
     }));
 
-export const CLUSTER_CONNECTION_IDENTITY = z.object({
-    label: z.string(),
-    version: z.string(),
+const CLUSTER_CONNECTION_IDENTITY_COMMON_FIELDS = {
     endpoint: z.string(),
     allowInsecure: z.boolean(),
     // Solr sources only; "" elsewhere.
@@ -169,6 +174,17 @@ export const CLUSTER_CONNECTION_IDENTITY = z.object({
     authSigv4Service: z.string(),
     authMtlsClientSecretName: z.string(),
     authMtlsCaCertHash: z.string(),
+};
+
+export const SOURCE_CLUSTER_CONNECTION_IDENTITY = z.object({
+    label: z.string(),
+    version: z.string(),
+    ...CLUSTER_CONNECTION_IDENTITY_COMMON_FIELDS,
+});
+
+export const TARGET_CLUSTER_CONNECTION_IDENTITY = z.object({
+    label: z.string(),
+    ...CLUSTER_CONNECTION_IDENTITY_COMMON_FIELDS,
 });
 
 export const COMPLETE_SNAPSHOT_CONFIG =
@@ -225,6 +241,7 @@ export const ARGO_METADATA_OPTIONS = makeOptionalDefaultedFieldsRequired(
         ...OTEL_EXPORT_CONTROL_FIELD_MASK,
     }).extend({
         ...FILE_SOURCE_RESOLVED_FIELDS,
+        ...COLLECTION_ROUTING_RESOLVED_FIELDS,
         skipEvaluateApproval: z.boolean(),
         skipMigrateApproval: z.boolean(),
     })
@@ -233,6 +250,7 @@ export const ARGO_METADATA_OPTIONS = makeOptionalDefaultedFieldsRequired(
 export const ARGO_METADATA_WORKFLOW_OPTION_KEYS = [
     "jvmArgs",
     "loggingConfigurationOverrideConfigMap",
+    "logLevels",
     "resources",
     "skipEvaluateApproval",
     "skipMigrateApproval",
@@ -246,6 +264,7 @@ export const ARGO_RFS_OPTIONS = makeOptionalDefaultedFieldsRequired(
         ...OTEL_EXPORT_CONTROL_FIELD_MASK,
     }).extend({
         ...FILE_SOURCE_RESOLVED_FIELDS,
+        ...COLLECTION_ROUTING_RESOLVED_FIELDS,
         skipApproval: z.boolean(),
         previousSnapshotName: z.string().min(1).optional(),
         deltaMode: z.enum(["DELETES_ONLY", "UPDATES_ONLY"]).optional(),
@@ -256,6 +275,7 @@ export const ARGO_RFS_WORKFLOW_OPTION_KEYS = [
     "minPodReplicas",
     "jvmArgs",
     "loggingConfigurationOverrideConfigMap",
+    "logLevels",
     "skipApproval",
     "useTargetClusterForWorkCoordination",
     "resources",
@@ -285,6 +305,7 @@ export const ARGO_PROXY_OPTIONS = makeOptionalDefaultedFieldsRequired(
 );
 export const ARGO_PROXY_WORKFLOW_OPTION_KEYS = [
     "loggingConfigurationOverrideConfigMap",
+    "logLevels",
     "serviceType",
     "internetFacing",
     "podReplicas",
@@ -322,6 +343,7 @@ export const ARGO_REPLAYER_OPTIONS = makeOptionalDefaultedFieldsRequired(
 export const ARGO_REPLAYER_WORKFLOW_OPTION_KEYS = [
     "jvmArgs",
     "loggingConfigurationOverrideConfigMap",
+    "logLevels",
     "podReplicas",
     "minPodReplicas",
     "useLocalStack",
@@ -375,8 +397,8 @@ export const SNAPSHOT_MIGRATION_CONFIG = z.object({
     snapshotConfigChecksum: z.string(),
     metadataMigrationConfig: ARGO_METADATA_OPTIONS.optional(),
     documentBackfillConfig: ARGO_RFS_OPTIONS.optional(),
-    sourceConnectionIdentity: CLUSTER_CONNECTION_IDENTITY,
-    targetConnectionIdentity: CLUSTER_CONNECTION_IDENTITY,
+    sourceConnectionIdentity: SOURCE_CLUSTER_CONNECTION_IDENTITY,
+    targetConnectionIdentity: TARGET_CLUSTER_CONNECTION_IDENTITY,
     sourceVersion: z.string(),
     sourceLabel: z.string(),
     targetConfig: NAMED_TARGET_CLUSTER_CONFIG,
@@ -407,7 +429,7 @@ export const NAMED_KAFKA_CLIENT_CONFIG =
 export const DENORMALIZED_PROXY_CONFIG = z.object({
     name: z.string(),
     sourceConfig: NAMED_SOURCE_CLUSTER_CONFIG,
-    sourceConnectionIdentity: CLUSTER_CONNECTION_IDENTITY,
+    sourceConnectionIdentity: SOURCE_CLUSTER_CONNECTION_IDENTITY,
     kafkaConfig: NAMED_KAFKA_CLIENT_CONFIG,
     proxyConfig: ARGO_PROXY_OPTIONS,
     configChecksum: z.string(),
@@ -429,7 +451,7 @@ export const PER_SOURCE_CREATE_SNAPSHOTS_CONFIG = z.object({
     label: z.string(),
     snapshotPrefix: z.string(),
     sequenceName: z.string().optional(),
-    sourceConnectionIdentity: CLUSTER_CONNECTION_IDENTITY,
+    sourceConnectionIdentity: SOURCE_CLUSTER_CONNECTION_IDENTITY,
     config: ARGO_CREATE_SNAPSHOT_OPTIONS,
     repo: DENORMALIZED_REPO_CONFIG,
     semaphoreConfigMapName: z.string(),
@@ -475,7 +497,7 @@ export const DENORMALIZED_REPLAY_CONFIG = z.object({
     kafkaConfig: NAMED_KAFKA_CLIENT_CONFIG,
     replayerConfig: ARGO_REPLAYER_OPTIONS,
     toTarget: NAMED_TARGET_CLUSTER_CONFIG,
-    targetConnectionIdentity: CLUSTER_CONNECTION_IDENTITY,
+    targetConnectionIdentity: TARGET_CLUSTER_CONNECTION_IDENTITY,
     configChecksum: z.string(),
     resourceUid: z.string(),
 });

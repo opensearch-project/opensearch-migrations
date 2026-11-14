@@ -9,7 +9,11 @@ import {parse as parseYaml, stringify} from "yaml";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import {MigrationConfigTransformer, MigrationInitializer} from "../../src";
+import {
+    MigrationConfigTransformer,
+    MigrationInitializer,
+    stringifyKubernetesManifest,
+} from "../../src";
 
 const TEST_NAMESPACE = "migration-crd-roundtrip";
 const MIGRATION_RUN_NAMESPACE = "migration-run-history";
@@ -98,6 +102,7 @@ function sampleConfig(): z.infer<typeof OVERALL_MIGRATION_CONFIG> {
                 snap1: [{
                     metadataMigrationConfig: {},
                     documentBackfillConfig: {
+                        disableFailedDocumentStream: true,
                         maxConnections: 8,
                     },
                 }],
@@ -133,6 +138,18 @@ async function copyTextToContainer(container: StartedK3sContainer, contents: str
     }
 }
 
+async function installGeneratedMigrationPolicies(container: StartedK3sContainer, namespace: string) {
+    await copyTextToContainer(container, generateMigrationCrdsYaml(), "/tmp/migrationCrds.yaml");
+    await copyTextToContainer(container, generateValidatingAdmissionPoliciesYaml(), "/tmp/migrationVaps.yaml");
+    await execOrThrow(container, ["kubectl", "apply", "-f", "/tmp/migrationCrds.yaml"],
+        "apply generated migration CRDs");
+    await execOrThrow(container, ["kubectl", "wait", "--for=condition=Established", "--timeout=90s", "crd",
+        "-l", "migrations.opensearch.org/generated=true"], "wait for generated migration CRDs");
+    await execOrThrow(container, ["kubectl", "apply", "-f", "/tmp/migrationVaps.yaml"],
+        "apply generated migration VAPs");
+    await execOrThrow(container, ["kubectl", "create", "namespace", namespace], "create namespace");
+}
+
 function manifestForCreate(item: any) {
     const {status, ...withoutStatus} = item;
     void status;
@@ -165,7 +182,7 @@ async function generateSnapshotMigrationManifest(config: z.infer<typeof OVERALL_
 
 function assertSpecRoundTrip(kind: string, name: string, expected: unknown, actual: unknown) {
     try {
-        expect(actual).toEqual(expected);
+        expect(actual).toEqual(JSON.parse(JSON.stringify(expected)));
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         throw new Error(`${kind}/${name} spec did not round-trip through the generated CRD.\n${message}`);
@@ -218,7 +235,7 @@ describe("generated migration CRDs live compatibility", () => {
             }
 
             const containerPath = `/tmp/resource-${String(i).padStart(2, "0")}.yaml`;
-            await copyTextToContainer(container, stringify(resource), containerPath);
+            await copyTextToContainer(container, stringifyKubernetesManifest(resource), containerPath);
             await execOrThrow(
                 container,
                 ["kubectl", "apply", "-f", containerPath, "-n", TEST_NAMESPACE],
@@ -374,6 +391,145 @@ describe("generated migration CRDs live compatibility", () => {
         });
     });
 
+    test("gates only increases of RFS maxConnections and leaves initialLeaseDuration safe", async () => {
+        const namespace = "rfs-throughput-knobs";
+        await installGeneratedMigrationPolicies(container, namespace);
+
+        const resource = "snapshotmigrations.migrations.opensearch.org/knobs";
+        await copyTextToContainer(container, stringify({
+            apiVersion: "migrations.opensearch.org/v1alpha1",
+            kind: "SnapshotMigration",
+            metadata: {
+                name: "knobs",
+                namespace,
+                labels: {"migrations.opensearch.org/run-number": "7"},
+            },
+            spec: {
+                documentBackfillMaxConnections: 10,
+                documentBackfillInitialLeaseDuration: "PT1H",
+            },
+        }), "/tmp/knobs.yaml");
+        await execOrThrow(container, ["kubectl", "apply", "-f", "/tmp/knobs.yaml"], "create SnapshotMigration");
+        await execOrThrow(container, ["kubectl", "patch", resource, "-n", namespace, "--subresource=status",
+            "--type=merge", "-p", JSON.stringify({status: {phase: "Pending"}})], "mark SnapshotMigration Pending");
+
+        const patchSpec = (spec: Record<string, unknown>) =>
+            ["kubectl", "patch", resource, "-n", namespace, "--type=merge", "-p", JSON.stringify({spec})];
+
+        await execOrThrow(container, patchSpec({documentBackfillMaxConnections: 5}), "lower maxConnections");
+        await execOrThrow(container, patchSpec({documentBackfillInitialLeaseDuration: "PT2H"}), "change initialLeaseDuration");
+        const denied = await execExpectFailure(container, patchSpec({documentBackfillMaxConnections: 20}),
+            "raise maxConnections without approval");
+        expect(denied).toContain("documentBackfillMaxConnections (increase)");
+
+        await execOrThrow(container, ["kubectl", "annotate", resource, "-n", namespace,
+            "migrations.opensearch.org/approved-during-run=7"], "approve the change for this run");
+        await execOrThrow(container, patchSpec({documentBackfillMaxConnections: 20}), "raise maxConnections with approval");
+    });
+
+    test("override annotations for the current run override field rules but not lifecycle guards", async () => {
+        const namespace = "change-restriction-override";
+        await installGeneratedMigrationPolicies(container, namespace);
+
+        const fieldKey = (specPath: string) => `change-restriction-override.migrations.opensearch.org/${specPath}`;
+        const allFieldsKey = "migrations.opensearch.org/change-restriction-override-all-fields";
+        const create = async (kind: string, name: string, spec: Record<string, unknown>, phase: string) => {
+            await copyTextToContainer(container, stringify({
+                apiVersion: "migrations.opensearch.org/v1alpha1",
+                kind,
+                metadata: {name, namespace, labels: {"migrations.opensearch.org/run-number": "7"}},
+                spec,
+            }), `/tmp/${name}.yaml`);
+            await execOrThrow(container, ["kubectl", "apply", "-f", `/tmp/${name}.yaml`], `create ${kind}/${name}`);
+            await execOrThrow(container, ["kubectl", "patch", `${CRD_KIND_TO_PLURAL[kind]}.migrations.opensearch.org/${name}`,
+                "-n", namespace, "--subresource=status", "--type=merge", "-p", JSON.stringify({status: {phase}})],
+                `set ${kind}/${name} phase ${phase}`);
+            return `${CRD_KIND_TO_PLURAL[kind]}.migrations.opensearch.org/${name}`;
+        };
+        const annotate = (resource: string, key: string, value: string) => execOrThrow(container,
+            ["kubectl", "annotate", "--overwrite", resource, "-n", namespace, `${key}=${value}`], `annotate ${key}=${value}`);
+        const patchSpec = (resource: string, spec: Record<string, unknown>) =>
+            ["kubectl", "patch", resource, "-n", namespace, "--type=merge", "-p", JSON.stringify({spec})];
+
+        const migration = await create("SnapshotMigration", "running", {
+            documentBackfillIndexAllowlist: ["a"],
+            documentBackfillAllowLooseVersionMatching: true,
+            documentBackfillMaxShardSizeBytes: 100,
+        }, "Pending");
+
+        // Impossible field: denied without an annotation, and with one for an earlier run.
+        expect(await execExpectFailure(container, patchSpec(migration, {documentBackfillIndexAllowlist: ["a", "b"]}),
+            "impossible change without the override")).toContain("Impossible");
+        await annotate(migration, fieldKey("documentBackfillIndexAllowlist"), "6");
+        await execExpectFailure(container, patchSpec(migration, {documentBackfillIndexAllowlist: ["a", "b"]}),
+            "impossible change with a stale override run number");
+        await annotate(migration, fieldKey("documentBackfillIndexAllowlist"), "7");
+        await execOrThrow(container, patchSpec(migration, {documentBackfillIndexAllowlist: ["a", "b"]}),
+            "impossible change with the override for this run");
+
+        // A gated field passes on its own override annotation without the run's approval.
+        await execExpectFailure(container, patchSpec(migration, {documentBackfillMaxShardSizeBytes: 200}),
+            "gated change without approval or an override");
+        await annotate(migration, fieldKey("documentBackfillMaxShardSizeBytes"), "7");
+        await execOrThrow(container, patchSpec(migration, {documentBackfillMaxShardSizeBytes: 200}),
+            "gated change with the override");
+
+        // The resource-wide key covers any field.
+        await execExpectFailure(container, patchSpec(migration, {documentBackfillAllowLooseVersionMatching: false}),
+            "second impossible field without the override");
+        await annotate(migration, allFieldsKey, "7");
+        await execOrThrow(container, patchSpec(migration, {documentBackfillAllowLooseVersionMatching: false}),
+            "second impossible field with the resource-wide override");
+
+        // A nonDecreasing invariant, which approval can't override, yields to the override.
+        const topic = await create("CapturedTraffic", "topic", {partitions: 3}, "Pending");
+        await annotate(topic, "migrations.opensearch.org/approved-during-run", "7");
+        expect(await execExpectFailure(container, patchSpec(topic, {partitions: 2}),
+            "partition decrease with approval only")).toContain("cannot decrease");
+        await annotate(topic, fieldKey("partitions"), "7");
+        await execOrThrow(container, patchSpec(topic, {partitions: 2}), "partition decrease with the override");
+
+        // Lifecycle guards ignore the override.
+        const completed = await create("SnapshotMigration", "completed", {documentBackfillMaxShardSizeBytes: 100}, "Completed");
+        await annotate(completed, allFieldsKey, "7");
+        expect(await execExpectFailure(container, patchSpec(completed, {documentBackfillMaxShardSizeBytes: 200}),
+            "change to a Completed resource with the override")).toContain("Completed");
+        // A Deleting resource refuses even the annotation, and so any change.
+        const deleting = await create("SnapshotMigration", "deleting", {documentBackfillMaxShardSizeBytes: 100}, "Deleting");
+        expect(await execExpectFailure(container, ["kubectl", "annotate", deleting, "-n", namespace,
+            `${allFieldsKey}=7`], "override annotation on a Deleting resource")).toContain("being deleted");
+        await execExpectFailure(container, patchSpec(deleting, {documentBackfillMaxShardSizeBytes: 200}),
+            "change to a Deleting resource");
+    });
+
+    test("refuses metadata transform changes on a running SnapshotMigration", async () => {
+        const namespace = "metadata-transforms";
+        await installGeneratedMigrationPolicies(container, namespace);
+        await copyTextToContainer(container, stringify({
+            apiVersion: "migrations.opensearch.org/v1alpha1",
+            kind: "SnapshotMigration",
+            metadata: {name: "transforms", namespace, labels: {"migrations.opensearch.org/run-number": "3"}},
+            spec: {
+                metadataMigrationTransformerConfig: "[{\"A\":{}}]",
+                metadataMigrationTransformerConfigBase64: "",
+                metadataMigrationTransformerConfigFile: "",
+            },
+        }), "/tmp/transforms.yaml");
+        await execOrThrow(container, ["kubectl", "apply", "-f", "/tmp/transforms.yaml"], "create SnapshotMigration");
+        const resource = "snapshotmigrations.migrations.opensearch.org/transforms";
+        await execOrThrow(container, ["kubectl", "patch", resource, "-n", namespace, "--subresource=status",
+            "--type=merge", "-p", JSON.stringify({status: {phase: "Pending"}})], "mark SnapshotMigration Pending");
+
+        for (const [field, value] of [
+            ["metadataMigrationTransformerConfig", "[{\"B\":{}}]"],
+            ["metadataMigrationTransformerConfigBase64", "W10="],
+            ["metadataMigrationTransformerConfigFile", "/transforms.json"],
+        ]) {
+            expect(await execExpectFailure(container, ["kubectl", "patch", resource, "-n", namespace, "--type=merge",
+                "-p", JSON.stringify({spec: {[field]: value}})], `change ${field}`)).toContain(`Impossible: ${field}`);
+        }
+    });
+
     test("allows Kubernetes deletion bookkeeping after a migration resource enters Deleting", async () => {
         await copyTextToContainer(container, generateMigrationCrdsYaml(), "/tmp/migrationCrds.yaml");
         await copyTextToContainer(container, generateValidatingAdmissionPoliciesYaml(), "/tmp/migrationVaps.yaml");
@@ -494,7 +650,7 @@ describe("generated migration CRDs live compatibility", () => {
                 ...manifest,
                 metadata: {...manifest.metadata, name: label, namespace: FAILED_DOCUMENT_STREAM_NAMESPACE},
             };
-            await copyTextToContainer(container, stringify(named), `/tmp/sm-${label}.yaml`);
+            await copyTextToContainer(container, stringifyKubernetesManifest(named), `/tmp/sm-${label}.yaml`);
             await execOrThrow(
                 container,
                 ["kubectl", "apply", "-f", `/tmp/sm-${label}.yaml`, "-n", FAILED_DOCUMENT_STREAM_NAMESPACE],
@@ -520,8 +676,10 @@ describe("generated migration CRDs live compatibility", () => {
 
         // Control: an explicit bucket does reach the CR, so the assertions above aren't vacuous.
         const configWithBucket = sampleConfig() as any;
-        configWithBucket.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0].documentBackfillConfig
-            .failedDocumentStreamS3Bucket = "user-named-bucket";
+        const backfillWithBucket = configWithBucket.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0]
+            .documentBackfillConfig;
+        delete backfillWithBucket.disableFailedDocumentStream;
+        backfillWithBucket.failedDocumentStreamS3Bucket = "user-named-bucket";
         const withBucket = await applyAndReadSpec(
             await generateSnapshotMigrationManifest(configWithBucket), "with-bucket");
 

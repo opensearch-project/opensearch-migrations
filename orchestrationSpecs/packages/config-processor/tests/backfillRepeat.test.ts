@@ -25,7 +25,7 @@ function policyConfig(maxRuns = 3, snapshotLag?: string) {
             backfill: {
                 snapshot: {repoName: "repo", createSnapshotConfig: {indexAllowlist: ["orders"]}},
                 metadataMigrationConfig: {},
-                documentBackfillConfig: {indexAllowlist: ["orders"]},
+                documentBackfillConfig: {indexAllowlist: ["orders"], disableFailedDocumentStream: true},
                 repeat: {maxRuns, ...(snapshotLag ? {until: {snapshotLag}} : {})},
             },
         }],
@@ -51,6 +51,55 @@ describe("declarative repeated backfills", () => {
         expect(once.snapshotSequences![0].steps).toHaveLength(1);
         expect(more.snapshotMigrations[0]).toEqual(once.snapshotMigrations[0]);
         expect(more.snapshots[0].createSnapshotConfig[0]).toEqual(once.snapshots[0].createSnapshotConfig[0]);
+    });
+
+    it("preserves shared collection routing through every generated metadata and document phase", async () => {
+        const config = policyConfig();
+        const routing = {
+            staticCollectionRouting: [{sourceIndex: "orders", collection: "orders-search"}],
+            regexCollectionRouting: [{sourceIndex: "(.+)-archive", collection: "$1-search"}],
+        };
+        const output = await new MigrationConfigTransformer().processFromObject({
+            ...config,
+            targetClusters: {target: {
+                endpoint: "https://123456789012.aoss.us-east-1.on.aws",
+                collectionRouted: true,
+                authConfig: {sigv4: {region: "us-east-1", service: "aoss"}},
+            }},
+            snapshotMigrationConfigs: [{
+                ...config.snapshotMigrationConfigs[0],
+                backfill: {...config.snapshotMigrationConfigs[0].backfill, ...routing},
+            }],
+        });
+        expect(output.snapshotMigrations).toHaveLength(5);
+        for (const migration of output.snapshotMigrations) {
+            expect(JSON.parse(migration.documentBackfillConfig!.collectionRouting!)).toEqual(routing);
+            if (migration.metadataMigrationConfig) {
+                expect(JSON.parse(migration.metadataMigrationConfig.collectionRouting!)).toEqual(routing);
+            }
+        }
+    });
+
+    it("validates collection routing on the reusable backfill configuration", async () => {
+        const config = policyConfig();
+        await expect(new MigrationConfigTransformer().processFromObject({
+            ...config,
+            targetClusters: {target: {
+                endpoint: "https://123456789012.aoss.us-east-1.on.aws",
+                collectionRouted: true,
+                authConfig: {sigv4: {region: "us-east-1", service: "aoss"}},
+            }},
+        })).rejects.toThrow(/backfill needs at least one/);
+        await expect(new MigrationConfigTransformer().processFromObject({
+            ...config,
+            snapshotMigrationConfigs: [{
+                ...config.snapshotMigrationConfigs[0],
+                backfill: {
+                    ...config.snapshotMigrationConfigs[0].backfill,
+                    staticCollectionRouting: [{sourceIndex: "orders", collection: "orders-search"}],
+                },
+            }],
+        })).rejects.toThrow(/backfill sets collection routing.*not collectionRouted/);
     });
 
     it("preserves resource identities and checksums for omitted versus empty snapshot options", async () => {

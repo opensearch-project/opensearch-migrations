@@ -49,11 +49,39 @@ get_docker_network_dns_servers() {
   resolv_conf="$(docker run --rm --network "${EXTERNAL_DOCKER_NETWORK}" "${registry_image}" cat /etc/resolv.conf 2>/dev/null || true)"
   dns_line="$(printf '%s\n' "${resolv_conf}" | sed -n 's/^# ExtServers: \[\(.*\)\]$/\1/p' | head -n1)"
 
-  if [[ -z "${dns_line}" ]]; then
-    return 0
+  local server found_loopback=false servers=()
+  if [[ -n "${dns_line}" ]]; then
+    # Newer Docker lists resolvers in the host namespace as host(IP). A loopback resolver such as
+    # systemd-resolved's 127.0.0.53 (e.g. GitHub Actions Ubuntu runners) is unreachable from
+    # BuildKit RUN steps, so use the upstream servers systemd-resolved forwards to instead.
+    while IFS= read -r server; do
+      if [[ "${server}" == 127.* ]]; then
+        found_loopback=true
+      else
+        servers+=("${server}")
+      fi
+    done < <(printf '%s\n' "${dns_line}" | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}')
+
+    if [[ "${found_loopback}" == true && -r /run/systemd/resolve/resolv.conf ]]; then
+      while IFS= read -r server; do
+        servers+=("${server}")
+      done < <(sed -n 's/^nameserver[[:space:]]\{1,\}\([0-9.]\{1,\}\)[[:space:]]*$/\1/p' /run/systemd/resolve/resolv.conf | grep -v '^127\.')
+    fi
   fi
 
-  printf '%s\n' "${dns_line}" | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}'
+  # Older Docker (e.g. 25 on Amazon Linux 2 Cloud Desktops) doesn't write ExtServers. The default
+  # bridge doesn't use Docker's embedded DNS, so its resolv.conf lists the upstream servers Docker
+  # resolved itself (daemon.json "dns", or the host's, minus loopback); use those instead.
+  if [[ "${#servers[@]}" -eq 0 ]]; then
+    while IFS= read -r server; do
+      servers+=("${server}")
+    done < <(docker run --rm --network bridge "${registry_image}" cat /etc/resolv.conf 2>/dev/null |
+      sed -n 's/^nameserver[[:space:]]\{1,\}\([0-9.]\{1,\}\)[[:space:]]*$/\1/p' | grep -v '^127\.')
+  fi
+
+  if [[ "${#servers[@]}" -gt 0 ]]; then
+    printf '%s\n' "${servers[@]}" | awk '!seen[$0]++'
+  fi
 }
 
 write_buildkit_config() {
@@ -64,6 +92,11 @@ write_buildkit_config() {
   # buildkitd.toml marks docker-registry:5000 as plain HTTP; point that at this run's registry.
   sed "s/docker-registry:5000/${BUILD_CONTAINER_REGISTRY_ENDPOINT}/" "${source_config}" > "${target_config}"
 
+  # Optional extra BuildKit config, e.g. registry mirrors set up by CI (.github/scripts/registry-cache.sh).
+  if [[ -n "${BUILDKIT_EXTRA_CONFIG:-}" ]]; then
+    cat "${BUILDKIT_EXTRA_CONFIG}" >> "${target_config}"
+  fi
+
   local docker_dns_servers=()
   local server
   while IFS= read -r server; do
@@ -71,6 +104,7 @@ write_buildkit_config() {
   done < <(get_docker_network_dns_servers)
 
   if [[ "${#docker_dns_servers[@]}" -gt 0 ]]; then
+    echo "BuildKit DNS servers: ${docker_dns_servers[*]}" >&2
     {
       printf '\n[dns]\n'
       printf '  nameservers = ['

@@ -192,6 +192,7 @@ function getReplayerDeploymentManifest
     useLocalStack: BaseExpression<boolean>,
     loggingConfigMap: BaseExpression<string>,
     jvmArgs: BaseExpression<string>,
+    rootLogLevel: BaseExpression<string>,
     fileSourceVolumes: BaseExpression<any[]>,
     fileSourceVolumeMounts: BaseExpression<any[]>,
 
@@ -234,7 +235,11 @@ function getReplayerDeploymentManifest
                     }
                 }
             },
-            ...getTargetHttpAuthCredsEnvVars(args.basicAuthSecretName)
+            ...getTargetHttpAuthCredsEnvVars(args.basicAuthSecretName),
+            {
+                name: "MIGRATIONS_ROOT_LOG_LEVEL",
+                value: makeStringTypeProxy(args.rootLogLevel)
+            }
         ],
         volumeMounts: [
             {
@@ -329,6 +334,7 @@ const createDeploymentInputs = {
     useLocalStack: defineRequiredParam<boolean>(),
     jvmArgs: defineRequiredParam<string>(),
     loggingConfigurationOverrideConfigMap: defineRequiredParam<string>(),
+    rootLogLevel: defineRequiredParam<string>(),
     fileSourceVolumes: defineRequiredParam<z.infer<typeof ARGO_FILE_SOURCE_VOLUME>[]>(),
     fileSourceVolumeMounts: defineRequiredParam<z.infer<typeof ARGO_FILE_SOURCE_VOLUME_MOUNT>[]>(),
     basicAuthSecretName: defineRequiredParam<string>(),
@@ -372,6 +378,7 @@ function makeReplayerDeploymentDefinition(
             useLocalStack: expr.deserializeRecord(inputs.useLocalStack),
             loggingConfigMap: inputs.loggingConfigurationOverrideConfigMap,
             jvmArgs: inputs.jvmArgs,
+            rootLogLevel: inputs.rootLogLevel,
             fileSourceVolumes: expr.deserializeRecord(inputs.fileSourceVolumes),
             fileSourceVolumeMounts: expr.deserializeRecord(inputs.fileSourceVolumeMounts),
             basicAuthSecretName: inputs.basicAuthSecretName,
@@ -540,6 +547,10 @@ export const Replayer = replayerBaseBuilder
                 expr.deserializeRecord(b.inputs.replayerOptions),
                 ["loggingConfigurationOverrideConfigMap"],
                 "",
+              ),
+              rootLogLevel: expr.getLoose(
+                expr.getLoose(expr.deserializeRecord(b.inputs.replayerOptions), "logLevels"),
+                "root",
               ),
               fileSourceVolumes: expr.serialize(expr.dig(
                 expr.deserializeRecord(b.inputs.replayerOptions),

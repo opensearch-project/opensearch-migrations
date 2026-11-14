@@ -1,5 +1,9 @@
 # Migration Assistant Helm Chart
 
+See the [Kafka observability guide](../../../dashboards/KAFKA_OBSERVABILITY.md)
+for managed Kafka storage dashboards, opt-in alerts, CloudWatch dimensions,
+and broker JMX health.
+
 A Helm chart for deploying the OpenSearch Migration Assistant with Argo Workflows orchestration.
 
 ## Overview

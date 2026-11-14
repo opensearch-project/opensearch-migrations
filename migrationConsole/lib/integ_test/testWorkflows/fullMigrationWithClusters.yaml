@@ -22,6 +22,7 @@ spec:
             "migrations": [{
               "metadataMigrationConfig": {},
               "documentBackfillConfig": {
+                "disableFailedDocumentStream": true,
                 "maxShardSizeBytes": 16000000,
                 "resources": {
                   requests: { cpu: "25m",   memory: "1Gi", ephemeral-storage: "5Gi" },

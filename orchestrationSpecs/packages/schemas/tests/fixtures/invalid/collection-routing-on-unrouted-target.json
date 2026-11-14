@@ -1,0 +1,62 @@
+{
+  "sourceClusters": {
+    "source": {
+      "version": "ES 7.10.2",
+      "endpoint": "http://source:9200",
+      "snapshotInfo": {
+        "repos": {
+          "my-repo": {
+            "awsRegion": "us-east-1",
+            "repoPathUri": "s3://my-bucket/snapshots"
+          }
+        },
+        "snapshots": {
+          "snap1": {
+            "repoName": "my-repo",
+            "config": {
+              "externallyManagedSnapshotName": "snap1"
+            }
+          }
+        }
+      }
+    }
+  },
+  "targetClusters": {
+    "tenant-collections": {
+      "endpoint": "https://123456789012.aoss.us-east-1.on.aws",
+      "authConfig": {
+        "sigv4": {
+          "region": "us-east-1",
+          "service": "aoss"
+        }
+      }
+    }
+  },
+  "snapshotMigrationConfigs": [
+    {
+      "fromSource": "source",
+      "toTarget": "tenant-collections",
+      "perSnapshotConfig": {
+        "snap1": [
+          {
+            "label": "docs",
+            "staticCollectionRouting": [
+              {
+                "sourceIndex": "shared-config",
+                "collection": "common"
+              }
+            ],
+            "regexCollectionRouting": [
+              {
+                "sourceIndex": "(.+)[-_]\\d{4}",
+                "collection": "$1"
+              }
+            ],
+            "metadataMigrationConfig": {},
+            "documentBackfillConfig": {}
+          }
+        ]
+      }
+    }
+  ]
+}

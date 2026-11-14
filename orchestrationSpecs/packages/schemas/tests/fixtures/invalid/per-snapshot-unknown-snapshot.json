@@ -22,7 +22,7 @@
       "toTarget": "target",
       "perSnapshotConfig": {
         "does-not-exist": [
-          { "documentBackfillConfig": {} }
+          { "documentBackfillConfig": { "disableFailedDocumentStream": true } }
         ]
       }
     }

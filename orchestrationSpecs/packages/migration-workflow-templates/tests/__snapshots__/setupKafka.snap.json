@@ -514,7 +514,7 @@
                   },
                   {
                     "name": "kafkaSpec",
-                    "value": "{{=toJSON(sprig.merge(sprig.dict(\"version\", inputs.parameters.version, \"metadataVersion\", '4.0-IV3', \"listeners\", [sprig.dict(\"name\", 'plain', \"port\", 9092, \"type\", 'internal', \"tls\", false), sprig.dict(\"name\", 'tls', \"port\", 9093, \"type\", 'internal', \"tls\", true)]), sprig.dig('clusterSpecOverrides', 'kafka', sprig.dict(), fromJSON(inputs.parameters.clusterConfig))))}}"
+                    "value": "{{=toJSON(sprig.merge(sprig.dict(\"version\", inputs.parameters.version, \"metadataVersion\", '4.0-IV3', \"listeners\", [sprig.dict(\"name\", 'plain', \"port\", 9092, \"type\", 'internal', \"tls\", false), sprig.dict(\"name\", 'tls', \"port\", 9093, \"type\", 'internal', \"tls\", true)], \"metricsConfig\", sprig.dict(\"type\", 'jmxPrometheusExporter', \"valueFrom\", sprig.dict(\"configMapKeyRef\", sprig.dict(\"name\", 'migration-assistant-kafka-jmx-metrics', \"key\", 'metrics-config.yml')))), sprig.dig('clusterSpecOverrides', 'kafka', sprig.dict(), fromJSON(inputs.parameters.clusterConfig))))}}"
                   },
                   {
                     "name": "migrationRunNumber",
@@ -541,7 +541,7 @@
                   },
                   {
                     "name": "kafkaSpec",
-                    "value": "{{=toJSON(sprig.merge(sprig.dict(\"version\", inputs.parameters.version, \"metadataVersion\", '4.0-IV3', \"listeners\", [sprig.dict(\"name\", 'tls', \"port\", 9093, \"type\", 'internal', \"tls\", true, \"authentication\", sprig.dict(\"type\", 'scram-sha-512'))]), sprig.dig('clusterSpecOverrides', 'kafka', sprig.dict(), fromJSON(inputs.parameters.clusterConfig))))}}"
+                    "value": "{{=toJSON(sprig.merge(sprig.dict(\"version\", inputs.parameters.version, \"metadataVersion\", '4.0-IV3', \"listeners\", [sprig.dict(\"name\", 'tls', \"port\", 9093, \"type\", 'internal', \"tls\", true, \"authentication\", sprig.dict(\"type\", 'scram-sha-512'))], \"metricsConfig\", sprig.dict(\"type\", 'jmxPrometheusExporter', \"valueFrom\", sprig.dict(\"configMapKeyRef\", sprig.dict(\"name\", 'migration-assistant-kafka-jmx-metrics', \"key\", 'metrics-config.yml')))), sprig.dig('clusterSpecOverrides', 'kafka', sprig.dict(), fromJSON(inputs.parameters.clusterConfig))))}}"
                   },
                   {
                     "name": "migrationRunNumber",

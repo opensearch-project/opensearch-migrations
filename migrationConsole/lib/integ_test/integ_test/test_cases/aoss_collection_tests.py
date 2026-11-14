@@ -168,7 +168,7 @@ def build_aoss_migration_config(
             "perSnapshotConfig": {
                 snapshot_name: [{
                     "metadataMigrationConfig": {"indexAllowlist": indices},
-                    "documentBackfillConfig": {"indexAllowlist": indices},
+                    "documentBackfillConfig": {"disableFailedDocumentStream": True, "indexAllowlist": indices},
                 }]
             },
         })

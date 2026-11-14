@@ -45,48 +45,6 @@ variable "node_count" {
   default     = 2
 }
 
-variable "kafka_brokers" {
-  description = "Comma-separated list of Kafka bootstrap brokers"
-  type        = string
-  default     = ""
-}
-
-variable "kafka_auth_type" {
-  description = "Kafka authentication type"
-  type        = string
-  default     = "scram-sha-512"
-}
-
-variable "deploy_kafka" {
-  description = "Deploy a dedicated GKE node pool for in-cluster Kafka brokers. Set to false when using external Kafka (MSK, Confluent Cloud, Aiven) configured via kafka_brokers."
-  type        = bool
-  default     = true
-}
-
-variable "kafka_broker_count" {
-  description = "Number of Kafka broker nodes. Sizing: brokers = max(3, ceil(retention_gb / kafka_disk_size_gb))"
-  type        = number
-  default     = 3
-}
-
-variable "kafka_machine_type" {
-  description = "GCE machine type for Kafka broker nodes. Kafka is I/O and network intensive; e2-standard-4 suits most workloads up to ~200MB/s aggregate throughput."
-  type        = string
-  default     = "e2-standard-4"
-}
-
-variable "kafka_disk_size_gb" {
-  description = "Persistent disk size per Kafka broker in GB. Sizing: retention_gb = write_throughput_mb_s * backfill_hours * 3.6 * replication_factor. Divide by broker count for per-broker."
-  type        = number
-  default     = 200
-}
-
-variable "kafka_disk_type" {
-  description = "Disk type for Kafka brokers (pd-ssd recommended for production throughput)"
-  type        = string
-  default     = "pd-ssd"
-}
-
 variable "create_vpc" {
   description = "Create a new VPC, or use an existing one"
   type        = bool

@@ -248,8 +248,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                 "properties": {
                                   "repoPathUri": {
                                     "type": "string",
-                                    "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9])(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
-                                    "description": "Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH' or 'gs://BUCKET_NAME/OPTIONAL_PATH'. The scheme determines the backend. The bucket must already exist and be accessible from the source cluster. For GCS, the source cluster must have the \`repository-gcs\` plugin installed with a configured client."
+                                    "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]|azure:\\\\/\\\\/[a-z0-9]{3,24}\\\\/(?=[a-z0-9-]{3,63}(?:\\\\/|$))[a-z0-9]+(?:-[a-z0-9]+)*)(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
+                                    "description": "Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH', 'gs://BUCKET_NAME/OPTIONAL_PATH', or 'azure://STORAGE_ACCOUNT/CONTAINER/OPTIONAL_PATH'. The scheme determines the backend. The bucket or container must already exist and be accessible from the source cluster. For GCS, the source cluster must have the \`repository-gcs\` plugin installed with a configured client. For Azure Blob Storage, the source cluster must have the \`repository-azure\` plugin installed with a configured client."
                                   },
                                   "awsRegion": {
                                     "type": "string",
@@ -260,19 +260,25 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                     "type": "string",
                                     "pattern": "^(?:(?:https?|localstacks?):\\\\/\\\\/[^/]+\\\\/?)?$",
                                     "default": "",
-                                    "description": "Override the storage endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. LocalStack endpoints are automatically resolved to IP addresses during config transformation. Used for S3 (LocalStack) or GCS (fake-gcs-server) testing."
+                                    "description": "Override the storage endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. LocalStack endpoints are automatically resolved to IP addresses during config transformation. Used for S3 (LocalStack), GCS (fake-gcs-server), or Azure (Azurite) testing. Honored by the tools that read a snapshot repository directly, for every scheme. Snapshot creation registers the repository on the cluster instead, and only repository-s3 has a repository-level endpoint setting, so creation ignores this for gs:// and azure://."
                                   },
                                   "s3RoleArn": {
                                     "type": "string",
-                                    "pattern": "^(arn:aws(-[a-z]+)*:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
+                                    "pattern": "^(arn:aws(-[a-z]+)*:iam::\\\\d{12}:role(\\\\/[\\\\w+=,.@-]+)*\\\\/[\\\\w+=,.@-]+)?$",
                                     "default": "",
-                                    "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3. Used for s3:// URIs only; ignored for gs://. Leave empty if the cluster's own IAM role already has S3 access."
+                                    "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3 (e.g. 'arn:aws:iam::123456789012:role/service-role/SnapshotRole'). Used for s3:// URIs only; ignored for gs:// and azure://. Leave empty if the cluster's own IAM role already has S3 access."
+                                  },
+                                  "azureCredentialsSecretName": {
+                                    "type": "string",
+                                    "pattern": "^(?:[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*)?$",
+                                    "default": "",
+                                    "description": "Name of a Kubernetes Secret holding either an 'accountKey' or a 'sasToken' key, used by the migration tools to read an azure:// repository. Used for azure:// URIs only; ignored otherwise. Leave empty to use the ambient Azure identity."
                                   }
                                 },
                                 "required": [
                                   "repoPathUri"
                                 ],
-                                "description": "Configuration for a snapshot repository used by the source cluster. The URI scheme in repoPathUri determines whether the backend is S3 or GCS. For GCS, authentication is expected to be provided to the source cluster out-of-band (e.g. via a service-account key loaded into the cluster keystore, or via Workload Identity)."
+                                "description": "Configuration for a snapshot repository used by the source cluster. The URI scheme in repoPathUri determines whether the backend is S3, GCS, or Azure Blob Storage. For GCS, authentication is expected to be provided to the source cluster out-of-band (e.g. via a service-account key loaded into the cluster keystore, or via Workload Identity). For Azure Blob Storage, the source cluster likewise expects an account key or SAS token in its keystore, while the migration tools' own Azure reader authenticates separately, from azureCredentialsSecretName when set and otherwise from the ambient Azure identity."
                               },
                               "description": "Solr backup repositories registered with the source cluster."
                             },
@@ -436,8 +442,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                 "properties": {
                                   "repoPathUri": {
                                     "type": "string",
-                                    "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9])(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
-                                    "description": "Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH' or 'gs://BUCKET_NAME/OPTIONAL_PATH'. The scheme determines the backend. The bucket must already exist and be accessible from the source cluster. For GCS, the source cluster must have the \`repository-gcs\` plugin installed with a configured client."
+                                    "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]|azure:\\\\/\\\\/[a-z0-9]{3,24}\\\\/(?=[a-z0-9-]{3,63}(?:\\\\/|$))[a-z0-9]+(?:-[a-z0-9]+)*)(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
+                                    "description": "Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH', 'gs://BUCKET_NAME/OPTIONAL_PATH', or 'azure://STORAGE_ACCOUNT/CONTAINER/OPTIONAL_PATH'. The scheme determines the backend. The bucket or container must already exist and be accessible from the source cluster. For GCS, the source cluster must have the \`repository-gcs\` plugin installed with a configured client. For Azure Blob Storage, the source cluster must have the \`repository-azure\` plugin installed with a configured client."
                                   },
                                   "awsRegion": {
                                     "type": "string",
@@ -448,19 +454,25 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                     "type": "string",
                                     "pattern": "^(?:(?:https?|localstacks?):\\\\/\\\\/[^/]+\\\\/?)?$",
                                     "default": "",
-                                    "description": "Override the storage endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. LocalStack endpoints are automatically resolved to IP addresses during config transformation. Used for S3 (LocalStack) or GCS (fake-gcs-server) testing."
+                                    "description": "Override the storage endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. LocalStack endpoints are automatically resolved to IP addresses during config transformation. Used for S3 (LocalStack), GCS (fake-gcs-server), or Azure (Azurite) testing. Honored by the tools that read a snapshot repository directly, for every scheme. Snapshot creation registers the repository on the cluster instead, and only repository-s3 has a repository-level endpoint setting, so creation ignores this for gs:// and azure://."
                                   },
                                   "s3RoleArn": {
                                     "type": "string",
-                                    "pattern": "^(arn:aws(-[a-z]+)*:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
+                                    "pattern": "^(arn:aws(-[a-z]+)*:iam::\\\\d{12}:role(\\\\/[\\\\w+=,.@-]+)*\\\\/[\\\\w+=,.@-]+)?$",
                                     "default": "",
-                                    "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3. Used for s3:// URIs only; ignored for gs://. Leave empty if the cluster's own IAM role already has S3 access."
+                                    "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3 (e.g. 'arn:aws:iam::123456789012:role/service-role/SnapshotRole'). Used for s3:// URIs only; ignored for gs:// and azure://. Leave empty if the cluster's own IAM role already has S3 access."
+                                  },
+                                  "azureCredentialsSecretName": {
+                                    "type": "string",
+                                    "pattern": "^(?:[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*)?$",
+                                    "default": "",
+                                    "description": "Name of a Kubernetes Secret holding either an 'accountKey' or a 'sasToken' key, used by the migration tools to read an azure:// repository. Used for azure:// URIs only; ignored otherwise. Leave empty to use the ambient Azure identity."
                                   }
                                 },
                                 "required": [
                                   "repoPathUri"
                                 ],
-                                "description": "Configuration for a snapshot repository used by the source cluster. The URI scheme in repoPathUri determines whether the backend is S3 or GCS. For GCS, authentication is expected to be provided to the source cluster out-of-band (e.g. via a service-account key loaded into the cluster keystore, or via Workload Identity)."
+                                "description": "Configuration for a snapshot repository used by the source cluster. The URI scheme in repoPathUri determines whether the backend is S3, GCS, or Azure Blob Storage. For GCS, authentication is expected to be provided to the source cluster out-of-band (e.g. via a service-account key loaded into the cluster keystore, or via Workload Identity). For Azure Blob Storage, the source cluster likewise expects an account key or SAS token in its keystore, while the migration tools' own Azure reader authenticates separately, from azureCredentialsSecretName when set and otherwise from the ambient Azure identity."
                               },
                               "description": "Elasticsearch/OpenSearch snapshot repositories registered with the source cluster."
                             },
@@ -780,6 +792,26 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "loggingConfigurationOverrideConfigMap": {
                       "type": "string",
                       "default": ""
+                    },
+                    "logLevels": {
+                      "type": "object",
+                      "properties": {
+                        "root": {
+                          "type": "string",
+                          "enum": [
+                            "off",
+                            "fatal",
+                            "error",
+                            "warn",
+                            "info",
+                            "debug",
+                            "trace",
+                            "all"
+                          ],
+                          "description": "Level for the root logger (MIGRATIONS_ROOT_LOG_LEVEL), which covers everything without its own setting below, including Netty and the AWS SDK. Defaults to 'info'."
+                        }
+                      },
+                      "description": "Log levels for the capture proxy. Changing these rolls the pods. For per-logger control beyond these, use loggingConfigurationOverrideConfigMap."
                     },
                     "serviceType": {
                       "type": "string",
@@ -1645,8 +1677,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                         "properties": {
                           "repoPathUri": {
                             "type": "string",
-                            "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9])(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
-                            "description": "Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH' or 'gs://BUCKET_NAME/OPTIONAL_PATH'. The scheme determines the backend. The bucket must already exist and be accessible from the source cluster. For GCS, the source cluster must have the \`repository-gcs\` plugin installed with a configured client."
+                            "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]|azure:\\\\/\\\\/[a-z0-9]{3,24}\\\\/(?=[a-z0-9-]{3,63}(?:\\\\/|$))[a-z0-9]+(?:-[a-z0-9]+)*)(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
+                            "description": "Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH', 'gs://BUCKET_NAME/OPTIONAL_PATH', or 'azure://STORAGE_ACCOUNT/CONTAINER/OPTIONAL_PATH'. The scheme determines the backend. The bucket or container must already exist and be accessible from the source cluster. For GCS, the source cluster must have the \`repository-gcs\` plugin installed with a configured client. For Azure Blob Storage, the source cluster must have the \`repository-azure\` plugin installed with a configured client."
                           },
                           "awsRegion": {
                             "type": "string",
@@ -1659,7 +1691,12 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           },
                           "s3RoleArn": {
                             "type": "string",
-                            "pattern": "^(arn:aws(-[a-z]+)*:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
+                            "pattern": "^(arn:aws(-[a-z]+)*:iam::\\\\d{12}:role(\\\\/[\\\\w+=,.@-]+)*\\\\/[\\\\w+=,.@-]+)?$",
+                            "default": ""
+                          },
+                          "azureCredentialsSecretName": {
+                            "type": "string",
+                            "pattern": "^(?:[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*)?$",
                             "default": ""
                           },
                           "useLocalStack": {
@@ -2003,6 +2040,26 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "type": "string",
                       "default": ""
                     },
+                    "logLevels": {
+                      "type": "object",
+                      "properties": {
+                        "root": {
+                          "type": "string",
+                          "enum": [
+                            "off",
+                            "fatal",
+                            "error",
+                            "warn",
+                            "info",
+                            "debug",
+                            "trace",
+                            "all"
+                          ],
+                          "description": "Level for the root logger (MIGRATIONS_ROOT_LOG_LEVEL), which covers everything without its own setting below, including Netty and the AWS SDK. Defaults to 'info'."
+                        }
+                      },
+                      "description": "Log levels for the metadata migration. Changing these rolls the pods. For per-logger control beyond these, use loggingConfigurationOverrideConfigMap."
+                    },
                     "resources": {
                       "type": "object",
                       "nullable": true,
@@ -2131,11 +2188,21 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     },
                     "transformerConfig": {
                       "type": "string",
-                      "description": "Inline JSON transformer configuration. Keys are transformer names and values are their configuration. Metadata transformers modify index mappings and settings during migration."
+                      "description": "Inline JSON transformer configuration. Keys are transformer names and values are their configuration. Metadata transformers modify index mappings and settings during migration.",
+                      "checksumFor": [
+                        "snapshot",
+                        "replayer"
+                      ],
+                      "changeRestriction": "impossible"
                     },
                     "transformerConfigFile": {
                       "type": "string",
-                      "description": "Path to a JSON file containing transformer configuration. Metadata transformers modify index mappings and settings during migration. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
+                      "description": "Path to a JSON file containing transformer configuration. Metadata transformers modify index mappings and settings during migration. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default.",
+                      "checksumFor": [
+                        "snapshot",
+                        "replayer"
+                      ],
+                      "changeRestriction": "impossible"
                     },
                     "enableSourcelessMigrations": {
                       "type": "boolean",
@@ -2244,6 +2311,11 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                         "additionalProperties": false
                       },
                       "default": []
+                    },
+                    "collectionRouting": {
+                      "type": "string",
+                      "description": "JSON object holding the staticCollectionRouting and regexCollectionRouting lists for a collection-routed OpenSearch Serverless target.",
+                      "changeRestriction": "impossible"
                     }
                   },
                   "required": [
@@ -2271,6 +2343,54 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "loggingConfigurationOverrideConfigMap": {
                       "type": "string",
                       "default": ""
+                    },
+                    "logLevels": {
+                      "type": "object",
+                      "properties": {
+                        "root": {
+                          "type": "string",
+                          "enum": [
+                            "off",
+                            "fatal",
+                            "error",
+                            "warn",
+                            "info",
+                            "debug",
+                            "trace",
+                            "all"
+                          ],
+                          "description": "Level for the root logger (MIGRATIONS_ROOT_LOG_LEVEL), which covers everything without its own setting below, including Netty and the AWS SDK. Defaults to 'info'."
+                        },
+                        "bulkRequestTrace": {
+                          "type": "string",
+                          "enum": [
+                            "off",
+                            "fatal",
+                            "error",
+                            "warn",
+                            "info",
+                            "debug",
+                            "trace",
+                            "all"
+                          ],
+                          "description": "Level for the BulkRequestTrace logger (BULK_REQUEST_TRACE_LOG_LEVEL). 'trace' logs every bulk request and response, including document contents. Defaults to 'off'."
+                        },
+                        "failedRequests": {
+                          "type": "string",
+                          "enum": [
+                            "off",
+                            "fatal",
+                            "error",
+                            "warn",
+                            "info",
+                            "debug",
+                            "trace",
+                            "all"
+                          ],
+                          "description": "Level for the pod-local FailedRequestsLogger file (FAILED_REQUESTS_LOGGER_LEVEL). Defaults to 'warn'."
+                        }
+                      },
+                      "description": "Log levels for the RFS workers. Changing these rolls the pods. For per-logger control beyond these, use loggingConfigurationOverrideConfigMap."
                     },
                     "skipApproval": {
                       "type": "boolean"
@@ -2390,10 +2510,34 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "type": "number",
                       "default": 10485760
                     },
+                    "bulkRequestTraceMaxBytes": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "default": 1048576
+                    },
+                    "maxDocumentSizeBytes": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "description": "Documents bigger than this many bytes are not sent to the target. They are recorded in the failed document stream with failureType 'document_too_large' and the backfill moves past them. The limit applies to each document body after transformation, or to the original document body when no transform is configured. It excludes bulk action metadata and NDJSON separators, so leave room for that overhead under the target's request limit. Unset means no limit.",
+                      "checksumFor": [
+                        "replayer"
+                      ],
+                      "changeRestriction": "impossible"
+                    },
                     "initialLeaseDuration": {
                       "type": "string",
                       "pattern": "^[-+]?P(?:(\\\\d+)D)?(?:T(?:(\\\\d+)H)?(?:(\\\\d+)M)?(?:(\\\\d+(?:\\\\.\\\\d+)?)S)?)?$",
                       "default": "PT1H"
+                    },
+                    "maxLeaseDuration": {
+                      "type": "string",
+                      "pattern": "^[-+]?P(?:(\\\\d+)D)?(?:T(?:(\\\\d+)H)?(?:(\\\\d+)M)?(?:(\\\\d+(?:\\\\.\\\\d+)?)S)?)?$",
+                      "default": "P1D"
+                    },
+                    "bulkResponseTimeout": {
+                      "type": "string",
+                      "pattern": "^[-+]?P(?:(\\\\d+)D)?(?:T(?:(\\\\d+)H)?(?:(\\\\d+)M)?(?:(\\\\d+(?:\\\\.\\\\d+)?)S)?)?$",
+                      "default": "PT310S"
                     },
                     "maxConnections": {
                       "type": "number",
@@ -2462,7 +2606,13 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     },
                     "failedDocumentStreamS3Bucket": {
                       "type": "string",
-                      "description": "S3 bucket for the failed document stream, and the switch that enables it. Omit it and terminal document failures are not recorded; there is no separate enable flag and no default bucket."
+                      "description": "S3 bucket for the failed document stream, where documents that can't be written are recorded. Either this or disableFailedDocumentStream is required; there is no default bucket.",
+                      "changeRestriction": "gated"
+                    },
+                    "disableFailedDocumentStream": {
+                      "type": "boolean",
+                      "description": "Set to true to run without a failed document stream. Documents that can't be written are then logged and counted but not recorded anywhere, and a batch that exhausts its retries fails its work item. Either this or failedDocumentStreamS3Bucket is required.",
+                      "changeRestriction": "gated"
                     },
                     "failedDocumentStreamS3Region": {
                       "type": "string",
@@ -2580,6 +2730,11 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       },
                       "default": []
                     },
+                    "collectionRouting": {
+                      "type": "string",
+                      "description": "JSON object holding the staticCollectionRouting and regexCollectionRouting lists for a collection-routed OpenSearch Serverless target.",
+                      "changeRestriction": "impossible"
+                    },
                     "previousSnapshotName": {
                       "type": "string",
                       "minLength": 1
@@ -2653,9 +2808,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "label": {
                       "type": "string"
                     },
-                    "version": {
-                      "type": "string"
-                    },
                     "endpoint": {
                       "type": "string"
                     },
@@ -2686,7 +2838,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                   },
                   "required": [
                     "label",
-                    "version",
                     "endpoint",
                     "allowInsecure",
                     "solrContextPath",
@@ -2795,6 +2946,10 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       ],
                       "description": "Authentication configuration for connecting to the cluster. Supports HTTP Basic (Kubernetes Secret), AWS SigV4, or mutual TLS."
                     },
+                    "collectionRouted": {
+                      "type": "boolean",
+                      "description": "Set to true when the endpoint is an OpenSearch Serverless per-account endpoint (<account-id>.aoss.<region>.on.aws), which selects the collection from a request header. Requires SigV4 auth with service 'aoss', and every snapshot migration to this target must define staticCollectionRouting or regexCollectionRouting. A replayer to this target needs a request transform that adds the x-amz-aoss-collection-name header. Migration console cluster commands don't send the collection header, so most of them don't work against this target."
+                    },
                     "label": {
                       "type": "string",
                       "pattern": "^[a-zA-Z0-9_]+$"
@@ -2816,8 +2971,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "properties": {
                         "repoPathUri": {
                           "type": "string",
-                          "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9])(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
-                          "description": "Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH' or 'gs://BUCKET_NAME/OPTIONAL_PATH'. The scheme determines the backend. The bucket must already exist and be accessible from the source cluster. For GCS, the source cluster must have the \`repository-gcs\` plugin installed with a configured client."
+                          "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]|azure:\\\\/\\\\/[a-z0-9]{3,24}\\\\/(?=[a-z0-9-]{3,63}(?:\\\\/|$))[a-z0-9]+(?:-[a-z0-9]+)*)(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
+                          "description": "Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH', 'gs://BUCKET_NAME/OPTIONAL_PATH', or 'azure://STORAGE_ACCOUNT/CONTAINER/OPTIONAL_PATH'. The scheme determines the backend. The bucket or container must already exist and be accessible from the source cluster. For GCS, the source cluster must have the \`repository-gcs\` plugin installed with a configured client. For Azure Blob Storage, the source cluster must have the \`repository-azure\` plugin installed with a configured client."
                         },
                         "awsRegion": {
                           "type": "string",
@@ -2830,7 +2985,12 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                         },
                         "s3RoleArn": {
                           "type": "string",
-                          "pattern": "^(arn:aws(-[a-z]+)*:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
+                          "pattern": "^(arn:aws(-[a-z]+)*:iam::\\\\d{12}:role(\\\\/[\\\\w+=,.@-]+)*\\\\/[\\\\w+=,.@-]+)?$",
+                          "default": ""
+                        },
+                        "azureCredentialsSecretName": {
+                          "type": "string",
+                          "pattern": "^(?:[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*)?$",
                           "default": ""
                         },
                         "useLocalStack": {
@@ -3169,6 +3329,26 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "type": "string",
                       "default": ""
                     },
+                    "logLevels": {
+                      "type": "object",
+                      "properties": {
+                        "root": {
+                          "type": "string",
+                          "enum": [
+                            "off",
+                            "fatal",
+                            "error",
+                            "warn",
+                            "info",
+                            "debug",
+                            "trace",
+                            "all"
+                          ],
+                          "description": "Level for the root logger (MIGRATIONS_ROOT_LOG_LEVEL), which covers everything without its own setting below, including Netty and the AWS SDK. Defaults to 'info'."
+                        }
+                      },
+                      "description": "Log levels for the traffic replayer. Changing these rolls the pods. For per-logger control beyond these, use loggingConfigurationOverrideConfigMap."
+                    },
                     "useLocalStack": {
                       "type": "boolean",
                       "default": false
@@ -3312,7 +3492,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "items": {
                         "type": "string"
                       },
-                      "description": "List of document-level exception types that should not be retried during bulk replay. These errors still count as failures in the output but are not retried because they are deterministic client or mapping errors that will produce the same result on every attempt. When omitted, defaults to a built-in set including version_conflict_engine_exception, mapper_parsing_exception, strict_dynamic_mapping_exception, and others. Set explicitly to override the defaults entirely (not additive). Common values: version_conflict_engine_exception, mapper_parsing_exception, illegal_argument_exception, resource_already_exists_exception."
+                      "description": "List of document-level exception types that should not be retried during bulk replay. These errors still count as failures in the output but are not retried because they are deterministic client or mapping errors that will produce the same result on every attempt. When omitted, defaults to a built-in set including version_conflict_engine_exception, mapper_parsing_exception, strict_dynamic_mapping_exception, and others. Set explicitly to override the defaults entirely (not additive). An item is not retried if its error type or any of its caused_by types is in the list. Common values: version_conflict_engine_exception, mapper_parsing_exception, illegal_argument_exception, resource_already_exists_exception."
                     },
                     "otelTraceCollectorEndpoint": {
                       "type": "string",
@@ -3592,6 +3772,10 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       ],
                       "description": "Authentication configuration for connecting to the cluster. Supports HTTP Basic (Kubernetes Secret), AWS SigV4, or mutual TLS."
                     },
+                    "collectionRouted": {
+                      "type": "boolean",
+                      "description": "Set to true when the endpoint is an OpenSearch Serverless per-account endpoint (<account-id>.aoss.<region>.on.aws), which selects the collection from a request header. Requires SigV4 auth with service 'aoss', and every snapshot migration to this target must define staticCollectionRouting or regexCollectionRouting. A replayer to this target needs a request transform that adds the x-amz-aoss-collection-name header. Migration console cluster commands don't send the collection header, so most of them don't work against this target."
+                    },
                     "label": {
                       "type": "string",
                       "pattern": "^[a-zA-Z0-9_]+$"
@@ -3606,9 +3790,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                   "type": "object",
                   "properties": {
                     "label": {
-                      "type": "string"
-                    },
-                    "version": {
                       "type": "string"
                     },
                     "endpoint": {
@@ -3641,7 +3822,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                   },
                   "required": [
                     "label",
-                    "version",
                     "endpoint",
                     "allowInsecure",
                     "solrContextPath",
@@ -3971,8 +4151,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "properties": {
                         "repoPathUri": {
                           "type": "string",
-                          "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9])(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
-                          "description": "Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH' or 'gs://BUCKET_NAME/OPTIONAL_PATH'. The scheme determines the backend. The bucket must already exist and be accessible from the source cluster. For GCS, the source cluster must have the \`repository-gcs\` plugin installed with a configured client."
+                          "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]|azure:\\\\/\\\\/[a-z0-9]{3,24}\\\\/(?=[a-z0-9-]{3,63}(?:\\\\/|$))[a-z0-9]+(?:-[a-z0-9]+)*)(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
+                          "description": "Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH', 'gs://BUCKET_NAME/OPTIONAL_PATH', or 'azure://STORAGE_ACCOUNT/CONTAINER/OPTIONAL_PATH'. The scheme determines the backend. The bucket or container must already exist and be accessible from the source cluster. For GCS, the source cluster must have the \`repository-gcs\` plugin installed with a configured client. For Azure Blob Storage, the source cluster must have the \`repository-azure\` plugin installed with a configured client."
                         },
                         "awsRegion": {
                           "type": "string",
@@ -3983,19 +4163,25 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "type": "string",
                           "pattern": "^(?:(?:https?|localstacks?):\\\\/\\\\/[^/]+\\\\/?)?$",
                           "default": "",
-                          "description": "Override the storage endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. LocalStack endpoints are automatically resolved to IP addresses during config transformation. Used for S3 (LocalStack) or GCS (fake-gcs-server) testing."
+                          "description": "Override the storage endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. LocalStack endpoints are automatically resolved to IP addresses during config transformation. Used for S3 (LocalStack), GCS (fake-gcs-server), or Azure (Azurite) testing. Honored by the tools that read a snapshot repository directly, for every scheme. Snapshot creation registers the repository on the cluster instead, and only repository-s3 has a repository-level endpoint setting, so creation ignores this for gs:// and azure://."
                         },
                         "s3RoleArn": {
                           "type": "string",
-                          "pattern": "^(arn:aws(-[a-z]+)*:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
+                          "pattern": "^(arn:aws(-[a-z]+)*:iam::\\\\d{12}:role(\\\\/[\\\\w+=,.@-]+)*\\\\/[\\\\w+=,.@-]+)?$",
                           "default": "",
-                          "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3. Used for s3:// URIs only; ignored for gs://. Leave empty if the cluster's own IAM role already has S3 access."
+                          "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3 (e.g. 'arn:aws:iam::123456789012:role/service-role/SnapshotRole'). Used for s3:// URIs only; ignored for gs:// and azure://. Leave empty if the cluster's own IAM role already has S3 access."
+                        },
+                        "azureCredentialsSecretName": {
+                          "type": "string",
+                          "pattern": "^(?:[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*)?$",
+                          "default": "",
+                          "description": "Name of a Kubernetes Secret holding either an 'accountKey' or a 'sasToken' key, used by the migration tools to read an azure:// repository. Used for azure:// URIs only; ignored otherwise. Leave empty to use the ambient Azure identity."
                         }
                       },
                       "required": [
                         "repoPathUri"
                       ],
-                      "description": "Configuration for a snapshot repository used by the source cluster. The URI scheme in repoPathUri determines whether the backend is S3 or GCS. For GCS, authentication is expected to be provided to the source cluster out-of-band (e.g. via a service-account key loaded into the cluster keystore, or via Workload Identity)."
+                      "description": "Configuration for a snapshot repository used by the source cluster. The URI scheme in repoPathUri determines whether the backend is S3, GCS, or Azure Blob Storage. For GCS, authentication is expected to be provided to the source cluster out-of-band (e.g. via a service-account key loaded into the cluster keystore, or via Workload Identity). For Azure Blob Storage, the source cluster likewise expects an account key or SAS token in its keystore, while the migration tools' own Azure reader authenticates separately, from azureCredentialsSecretName when set and otherwise from the ambient Azure identity."
                     },
                     "description": "Solr backup repositories registered with the source cluster."
                   },
@@ -4159,8 +4345,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "properties": {
                         "repoPathUri": {
                           "type": "string",
-                          "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9])(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
-                          "description": "Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH' or 'gs://BUCKET_NAME/OPTIONAL_PATH'. The scheme determines the backend. The bucket must already exist and be accessible from the source cluster. For GCS, the source cluster must have the \`repository-gcs\` plugin installed with a configured client."
+                          "pattern": "^(?:s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]|azure:\\\\/\\\\/[a-z0-9]{3,24}\\\\/(?=[a-z0-9-]{3,63}(?:\\\\/|$))[a-z0-9]+(?:-[a-z0-9]+)*)(\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
+                          "description": "Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH', 'gs://BUCKET_NAME/OPTIONAL_PATH', or 'azure://STORAGE_ACCOUNT/CONTAINER/OPTIONAL_PATH'. The scheme determines the backend. The bucket or container must already exist and be accessible from the source cluster. For GCS, the source cluster must have the \`repository-gcs\` plugin installed with a configured client. For Azure Blob Storage, the source cluster must have the \`repository-azure\` plugin installed with a configured client."
                         },
                         "awsRegion": {
                           "type": "string",
@@ -4171,19 +4357,25 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "type": "string",
                           "pattern": "^(?:(?:https?|localstacks?):\\\\/\\\\/[^/]+\\\\/?)?$",
                           "default": "",
-                          "description": "Override the storage endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. LocalStack endpoints are automatically resolved to IP addresses during config transformation. Used for S3 (LocalStack) or GCS (fake-gcs-server) testing."
+                          "description": "Override the storage endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. LocalStack endpoints are automatically resolved to IP addresses during config transformation. Used for S3 (LocalStack), GCS (fake-gcs-server), or Azure (Azurite) testing. Honored by the tools that read a snapshot repository directly, for every scheme. Snapshot creation registers the repository on the cluster instead, and only repository-s3 has a repository-level endpoint setting, so creation ignores this for gs:// and azure://."
                         },
                         "s3RoleArn": {
                           "type": "string",
-                          "pattern": "^(arn:aws(-[a-z]+)*:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
+                          "pattern": "^(arn:aws(-[a-z]+)*:iam::\\\\d{12}:role(\\\\/[\\\\w+=,.@-]+)*\\\\/[\\\\w+=,.@-]+)?$",
                           "default": "",
-                          "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3. Used for s3:// URIs only; ignored for gs://. Leave empty if the cluster's own IAM role already has S3 access."
+                          "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3 (e.g. 'arn:aws:iam::123456789012:role/service-role/SnapshotRole'). Used for s3:// URIs only; ignored for gs:// and azure://. Leave empty if the cluster's own IAM role already has S3 access."
+                        },
+                        "azureCredentialsSecretName": {
+                          "type": "string",
+                          "pattern": "^(?:[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*)?$",
+                          "default": "",
+                          "description": "Name of a Kubernetes Secret holding either an 'accountKey' or a 'sasToken' key, used by the migration tools to read an azure:// repository. Used for azure:// URIs only; ignored otherwise. Leave empty to use the ambient Azure identity."
                         }
                       },
                       "required": [
                         "repoPathUri"
                       ],
-                      "description": "Configuration for a snapshot repository used by the source cluster. The URI scheme in repoPathUri determines whether the backend is S3 or GCS. For GCS, authentication is expected to be provided to the source cluster out-of-band (e.g. via a service-account key loaded into the cluster keystore, or via Workload Identity)."
+                      "description": "Configuration for a snapshot repository used by the source cluster. The URI scheme in repoPathUri determines whether the backend is S3, GCS, or Azure Blob Storage. For GCS, authentication is expected to be provided to the source cluster out-of-band (e.g. via a service-account key loaded into the cluster keystore, or via Workload Identity). For Azure Blob Storage, the source cluster likewise expects an account key or SAS token in its keystore, while the migration tools' own Azure reader authenticates separately, from azureCredentialsSecretName when set and otherwise from the ambient Azure identity."
                     },
                     "description": "Elasticsearch/OpenSearch snapshot repositories registered with the source cluster."
                   },
@@ -4410,6 +4602,10 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
               }
             ],
             "description": "Authentication configuration for connecting to the cluster. Supports HTTP Basic (Kubernetes Secret), AWS SigV4, or mutual TLS."
+          },
+          "collectionRouted": {
+            "type": "boolean",
+            "description": "Set to true when the endpoint is an OpenSearch Serverless per-account endpoint (<account-id>.aoss.<region>.on.aws), which selects the collection from a request header. Requires SigV4 auth with service 'aoss', and every snapshot migration to this target must define staticCollectionRouting or regexCollectionRouting. A replayer to this target needs a request transform that adds the x-amz-aoss-collection-name header. Migration console cluster commands don't send the collection header, so most of them don't work against this target."
           }
         },
         "required": [
@@ -4540,6 +4736,26 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "type": "string",
                     "default": "",
                     "description": "Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. The ConfigMap should have a single key whose value is the Log4j2 properties file content. When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference."
+                  },
+                  "logLevels": {
+                    "type": "object",
+                    "properties": {
+                      "root": {
+                        "type": "string",
+                        "enum": [
+                          "off",
+                          "fatal",
+                          "error",
+                          "warn",
+                          "info",
+                          "debug",
+                          "trace",
+                          "all"
+                        ],
+                        "description": "Level for the root logger (MIGRATIONS_ROOT_LOG_LEVEL), which covers everything without its own setting below, including Netty and the AWS SDK. Defaults to 'info'."
+                      }
+                    },
+                    "description": "Log levels for the metadata migration. Changing these rolls the pods. For per-logger control beyond these, use loggingConfigurationOverrideConfigMap."
                   },
                   "resources": {
                     "type": "object",
@@ -4684,15 +4900,30 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   "transformerConfigBase64": {
                     "type": "string",
                     "default": "",
-                    "description": "Base64-encoded JSON transformer configuration. Metadata transformers modify index mappings and settings during migration."
+                    "description": "Base64-encoded JSON transformer configuration. Metadata transformers modify index mappings and settings during migration.",
+                    "checksumFor": [
+                      "snapshot",
+                      "replayer"
+                    ],
+                    "changeRestriction": "impossible"
                   },
                   "transformerConfig": {
                     "type": "string",
-                    "description": "Inline JSON transformer configuration. Keys are transformer names and values are their configuration. Metadata transformers modify index mappings and settings during migration."
+                    "description": "Inline JSON transformer configuration. Keys are transformer names and values are their configuration. Metadata transformers modify index mappings and settings during migration.",
+                    "checksumFor": [
+                      "snapshot",
+                      "replayer"
+                    ],
+                    "changeRestriction": "impossible"
                   },
                   "transformerConfigFile": {
                     "type": "string",
-                    "description": "Path to a JSON file containing transformer configuration. Metadata transformers modify index mappings and settings during migration. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
+                    "description": "Path to a JSON file containing transformer configuration. Metadata transformers modify index mappings and settings during migration. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default.",
+                    "checksumFor": [
+                      "snapshot",
+                      "replayer"
+                    ],
+                    "changeRestriction": "impossible"
                   },
                   "metadataTransforms": {
                     "type": "array",
@@ -5063,6 +5294,54 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "type": "string",
                     "default": "",
                     "description": "Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. The ConfigMap should have a single key whose value is the Log4j2 properties file content. When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference."
+                  },
+                  "logLevels": {
+                    "type": "object",
+                    "properties": {
+                      "root": {
+                        "type": "string",
+                        "enum": [
+                          "off",
+                          "fatal",
+                          "error",
+                          "warn",
+                          "info",
+                          "debug",
+                          "trace",
+                          "all"
+                        ],
+                        "description": "Level for the root logger (MIGRATIONS_ROOT_LOG_LEVEL), which covers everything without its own setting below, including Netty and the AWS SDK. Defaults to 'info'."
+                      },
+                      "bulkRequestTrace": {
+                        "type": "string",
+                        "enum": [
+                          "off",
+                          "fatal",
+                          "error",
+                          "warn",
+                          "info",
+                          "debug",
+                          "trace",
+                          "all"
+                        ],
+                        "description": "Level for the BulkRequestTrace logger (BULK_REQUEST_TRACE_LOG_LEVEL). 'trace' logs every bulk request and response, including document contents. Defaults to 'off'."
+                      },
+                      "failedRequests": {
+                        "type": "string",
+                        "enum": [
+                          "off",
+                          "fatal",
+                          "error",
+                          "warn",
+                          "info",
+                          "debug",
+                          "trace",
+                          "all"
+                        ],
+                        "description": "Level for the pod-local FailedRequestsLogger file (FAILED_REQUESTS_LOGGER_LEVEL). Defaults to 'warn'."
+                      }
+                    },
+                    "description": "Log levels for the RFS workers. Changing these rolls the pods. For per-logger control beyond these, use loggingConfigurationOverrideConfigMap."
                   },
                   "skipApproval": {
                     "type": "boolean",
@@ -5527,20 +5806,47 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   "documentsSizePerBulkRequest": {
                     "type": "number",
                     "default": 10485760,
-                    "description": "Maximum aggregate document size in bytes per bulk indexing request. Individual documents larger than this limit are sent as single-document requests."
+                    "description": "Maximum aggregate document size in bytes per bulk indexing request. Individual documents larger than this limit are sent as single-document requests. 5–15 MB works well; keep it at or under the largest request the target accepts: its http.max_content_length, or a smaller limit set in front of it."
+                  },
+                  "bulkRequestTraceMaxBytes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "default": 1048576,
+                    "description": "Maximum request or response body bytes included in each BulkRequestTrace log entry. Set to 0 to log complete bodies. The trace contains document contents and can produce logs rapidly. Default: 1048576 (1 MiB)."
+                  },
+                  "maxDocumentSizeBytes": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Documents bigger than this many bytes are not sent to the target. They are recorded in the failed document stream with failureType 'document_too_large' and the backfill moves past them. The limit applies to each document body after transformation, or to the original document body when no transform is configured. It excludes bulk action metadata and NDJSON separators, so leave room for that overhead under the target's request limit. Unset means no limit.",
+                    "checksumFor": [
+                      "replayer"
+                    ],
+                    "changeRestriction": "impossible"
                   },
                   "initialLeaseDuration": {
                     "type": "string",
                     "pattern": "^[-+]?P(?:(\\\\d+)D)?(?:T(?:(\\\\d+)H)?(?:(\\\\d+)M)?(?:(\\\\d+(?:\\\\.\\\\d+)?)S)?)?$",
                     "default": "PT1H",
-                    "description": "[Expert] ISO 8601 duration for the initial work item lease in the coordination store (e.g. 'PT1H' = 1 hour, 'PT10M' = 10 minutes). If a worker fails to complete a shard within this duration, the lease expires and another worker can pick it up, doubling the lease duration on each retry. Increase for very large shards (>200GB) to reduce the number of re-downloads per shard needed to complete the migration.",
-                    "changeRestriction": "gated"
+                    "description": "[Expert] ISO 8601 duration for the initial work item lease in the coordination store (e.g. 'PT1H' = 1 hour, 'PT10M' = 10 minutes). If a worker fails to complete a shard within this duration, the lease expires and another worker can pick it up, doubling the lease duration on each retry. Increase for very large shards (>200GB) to reduce the number of re-downloads per shard needed to complete the migration. Safe to change on a running migration: it only affects leases granted after the change."
+                  },
+                  "maxLeaseDuration": {
+                    "type": "string",
+                    "pattern": "^[-+]?P(?:(\\\\d+)D)?(?:T(?:(\\\\d+)H)?(?:(\\\\d+)M)?(?:(\\\\d+(?:\\\\.\\\\d+)?)S)?)?$",
+                    "default": "P1D",
+                    "description": "[Expert] ISO 8601 upper bound on a work item lease (e.g. 'P1D' = 1 day). The lease doubles each time a shard is picked up again after its lease expired; once the doubled lease would reach this value, it stays at this value. Must be at least initialLeaseDuration."
+                  },
+                  "bulkResponseTimeout": {
+                    "type": "string",
+                    "pattern": "^[-+]?P(?:(\\\\d+)D)?(?:T(?:(\\\\d+)H)?(?:(\\\\d+)M)?(?:(\\\\d+(?:\\\\.\\\\d+)?)S)?)?$",
+                    "default": "PT310S",
+                    "description": "[Expert] ISO 8601 duration each bulk request waits for its response once sent, before it is retried as a request that got no response. The target keeps working on a bulk it has received, so a retry adds a second copy of the work; this should outlast the slowest bulk the target completes. The default is just over the 300 s idle timeout common to load balancers in front of a cluster, so behind one a stuck bulk is answered with a 504 first. Work coordination and other requests keep their shorter timeout."
                   },
                   "maxConnections": {
                     "type": "number",
                     "default": 10,
-                    "description": "Maximum number of concurrent HTTP connections from each RFS worker to the target cluster for bulk indexing.",
-                    "changeRestriction": "gated"
+                    "description": "M, the most bulk requests each RFS worker may have in flight to the target at once (and so the most connections it uses for them). The worker's limit L starts at 1: each success while L is in use adds 1 (1/L above the threshold), each throttle (429, rejected execution, response timeout) multiplies it by a random 0.5-0.7, and it stays within [1/32, M]; below 1 the worker paces its one request. So M is the ceiling, not what a worker always uses. On a running migration, lowering it applies immediately; raising it adds load to the target and needs approval.",
+                    "changeRestriction": "gated",
+                    "gatedOnIncreaseOnly": true
                   },
                   "maxShardSizeBytes": {
                     "type": "number",
@@ -5638,7 +5944,13 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   },
                   "failedDocumentStreamS3Bucket": {
                     "type": "string",
-                    "description": "S3 bucket for the failed document stream, and the switch that enables it. Omit it and terminal document failures are not recorded; there is no separate enable flag and no default bucket."
+                    "description": "S3 bucket for the failed document stream, where documents that can't be written are recorded. Either this or disableFailedDocumentStream is required; there is no default bucket.",
+                    "changeRestriction": "gated"
+                  },
+                  "disableFailedDocumentStream": {
+                    "type": "boolean",
+                    "description": "Set to true to run without a failed document stream. Documents that can't be written are then logged and counted but not recorded anywhere, and a batch that exhausts its retries fails its work item. Either this or failedDocumentStreamS3Bucket is required.",
+                    "changeRestriction": "gated"
                   },
                   "failedDocumentStreamS3Region": {
                     "type": "string",
@@ -5665,6 +5977,54 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                 },
                 "default": {},
                 "description": "Document backfill options reused for every round."
+              },
+              "staticCollectionRouting": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "sourceIndex": {
+                      "type": "string",
+                      "pattern": "\\\\S",
+                      "description": "Exact source index name."
+                    },
+                    "collection": {
+                      "type": "string",
+                      "pattern": "\\\\S",
+                      "description": "OpenSearch Serverless collection name, used as is."
+                    }
+                  },
+                  "required": [
+                    "sourceIndex",
+                    "collection"
+                  ],
+                  "description": "Routes one source index to one OpenSearch Serverless collection."
+                },
+                "description": "Exact source index to OpenSearch Serverless collection mappings. With regexCollectionRouting, needs at least one entry when the target is collectionRouted and is not allowed otherwise. Shared by metadata migration and document backfill so an index's metadata and documents reach the same collection. Templates aren't migrated to collection-routed targets."
+              },
+              "regexCollectionRouting": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "sourceIndex": {
+                      "type": "string",
+                      "pattern": "\\\\S",
+                      "description": "Java regular expression that must match the whole source index name (e.g. '(.+)-\\\\d{4}')."
+                    },
+                    "collection": {
+                      "type": "string",
+                      "pattern": "\\\\S",
+                      "description": "Collection name replacement pattern, which may reference the regex's capture groups by number or name (e.g. '$1' or '\${tenant}')."
+                    }
+                  },
+                  "required": [
+                    "sourceIndex",
+                    "collection"
+                  ],
+                  "description": "Routes source indices that match a regex to an OpenSearch Serverless collection."
+                },
+                "description": "Ordered regex source index to OpenSearch Serverless collection mappings, used when no static entry matches. Same rules as staticCollectionRouting."
               },
               "repeat": {
                 "type": "object",
@@ -5699,7 +6059,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
               }
             },
             "required": [
-              "snapshot"
+              "snapshot",
+              "documentBackfillConfig"
             ],
             "description": "Automatically create and backfill snapshots using one reusable configuration and a repeat policy. Use this instead of perSnapshotConfig and snapshotSequence."
           },
@@ -5728,6 +6089,26 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "type": "string",
                         "default": "",
                         "description": "Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. The ConfigMap should have a single key whose value is the Log4j2 properties file content. When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference."
+                      },
+                      "logLevels": {
+                        "type": "object",
+                        "properties": {
+                          "root": {
+                            "type": "string",
+                            "enum": [
+                              "off",
+                              "fatal",
+                              "error",
+                              "warn",
+                              "info",
+                              "debug",
+                              "trace",
+                              "all"
+                            ],
+                            "description": "Level for the root logger (MIGRATIONS_ROOT_LOG_LEVEL), which covers everything without its own setting below, including Netty and the AWS SDK. Defaults to 'info'."
+                          }
+                        },
+                        "description": "Log levels for the metadata migration. Changing these rolls the pods. For per-logger control beyond these, use loggingConfigurationOverrideConfigMap."
                       },
                       "resources": {
                         "type": "object",
@@ -5872,15 +6253,30 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "transformerConfigBase64": {
                         "type": "string",
                         "default": "",
-                        "description": "Base64-encoded JSON transformer configuration. Metadata transformers modify index mappings and settings during migration."
+                        "description": "Base64-encoded JSON transformer configuration. Metadata transformers modify index mappings and settings during migration.",
+                        "checksumFor": [
+                          "snapshot",
+                          "replayer"
+                        ],
+                        "changeRestriction": "impossible"
                       },
                       "transformerConfig": {
                         "type": "string",
-                        "description": "Inline JSON transformer configuration. Keys are transformer names and values are their configuration. Metadata transformers modify index mappings and settings during migration."
+                        "description": "Inline JSON transformer configuration. Keys are transformer names and values are their configuration. Metadata transformers modify index mappings and settings during migration.",
+                        "checksumFor": [
+                          "snapshot",
+                          "replayer"
+                        ],
+                        "changeRestriction": "impossible"
                       },
                       "transformerConfigFile": {
                         "type": "string",
-                        "description": "Path to a JSON file containing transformer configuration. Metadata transformers modify index mappings and settings during migration. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
+                        "description": "Path to a JSON file containing transformer configuration. Metadata transformers modify index mappings and settings during migration. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default.",
+                        "checksumFor": [
+                          "snapshot",
+                          "replayer"
+                        ],
+                        "changeRestriction": "impossible"
                       },
                       "metadataTransforms": {
                         "type": "array",
@@ -6251,6 +6647,54 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "type": "string",
                         "default": "",
                         "description": "Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. The ConfigMap should have a single key whose value is the Log4j2 properties file content. When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference."
+                      },
+                      "logLevels": {
+                        "type": "object",
+                        "properties": {
+                          "root": {
+                            "type": "string",
+                            "enum": [
+                              "off",
+                              "fatal",
+                              "error",
+                              "warn",
+                              "info",
+                              "debug",
+                              "trace",
+                              "all"
+                            ],
+                            "description": "Level for the root logger (MIGRATIONS_ROOT_LOG_LEVEL), which covers everything without its own setting below, including Netty and the AWS SDK. Defaults to 'info'."
+                          },
+                          "bulkRequestTrace": {
+                            "type": "string",
+                            "enum": [
+                              "off",
+                              "fatal",
+                              "error",
+                              "warn",
+                              "info",
+                              "debug",
+                              "trace",
+                              "all"
+                            ],
+                            "description": "Level for the BulkRequestTrace logger (BULK_REQUEST_TRACE_LOG_LEVEL). 'trace' logs every bulk request and response, including document contents. Defaults to 'off'."
+                          },
+                          "failedRequests": {
+                            "type": "string",
+                            "enum": [
+                              "off",
+                              "fatal",
+                              "error",
+                              "warn",
+                              "info",
+                              "debug",
+                              "trace",
+                              "all"
+                            ],
+                            "description": "Level for the pod-local FailedRequestsLogger file (FAILED_REQUESTS_LOGGER_LEVEL). Defaults to 'warn'."
+                          }
+                        },
+                        "description": "Log levels for the RFS workers. Changing these rolls the pods. For per-logger control beyond these, use loggingConfigurationOverrideConfigMap."
                       },
                       "skipApproval": {
                         "type": "boolean",
@@ -6715,20 +7159,47 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "documentsSizePerBulkRequest": {
                         "type": "number",
                         "default": 10485760,
-                        "description": "Maximum aggregate document size in bytes per bulk indexing request. Individual documents larger than this limit are sent as single-document requests."
+                        "description": "Maximum aggregate document size in bytes per bulk indexing request. Individual documents larger than this limit are sent as single-document requests. 5–15 MB works well; keep it at or under the largest request the target accepts: its http.max_content_length, or a smaller limit set in front of it."
+                      },
+                      "bulkRequestTraceMaxBytes": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "default": 1048576,
+                        "description": "Maximum request or response body bytes included in each BulkRequestTrace log entry. Set to 0 to log complete bodies. The trace contains document contents and can produce logs rapidly. Default: 1048576 (1 MiB)."
+                      },
+                      "maxDocumentSizeBytes": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "Documents bigger than this many bytes are not sent to the target. They are recorded in the failed document stream with failureType 'document_too_large' and the backfill moves past them. The limit applies to each document body after transformation, or to the original document body when no transform is configured. It excludes bulk action metadata and NDJSON separators, so leave room for that overhead under the target's request limit. Unset means no limit.",
+                        "checksumFor": [
+                          "replayer"
+                        ],
+                        "changeRestriction": "impossible"
                       },
                       "initialLeaseDuration": {
                         "type": "string",
                         "pattern": "^[-+]?P(?:(\\\\d+)D)?(?:T(?:(\\\\d+)H)?(?:(\\\\d+)M)?(?:(\\\\d+(?:\\\\.\\\\d+)?)S)?)?$",
                         "default": "PT1H",
-                        "description": "[Expert] ISO 8601 duration for the initial work item lease in the coordination store (e.g. 'PT1H' = 1 hour, 'PT10M' = 10 minutes). If a worker fails to complete a shard within this duration, the lease expires and another worker can pick it up, doubling the lease duration on each retry. Increase for very large shards (>200GB) to reduce the number of re-downloads per shard needed to complete the migration.",
-                        "changeRestriction": "gated"
+                        "description": "[Expert] ISO 8601 duration for the initial work item lease in the coordination store (e.g. 'PT1H' = 1 hour, 'PT10M' = 10 minutes). If a worker fails to complete a shard within this duration, the lease expires and another worker can pick it up, doubling the lease duration on each retry. Increase for very large shards (>200GB) to reduce the number of re-downloads per shard needed to complete the migration. Safe to change on a running migration: it only affects leases granted after the change."
+                      },
+                      "maxLeaseDuration": {
+                        "type": "string",
+                        "pattern": "^[-+]?P(?:(\\\\d+)D)?(?:T(?:(\\\\d+)H)?(?:(\\\\d+)M)?(?:(\\\\d+(?:\\\\.\\\\d+)?)S)?)?$",
+                        "default": "P1D",
+                        "description": "[Expert] ISO 8601 upper bound on a work item lease (e.g. 'P1D' = 1 day). The lease doubles each time a shard is picked up again after its lease expired; once the doubled lease would reach this value, it stays at this value. Must be at least initialLeaseDuration."
+                      },
+                      "bulkResponseTimeout": {
+                        "type": "string",
+                        "pattern": "^[-+]?P(?:(\\\\d+)D)?(?:T(?:(\\\\d+)H)?(?:(\\\\d+)M)?(?:(\\\\d+(?:\\\\.\\\\d+)?)S)?)?$",
+                        "default": "PT310S",
+                        "description": "[Expert] ISO 8601 duration each bulk request waits for its response once sent, before it is retried as a request that got no response. The target keeps working on a bulk it has received, so a retry adds a second copy of the work; this should outlast the slowest bulk the target completes. The default is just over the 300 s idle timeout common to load balancers in front of a cluster, so behind one a stuck bulk is answered with a 504 first. Work coordination and other requests keep their shorter timeout."
                       },
                       "maxConnections": {
                         "type": "number",
                         "default": 10,
-                        "description": "Maximum number of concurrent HTTP connections from each RFS worker to the target cluster for bulk indexing.",
-                        "changeRestriction": "gated"
+                        "description": "M, the most bulk requests each RFS worker may have in flight to the target at once (and so the most connections it uses for them). The worker's limit L starts at 1: each success while L is in use adds 1 (1/L above the threshold), each throttle (429, rejected execution, response timeout) multiplies it by a random 0.5-0.7, and it stays within [1/32, M]; below 1 the worker paces its one request. So M is the ceiling, not what a worker always uses. On a running migration, lowering it applies immediately; raising it adds load to the target and needs approval.",
+                        "changeRestriction": "gated",
+                        "gatedOnIncreaseOnly": true
                       },
                       "maxShardSizeBytes": {
                         "type": "number",
@@ -6826,7 +7297,13 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       },
                       "failedDocumentStreamS3Bucket": {
                         "type": "string",
-                        "description": "S3 bucket for the failed document stream, and the switch that enables it. Omit it and terminal document failures are not recorded; there is no separate enable flag and no default bucket."
+                        "description": "S3 bucket for the failed document stream, where documents that can't be written are recorded. Either this or disableFailedDocumentStream is required; there is no default bucket.",
+                        "changeRestriction": "gated"
+                      },
+                      "disableFailedDocumentStream": {
+                        "type": "boolean",
+                        "description": "Set to true to run without a failed document stream. Documents that can't be written are then logged and counted but not recorded anywhere, and a batch that exhausts its retries fails its work item. Either this or failedDocumentStreamS3Bucket is required.",
+                        "changeRestriction": "gated"
                       },
                       "failedDocumentStreamS3Region": {
                         "type": "string",
@@ -6852,6 +7329,54 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       }
                     },
                     "description": "Configuration for backfilling documents from the snapshot to the target using Reindex From Snapshot. Omit to skip document backfill."
+                  },
+                  "staticCollectionRouting": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "sourceIndex": {
+                          "type": "string",
+                          "pattern": "\\\\S",
+                          "description": "Exact source index name."
+                        },
+                        "collection": {
+                          "type": "string",
+                          "pattern": "\\\\S",
+                          "description": "OpenSearch Serverless collection name, used as is."
+                        }
+                      },
+                      "required": [
+                        "sourceIndex",
+                        "collection"
+                      ],
+                      "description": "Routes one source index to one OpenSearch Serverless collection."
+                    },
+                    "description": "Exact source index to OpenSearch Serverless collection mappings. With regexCollectionRouting, needs at least one entry when the target is collectionRouted and is not allowed otherwise. Shared by metadata migration and document backfill so an index's metadata and documents reach the same collection. Templates aren't migrated to collection-routed targets."
+                  },
+                  "regexCollectionRouting": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "sourceIndex": {
+                          "type": "string",
+                          "pattern": "\\\\S",
+                          "description": "Java regular expression that must match the whole source index name (e.g. '(.+)-\\\\d{4}')."
+                        },
+                        "collection": {
+                          "type": "string",
+                          "pattern": "\\\\S",
+                          "description": "Collection name replacement pattern, which may reference the regex's capture groups by number or name (e.g. '$1' or '\${tenant}')."
+                        }
+                      },
+                      "required": [
+                        "sourceIndex",
+                        "collection"
+                      ],
+                      "description": "Routes source indices that match a regex to an OpenSearch Serverless collection."
+                    },
+                    "description": "Ordered regex source index to OpenSearch Serverless collection mappings, used when no static entry matches. Same rules as staticCollectionRouting."
                   }
                 },
                 "description": "Configuration for a single migration pass from a snapshot. At least one of metadataMigrationConfig or documentBackfillConfig must be provided."
@@ -6917,6 +7442,26 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "type": "string",
                     "default": "",
                     "description": "Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. The ConfigMap should have a single key whose value is the Log4j2 properties file content. When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference."
+                  },
+                  "logLevels": {
+                    "type": "object",
+                    "properties": {
+                      "root": {
+                        "type": "string",
+                        "enum": [
+                          "off",
+                          "fatal",
+                          "error",
+                          "warn",
+                          "info",
+                          "debug",
+                          "trace",
+                          "all"
+                        ],
+                        "description": "Level for the root logger (MIGRATIONS_ROOT_LOG_LEVEL), which covers everything without its own setting below, including Netty and the AWS SDK. Defaults to 'info'."
+                      }
+                    },
+                    "description": "Log levels for the capture proxy. Changing these rolls the pods. For per-logger control beyond these, use loggingConfigurationOverrideConfigMap."
                   },
                   "serviceType": {
                     "type": "string",
@@ -7510,6 +8055,26 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "default": "",
                     "description": "Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. The ConfigMap should have a single key whose value is the Log4j2 properties file content. When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference."
                   },
+                  "logLevels": {
+                    "type": "object",
+                    "properties": {
+                      "root": {
+                        "type": "string",
+                        "enum": [
+                          "off",
+                          "fatal",
+                          "error",
+                          "warn",
+                          "info",
+                          "debug",
+                          "trace",
+                          "all"
+                        ],
+                        "description": "Level for the root logger (MIGRATIONS_ROOT_LOG_LEVEL), which covers everything without its own setting below, including Netty and the AWS SDK. Defaults to 'info'."
+                      }
+                    },
+                    "description": "Log levels for the traffic replayer. Changing these rolls the pods. For per-logger control beyond these, use loggingConfigurationOverrideConfigMap."
+                  },
                   "useLocalStack": {
                     "type": "boolean",
                     "default": false,
@@ -7668,7 +8233,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "items": {
                       "type": "string"
                     },
-                    "description": "List of document-level exception types that should not be retried during bulk replay. These errors still count as failures in the output but are not retried because they are deterministic client or mapping errors that will produce the same result on every attempt. When omitted, defaults to a built-in set including version_conflict_engine_exception, mapper_parsing_exception, strict_dynamic_mapping_exception, and others. Set explicitly to override the defaults entirely (not additive). Common values: version_conflict_engine_exception, mapper_parsing_exception, illegal_argument_exception, resource_already_exists_exception."
+                    "description": "List of document-level exception types that should not be retried during bulk replay. These errors still count as failures in the output but are not retried because they are deterministic client or mapping errors that will produce the same result on every attempt. When omitted, defaults to a built-in set including version_conflict_engine_exception, mapper_parsing_exception, strict_dynamic_mapping_exception, and others. Set explicitly to override the defaults entirely (not additive). An item is not retried if its error type or any of its caused_by types is in the list. Common values: version_conflict_engine_exception, mapper_parsing_exception, illegal_argument_exception, resource_already_exists_exception."
                   },
                   "otelTraceExportEnabled": {
                     "type": "boolean",

@@ -33,7 +33,8 @@ public class CreationResult implements Comparable<CreationResult>  {
         UNABLE_TO_TRANSFORM_FAILURE(true, "failed to transform to the target version"),
         TARGET_CLUSTER_FAILURE(true, "failed on target cluster"),
         INCOMPATIBLE_REPLICA_COUNT_FAILURE(true, "failed due to incompatible replica count for awareness attribute count"),
-        SKIPPED_DUE_TO_FILTER(false, "skipped due to filter");
+        SKIPPED_DUE_TO_FILTER(false, "skipped due to filter"),
+        SKIPPED_ON_COLLECTION_ROUTED_TARGET(false, "skipped because templates aren't migrated to collection-routed targets");
 
         private final boolean fatal;
         private final String message;

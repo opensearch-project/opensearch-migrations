@@ -1251,6 +1251,7 @@ exports[`Solutions stack Migration stack with import VPC matches snapshot 1`] = 
               "Action": [
                 "cloudwatch:ListMetrics",
                 "cloudwatch:GetMetricData",
+                "cloudwatch:DescribeAlarms",
               ],
               "Effect": "Allow",
               "Resource": "*",
@@ -1303,6 +1304,32 @@ exports[`Solutions stack Migration stack with import VPC matches snapshot 1`] = 
                       "Ref": "AWS::AccountId",
                     },
                     ":dashboard/MA-*",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "cloudwatch:PutMetricAlarm",
+                "cloudwatch:DeleteAlarms",
+                "cloudwatch:TagResource",
+                "cloudwatch:UntagResource",
+                "cloudwatch:ListTagsForResource",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":cloudwatch:us-west-1:",
+                    {
+                      "Ref": "AWS::AccountId",
+                    },
+                    ":alarm:MA-*",
                   ],
                 ],
               },
@@ -2523,6 +2550,7 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
               "Action": [
                 "cloudwatch:ListMetrics",
                 "cloudwatch:GetMetricData",
+                "cloudwatch:DescribeAlarms",
               ],
               "Effect": "Allow",
               "Resource": "*",
@@ -2575,6 +2603,32 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
                       "Ref": "AWS::AccountId",
                     },
                     ":dashboard/MA-*",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "cloudwatch:PutMetricAlarm",
+                "cloudwatch:DeleteAlarms",
+                "cloudwatch:TagResource",
+                "cloudwatch:UntagResource",
+                "cloudwatch:ListTagsForResource",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":cloudwatch:us-west-1:",
+                    {
+                      "Ref": "AWS::AccountId",
+                    },
+                    ":alarm:MA-*",
                   ],
                 ],
               },

@@ -19,6 +19,8 @@ rich = "==14.2.0"
 textual = "==7.0.0"
 ijson = "*"
 psutil = "*"
+azure-storage-blob = "*"
+azure-identity = "*"
 
 [dev-packages]
 pytest = "*"

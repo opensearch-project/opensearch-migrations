@@ -1,5 +1,5 @@
 # Run with: workflow configure edit --stdin < successive-snapshots.yaml
-# Replace endpoints, repository URI, region, and authentication for your deployment.
+# Replace endpoints, bucket names, repository URI, region, and authentication for your deployment.
 sourceClusters:
   source:
     endpoint: https://source.example.com:9200
@@ -23,6 +23,7 @@ snapshotMigrationConfigs:
       metadataMigrationConfig: {}
       documentBackfillConfig:
         indexAllowlist: [orders]
+        failedDocumentStreamS3Bucket: migration-failures
       repeat:
         maxRuns: 3
         until:

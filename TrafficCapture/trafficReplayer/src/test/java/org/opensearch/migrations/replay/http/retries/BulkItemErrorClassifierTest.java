@@ -18,7 +18,8 @@ class BulkItemErrorClassifierTest {
         "invalid_index_name_exception",
         "routing_missing_exception",
         "illegal_argument_exception",
-        "resource_already_exists_exception"
+        "resource_already_exists_exception",
+        "stream_constraints_exception"
     })
     void testNonRetryableErrors(String errorType) {
         Assertions.assertTrue(classifier.isNonRetryable(errorType));
@@ -35,6 +36,17 @@ class BulkItemErrorClassifierTest {
     })
     void testRetryableErrors(String errorType) {
         Assertions.assertFalse(classifier.isNonRetryable(errorType));
+    }
+
+    @org.junit.jupiter.api.Test
+    void anErrorIsNonRetryableIfAnyTypeInItsChainIs() {
+        Assertions.assertTrue(classifier.anyNonRetryable(
+            java.util.List.of("parse_exception", "stream_constraints_exception")));
+        Assertions.assertTrue(classifier.anyNonRetryable(
+            java.util.List.of("mapper_parsing_exception", "json_parse_exception")));
+        Assertions.assertFalse(classifier.anyNonRetryable(
+            java.util.List.of("unavailable_shards_exception", "some_unknown_exception")));
+        Assertions.assertFalse(classifier.anyNonRetryable(java.util.List.<String>of()));
     }
 
     @org.junit.jupiter.api.Test

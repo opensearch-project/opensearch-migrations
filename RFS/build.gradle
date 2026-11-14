@@ -36,6 +36,8 @@ dependencies {
     implementation libs.jackson.annotations
     implementation libs.jackson.core
     implementation libs.jackson.dataformat.smile
+    testImplementation libs.jackson.dataformat.cbor
+    testImplementation libs.jackson.dataformat.yaml
     implementation libs.netty.codec.http
     implementation libs.httpclient5
 

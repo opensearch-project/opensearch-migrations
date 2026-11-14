@@ -456,11 +456,10 @@ gradle.projectsEvaluated {
             }
         }
 
-        // Collect tasks named 'test' (no need to check for duplicates with Sets)
-        subproject.tasks.matching { task ->
-            task.name == 'test' && !(task instanceof Test)
-        }.configureEach { task ->
-            sharedProcessTestsTasks.add(task)
+        // Collect non-Test tasks named 'test' without realizing every task in the project.
+        def testTask = subproject.tasks.findByName('test')
+        if (testTask != null && !(testTask instanceof Test)) {
+            sharedProcessTestsTasks.add(testTask)
         }
     }
 

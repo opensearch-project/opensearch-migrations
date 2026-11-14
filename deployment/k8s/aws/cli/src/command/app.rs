@@ -369,6 +369,13 @@ impl<'r, R: CommandRunner> App<'r, R> {
         let ma_ver = self.state.get_owned("MA_VERSION", "");
         let stack = self.state.get_owned("CFN_STACK_NAME", "");
         let outputs = self.cfn_outputs(&stack, &region);
+        let eks_cluster_name =
+            cfn::pick(&outputs, &["MIGRATIONS_EKS_CLUSTER_NAME", "EKSClusterName"])
+                .ok_or_else(|| {
+                    Error::die(format!(
+                        "could not read EKS cluster name from CFN outputs of '{stack}'"
+                    ))
+                })?;
         let mirror = self.state.get_or("MIRROR_IMAGES", "Y") == "Y";
         let registry = self.state.get_owned("CRANE_REGISTRY", "");
         let mirror_tag = self.resolve_image_tag();
@@ -406,6 +413,8 @@ impl<'r, R: CommandRunner> App<'r, R> {
         // producing invalid account-derived resource names such as S3 buckets.
         args.push("--set-string".into());
         args.push(format!("aws.account={account}"));
+        args.push("--set".into());
+        args.push(format!("aws.eksClusterName={eks_cluster_name}"));
         if let Some(role) = snapshot_role {
             args.push("--set".into());
             args.push(format!("defaultBucketConfiguration.snapshotRoleArn={role}"));
@@ -1400,6 +1409,9 @@ mod tests {
         ));
         assert!(j.contains("stageName=ma"));
         assert!(j.contains("--set-string aws.account=629003556176"));
+        assert!(j.contains(
+            "--set aws.eksClusterName=migration-eks-cluster-default-us-east-1"
+        ));
         // Waited for the console pod.
         assert!(r.any_call_contains("pod/migration-console-0"));
     }

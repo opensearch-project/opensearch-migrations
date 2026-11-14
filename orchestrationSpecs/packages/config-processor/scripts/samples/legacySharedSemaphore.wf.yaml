@@ -35,7 +35,7 @@ snapshotMigrationConfigs:
       s1:
         - metadataMigrationConfig: {}
       s2:
-        - documentBackfillConfig: {}
+        - documentBackfillConfig: { disableFailedDocumentStream: true }
 traffic:
   proxies: {}
   replayers: {}

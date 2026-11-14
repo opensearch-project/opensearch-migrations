@@ -115,6 +115,39 @@ class OpenSearchDefaultRetryTest {
                 RetryDecision.RetryRequired.class
             ),
             new BulkCase(
+                "a non-retryable type with an unrecognized cause finishes",
+                """
+                {"errors":true,"items":[
+                  {"index":{"_id":"1","status":400,
+                    "error":{"type":"mapper_parsing_exception","reason":"failed to parse",
+                      "caused_by":{"type":"json_parse_exception","reason":"Unexpected character"}}}}
+                ]}
+                """,
+                RetryDecision.TargetServerAttemptsFinished.class
+            ),
+            new BulkCase(
+                "a non-retryable cause under a retryable-looking type finishes",
+                """
+                {"errors":true,"items":[
+                  {"index":{"_id":"1","status":400,
+                    "error":{"type":"parse_exception","reason":"Failed to parse content to map",
+                      "caused_by":{"type":"stream_constraints_exception","reason":"String value length"}}}}
+                ]}
+                """,
+                RetryDecision.TargetServerAttemptsFinished.class
+            ),
+            new BulkCase(
+                "a retryable type with an unrecognized cause retries",
+                """
+                {"errors":true,"items":[
+                  {"index":{"_id":"1","status":503,
+                    "error":{"type":"unavailable_shards_exception",
+                      "caused_by":{"type":"some_unknown_exception"}}}}
+                ]}
+                """,
+                RetryDecision.RetryRequired.class
+            ),
+            new BulkCase(
                 "error object without a type retries",
                 """
                 {"errors":true,"items":[

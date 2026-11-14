@@ -226,6 +226,7 @@ class MATestBase:
             "migrations": [{
                 "metadataMigrationConfig": {},
                 "documentBackfillConfig": {
+                    "disableFailedDocumentStream": True,
                     "maxShardSizeBytes": 16000000,
                     "resources": {
                         "requests": {"cpu": "25m", "memory": "1Gi", "ephemeral-storage": "5Gi"},

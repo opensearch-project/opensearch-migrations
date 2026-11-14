@@ -2,6 +2,7 @@ import {renderWorkflowTemplate} from "@opensearch-migrations/argo-workflow-build
 import {SetupCapture} from "../src/workflowTemplates/setupCapture";
 import {Replayer} from "../src/workflowTemplates/replayer";
 import {SetupKafka} from "../src/workflowTemplates/setupKafka";
+import {DocumentBulkLoad} from "../src/workflowTemplates/documentBulkLoad";
 import {WORKLOAD_SELECTOR_LABEL_KEYS} from "../src/workflowTemplates/commonUtils/resourceLabels";
 
 function template(rendered: any, templateName: string): any {
@@ -44,7 +45,13 @@ function topologySpreadLine(manifest: string): string {
     return line!;
 }
 
-describe("capture/replay workloads spread across availability zones per the deployment setting", () => {
+describe("migration workloads spread across availability zones per the deployment setting", () => {
+    it("derives per-RFS-worker zone spread from provider-config", () => {
+        const found = template(renderWorkflowTemplate(DocumentBulkLoad), "createrfsdeployment");
+        expectZoneSpreadFromProviderConfig(found);
+        expectZoneSpreadExpression(topologySpreadLine(found.resource.manifest), WORKLOAD_SELECTOR_LABEL_KEYS);
+    });
+
     it.each(["deployproxydeployment", "deployproxydeploymentwithtls"])(
         "derives per-proxy zone spread in %s from provider-config",
         templateName => {

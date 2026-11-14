@@ -46,6 +46,7 @@ function injectMetaExtensions(jsonSchema: any, zodSchema: z.ZodType): void {
         const meta = fieldZod.meta() as FieldMeta | undefined;
         if (meta?.checksumFor?.length) propSchema['x-checksum-for'] = meta.checksumFor;
         if (meta?.changeRestriction) propSchema['x-change-restriction'] = meta.changeRestriction;
+        if (meta?.gatedOnIncreaseOnly) propSchema['x-gated-on-increase-only'] = true;
         // Recurse into nested objects
         injectMetaExtensions(propSchema, unwrapZod(fieldZod));
     }

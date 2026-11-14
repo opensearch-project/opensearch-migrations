@@ -171,7 +171,7 @@ class Test0041CdcFullE2eAossTarget(MATestBase):
         self.workflow_snapshot_and_migration_config = [{
             "migrations": [{
                 "metadataMigrationConfig": {"indexAllowlist": allowlist},
-                "documentBackfillConfig": {"indexAllowlist": allowlist},
+                "documentBackfillConfig": {"disableFailedDocumentStream": True, "indexAllowlist": allowlist},
             }]
         }]
 

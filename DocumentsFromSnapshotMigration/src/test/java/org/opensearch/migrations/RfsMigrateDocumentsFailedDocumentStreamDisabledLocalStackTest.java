@@ -93,7 +93,8 @@ class RfsMigrateDocumentsFailedDocumentStreamDisabledLocalStackTest {
         var args = new RfsMigrateDocuments.Args();
         JsonCommandLineParser.newBuilder().addObject(args).build().parse(new String[]{
             "---INLINE-JSON",
-            "{\"failedDocumentStreamS3Prefix\": \"" + PREFIX + "\","
+            "{\"disableFailedDocumentStream\": true,"
+                + "\"failedDocumentStreamS3Prefix\": \"" + PREFIX + "\","
                 + "\"failedDocumentStreamS3Region\": \"" + LOCAL_STACK.getRegion() + "\","
                 + "\"failedDocumentStreamS3Endpoint\": \"" + LOCAL_STACK.getEndpoint() + "\"}"
         });

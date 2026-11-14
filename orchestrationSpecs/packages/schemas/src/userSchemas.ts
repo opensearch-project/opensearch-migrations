@@ -10,12 +10,16 @@ export interface FieldMeta {
     checksumFor?: ChecksumDependency[];
     /** Change restriction category for VAP generation. Omit for 'safe'. */
     changeRestriction?: 'impossible' | 'gated';
+    /** With changeRestriction 'gated': only an increase needs approval; a decrease applies immediately. */
+    gatedOnIncreaseOnly?: boolean;
 }
 
 declare module "zod" {
     interface ZodType {
         checksumFor(...deps: ChecksumDependency[]): this;
         changeRestriction(restriction: 'impossible' | 'gated'): this;
+        /** Gated, but only for an increase; decreasing the (numeric) value is safe. */
+        gatedOnIncrease(): this;
     }
 }
 
@@ -27,6 +31,11 @@ z.ZodType.prototype.checksumFor = function(...deps: ChecksumDependency[]) {
 z.ZodType.prototype.changeRestriction = function(restriction: 'impossible' | 'gated') {
     const existing = (this.meta() ?? {}) as FieldMeta;
     return this.meta({ ...existing, changeRestriction: restriction });
+};
+
+z.ZodType.prototype.gatedOnIncrease = function() {
+    const existing = (this.meta() ?? {}) as FieldMeta;
+    return this.meta({ ...existing, changeRestriction: 'gated', gatedOnIncreaseOnly: true });
 };
 
 const REQUEST_TRANSFORMER_SUFFIX = " Request transformers modify each captured HTTP request before it is replayed to the target cluster.";
@@ -59,6 +68,69 @@ function validateMinPodReplicas(
             code: z.ZodIssueCode.custom,
             message: `minPodReplicas (${data.minPodReplicas}) must be less than or equal to podReplicas (${data.podReplicas}).`,
             path: ["minPodReplicas"]
+        });
+    }
+}
+
+export const LOG_LEVEL = z.enum(["off", "fatal", "error", "warn", "info", "debug", "trace", "all"]);
+
+const ROOT_LOG_LEVEL_DESC = "Level for the root logger (MIGRATIONS_ROOT_LOG_LEVEL), which covers everything without " +
+    "its own setting below, including Netty and the AWS SDK. Defaults to 'info'.";
+
+const LOG_LEVELS_DESC_SUFFIX = " Changing these rolls the pods. For per-logger control beyond these, use " +
+    "loggingConfigurationOverrideConfigMap.";
+
+function rootLogLevelOption(component: string) {
+    return z.object({
+        root: LOG_LEVEL.optional().describe(ROOT_LOG_LEVEL_DESC),
+    }).optional()
+        .describe(`Log levels for the ${component}.` + LOG_LEVELS_DESC_SUFFIX);
+}
+
+export const ISO_DURATION_PATTERN = /^[-+]?P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?)?$/;
+
+/** Seconds in an ISO 8601 duration matching {@link ISO_DURATION_PATTERN}, or undefined if it doesn't match. */
+export function isoDurationSeconds(duration: string): number | undefined {
+    const match = ISO_DURATION_PATTERN.exec(duration);
+    if (!match) return undefined;
+    const [days, hours, minutes, seconds] = match.slice(1).map(part => part === undefined ? 0 : Number(part));
+    const total = ((days * 24 + hours) * 60 + minutes) * 60 + seconds;
+    return duration.startsWith("-") ? -total : total;
+}
+
+function validateMaxLeaseDuration(
+    ctx: z.RefinementCtx,
+    data: {initialLeaseDuration?: string, maxLeaseDuration?: string}
+) {
+    if (data.initialLeaseDuration === undefined || data.maxLeaseDuration === undefined) return;
+    const initial = isoDurationSeconds(data.initialLeaseDuration);
+    const max = isoDurationSeconds(data.maxLeaseDuration);
+    if (initial !== undefined && max !== undefined && max < initial) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `maxLeaseDuration (${data.maxLeaseDuration}) must be at least initialLeaseDuration (${data.initialLeaseDuration}).`,
+            path: ["maxLeaseDuration"]
+        });
+    }
+}
+
+export const FAILED_DOCUMENT_STREAM_REQUIRED_MESSAGE =
+    "Set failedDocumentStreamS3Bucket to record documents that can't be written, or set " +
+    "disableFailedDocumentStream: true to run without a failed document stream.";
+
+function validateFailedDocumentStreamChoice(
+    ctx: z.RefinementCtx,
+    data: {failedDocumentStreamS3Bucket?: string, disableFailedDocumentStream?: boolean}
+) {
+    const hasBucket = (data.failedDocumentStreamS3Bucket ?? "").trim() !== "";
+    const disabled = data.disableFailedDocumentStream === true;
+    if (hasBucket === disabled) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: hasBucket
+                ? "failedDocumentStreamS3Bucket and disableFailedDocumentStream can't both be set."
+                : FAILED_DOCUMENT_STREAM_REQUIRED_MESSAGE,
+            path: [hasBucket ? "disableFailedDocumentStream" : "failedDocumentStreamS3Bucket"]
         });
     }
 }
@@ -165,27 +237,53 @@ function validateOptionalDefaultConsistency<T extends z.ZodTypeAny>(
 
 export const OPTIONAL_STORAGE_ENDPOINT_PATTERN = /^(?:(?:https?|localstacks?):\/\/[^/]+\/?)?$/;
 
-// Provider-agnostic repository config. The URI scheme (s3:// or gs://) determines the backend.
-// S3 bucket names: 3-63 chars; GCS bucket names: up to 220 chars including dotted segments.
+// An assumable IAM role ARN in any partition (aws, aws-cn, aws-us-gov, aws-iso-b, ...), with an optional
+// IAM path (role/service-role/Name). Only roles can be assumed, so users, groups, and policies are rejected.
+export const S3_ROLE_ARN_PATTERN = /^(arn:aws(-[a-z]+)*:iam::\d{12}:role(\/[\w+=,.@-]+)*\/[\w+=,.@-]+)?$/;
+
+// Name lengths: S3 bucket 3-63, GCS bucket 3-222 (dotted names), Azure account 3-24, Azure container 3-63.
+const S3_BUCKET_PATTERN = "[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]";
+const GCS_BUCKET_PATTERN = "[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]";
+const AZURE_ACCOUNT_PATTERN = "[a-z0-9]{3,24}";
+// The lookahead bounds the container's length; the rest rules out leading, trailing and repeated hyphens.
+const AZURE_CONTAINER_PATTERN = "(?=[a-z0-9-]{3,63}(?:\\/|$))[a-z0-9]+(?:-[a-z0-9]+)*";
+const REPO_SUBPATH_PATTERN = "(\\/[a-zA-Z0-9!\\-_.*'()/]*)?";
+const REPO_PATH_URI_PATTERN = new RegExp(
+    `^(?:s3:\\/\\/${S3_BUCKET_PATTERN}|gs:\\/\\/${GCS_BUCKET_PATTERN}` +
+    `|azure:\\/\\/${AZURE_ACCOUNT_PATTERN}\\/${AZURE_CONTAINER_PATTERN})${REPO_SUBPATH_PATTERN}$`);
+
 export const REPO_CONFIG = z.object({
-    repoPathUri: z.string().regex(/^(?:s3:\/\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\/\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9])(\/[a-zA-Z0-9!\-_.*'()/]*)?$/)
-        .describe("Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH' or 'gs://BUCKET_NAME/OPTIONAL_PATH'. " +
-            "The scheme determines the backend. The bucket must already exist and be accessible from the source cluster. " +
-            "For GCS, the source cluster must have the `repository-gcs` plugin installed with a configured client."),
+    repoPathUri: z.string().regex(REPO_PATH_URI_PATTERN)
+        .describe("Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH', 'gs://BUCKET_NAME/OPTIONAL_PATH', " +
+            "or 'azure://STORAGE_ACCOUNT/CONTAINER/OPTIONAL_PATH'. " +
+            "The scheme determines the backend. The bucket or container must already exist and be accessible from the source cluster. " +
+            "For GCS, the source cluster must have the `repository-gcs` plugin installed with a configured client. " +
+            "For Azure Blob Storage, the source cluster must have the `repository-azure` plugin installed with a configured client."),
     awsRegion: z.string().default("").optional()
         .describe("AWS region where the S3 bucket resides (e.g. 'us-east-2'). Required for s3:// URIs; ignored otherwise."),
     endpoint: z.string().regex(OPTIONAL_STORAGE_ENDPOINT_PATTERN).default("").optional()
         .describe("Override the storage endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. " +
             "LocalStack endpoints are automatically resolved to IP addresses during config transformation. " +
-            "Used for S3 (LocalStack) or GCS (fake-gcs-server) testing."),
-    s3RoleArn: z.string().regex(/^(arn:aws(-[a-z]+)*:iam::\d{12}:(user|role|group|policy)\/[a-zA-Z0-9+=,.@_-]+)?$/).default("").optional()
-        .describe("IAM role ARN that the source cluster will assume to read/write snapshots to S3. " +
-            "Used for s3:// URIs only; ignored for gs://. " +
-            "Leave empty if the cluster's own IAM role already has S3 access.")
+            "Used for S3 (LocalStack), GCS (fake-gcs-server), or Azure (Azurite) testing. " +
+            "Honored by the tools that read a snapshot repository directly, for every scheme. " +
+            "Snapshot creation registers the repository on the cluster instead, and only repository-s3 " +
+            "has a repository-level endpoint setting, so creation ignores this for gs:// and azure://."),
+    s3RoleArn: z.string().regex(S3_ROLE_ARN_PATTERN).default("").optional()
+        .describe("IAM role ARN that the source cluster will assume to read/write snapshots to S3 " +
+            "(e.g. 'arn:aws:iam::123456789012:role/service-role/SnapshotRole'). " +
+            "Used for s3:// URIs only; ignored for gs:// and azure://. " +
+            "Leave empty if the cluster's own IAM role already has S3 access."),
+    azureCredentialsSecretName: z.string().regex(/^(?:[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*)?$/).default("").optional()
+        .describe("Name of a Kubernetes Secret holding either an 'accountKey' or a 'sasToken' key, used by the " +
+            "migration tools to read an azure:// repository. Used for azure:// URIs only; ignored otherwise. " +
+            "Leave empty to use the ambient Azure identity.")
 }).describe("Configuration for a snapshot repository used by the source cluster. " +
-    "The URI scheme in repoPathUri determines whether the backend is S3 or GCS. " +
+    "The URI scheme in repoPathUri determines whether the backend is S3, GCS, or Azure Blob Storage. " +
     "For GCS, authentication is expected to be provided to the source cluster out-of-band " +
-    "(e.g. via a service-account key loaded into the cluster keystore, or via Workload Identity).");
+    "(e.g. via a service-account key loaded into the cluster keystore, or via Workload Identity). " +
+    "For Azure Blob Storage, the source cluster likewise expects an account key or SAS token in its " +
+    "keystore, while the migration tools' own Azure reader authenticates separately, from " +
+    "azureCredentialsSecretName when set and otherwise from the ambient Azure identity.");
 
 export const PORT_NUMBER_PATTERN = "(?:[1-9]\\d{0,3}|[1-5]\\d{4}|6[0-4]\\d{3}|65[0-4]\\d{2}|655[0-2]\\d|6553[0-5])";
 export const OPTIONAL_PORT_PATTERN = `(?::${PORT_NUMBER_PATTERN})?`;
@@ -291,6 +389,12 @@ function hasTransformPipelineEntries(value: unknown): boolean {
 
 function hasConfiguredString(value: unknown): boolean {
     return typeof value === "string" && value.trim().length > 0;
+}
+
+function hasRequestTransform(config: z.infer<typeof USER_REPLAYER_OPTIONS> | undefined): boolean {
+    return (config?.requestTransforms?.length ?? 0) > 0
+        || [config?.transformerConfig, config?.transformerConfigEncoded, config?.transformerConfigFile]
+            .some(hasConfiguredString);
 }
 
 function validatePipelineRawConfigConflict(
@@ -624,6 +728,7 @@ export const USER_PROXY_WORKFLOW_OPTIONS = withScalableServiceValidation(z.objec
     ).shape,
     loggingConfigurationOverrideConfigMap: z.string().default("").optional()
         .describe(LOGGING_CONFIG_OVERRIDE_DESC),
+    logLevels: rootLogLevelOption("capture proxy"),
     serviceType: z.enum(["LoadBalancer", "ClusterIP"]).default("LoadBalancer").optional()
         .describe("Expert setting controlling how the capture proxy Kubernetes Service is exposed. " +
             "'LoadBalancer' provisions a cloud/load-balancer-backed Service and waits for load balancer ingress before the proxy is Ready. " +
@@ -712,6 +817,7 @@ export const USER_REPLAYER_WORKFLOW_OPTIONS = withScalableServiceValidation(z.ob
         .describe(JVM_ARGS_DESC),
     loggingConfigurationOverrideConfigMap: z.string().default("").optional()
         .describe(LOGGING_CONFIG_OVERRIDE_DESC),
+    logLevels: rootLogLevelOption("traffic replayer"),
     useLocalStack: z.boolean().default(false).optional()
         .describe("[Internal] Mount local test AWS credentials for LocalStack-backed tuple S3 output. Workflow-only testing hook; not passed to the replayer process and not intended for production use."),
     resources: z.preprocess((v) => deepmerge(DEFAULT_RESOURCES.REPLAYER, (v ?? {})), RESOURCE_REQUIREMENTS)
@@ -773,6 +879,7 @@ export const USER_REPLAYER_PROCESS_OPTIONS = withOtelExportOptions(z.object({
             "When omitted, defaults to a built-in set including version_conflict_engine_exception, " +
             "mapper_parsing_exception, strict_dynamic_mapping_exception, and others. " +
             "Set explicitly to override the defaults entirely (not additive). " +
+            "An item is not retried if its error type or any of its caused_by types is in the list. " +
             "Common values: version_conflict_engine_exception, mapper_parsing_exception, " +
             "illegal_argument_exception, resource_already_exists_exception."),
     ...OTEL_EXPORT_OPTIONS,
@@ -940,6 +1047,7 @@ export const USER_METADATA_WORKFLOW_OPTIONS = z.object({
         .describe(JVM_ARGS_DESC),
     loggingConfigurationOverrideConfigMap: z.string().default("").optional()
         .describe(LOGGING_CONFIG_OVERRIDE_DESC),
+    logLevels: rootLogLevelOption("metadata migration"),
     resources: z.preprocess(
         (v) => deepmerge(
             DEFAULT_RESOURCES.JAVA_MIGRATION_CONSOLE_CLI,
@@ -981,12 +1089,20 @@ export const USER_METADATA_PROCESS_OPTIONS = withOtelExportOptions(z.object({
     ...OTEL_EXPORT_OPTIONS,
     output: z.enum(["HUMAN_READABLE", "JSON"]).default("HUMAN_READABLE").optional()
         .describe("Output format for the metadata migration evaluation report. 'HUMAN_READABLE' for formatted text, 'JSON' for machine-parseable output."),
+    // Same restriction as metadataTransforms, which config lowering turns into these fields: they are what reaches
+    // the SnapshotMigration resource, so they carry the restriction the admission policy enforces.
     transformerConfigBase64: z.string().default("").optional()
-        .describe("Base64-encoded JSON transformer configuration." + METADATA_TRANSFORMER_SUFFIX),
+        .describe("Base64-encoded JSON transformer configuration." + METADATA_TRANSFORMER_SUFFIX)
+        .checksumFor('snapshot', 'replayer')
+        .changeRestriction('impossible'),
     transformerConfig: z.string().optional()
-        .describe("Inline JSON transformer configuration. Keys are transformer names and values are their configuration." + METADATA_TRANSFORMER_SUFFIX),
+        .describe("Inline JSON transformer configuration. Keys are transformer names and values are their configuration." + METADATA_TRANSFORMER_SUFFIX)
+        .checksumFor('snapshot', 'replayer')
+        .changeRestriction('impossible'),
     transformerConfigFile: z.string().optional()
-        .describe("Path to a JSON file containing transformer configuration." + METADATA_TRANSFORMER_SUFFIX + EXPERT_FILE_SUFFIX),
+        .describe("Path to a JSON file containing transformer configuration." + METADATA_TRANSFORMER_SUFFIX + EXPERT_FILE_SUFFIX)
+        .checksumFor('snapshot', 'replayer')
+        .changeRestriction('impossible'),
     metadataTransforms: TRANSFORM_PIPELINE.optional()
         .describe("Metadata transform pipeline. Generates the existing transformerConfig inline JSON option.")
         .checksumFor('snapshot', 'replayer')
@@ -1027,6 +1143,15 @@ export const USER_RFS_WORKFLOW_OPTIONS = withScalableServiceValidation(z.object(
         .describe(JVM_ARGS_DESC),
     loggingConfigurationOverrideConfigMap: z.string().default("").optional()
         .describe(LOGGING_CONFIG_OVERRIDE_DESC),
+    logLevels: z.object({
+        root: LOG_LEVEL.optional().describe(ROOT_LOG_LEVEL_DESC),
+        bulkRequestTrace: LOG_LEVEL.optional()
+            .describe("Level for the BulkRequestTrace logger (BULK_REQUEST_TRACE_LOG_LEVEL). 'trace' logs every bulk " +
+                "request and response, including document contents. Defaults to 'off'."),
+        failedRequests: LOG_LEVEL.optional()
+            .describe("Level for the pod-local FailedRequestsLogger file (FAILED_REQUESTS_LOGGER_LEVEL). Defaults to 'warn'."),
+    }).optional()
+        .describe("Log levels for the RFS workers." + LOG_LEVELS_DESC_SUFFIX),
     skipApproval: z.boolean().optional()
         .describe("When true, skips the manual approval gate after the document backfill completes. Useful for automated pipelines where human approval is not needed."),
     useTargetClusterForWorkCoordination: z.boolean().default(false)
@@ -1083,17 +1208,53 @@ export const USER_RFS_PROCESS_OPTIONS = withOtelExportOptions(z.object({
     documentsPerBulkRequest: z.number().default(0x7fffffff).optional()
         .describe("Maximum number of documents per bulk indexing request to the target cluster. Lower values reduce per-request latency but increase overhead."),
     documentsSizePerBulkRequest: z.number().default(10*1024*1024).optional()
-        .describe("Maximum aggregate document size in bytes per bulk indexing request. Individual documents larger than this limit are sent as single-document requests."),
+        .describe("Maximum aggregate document size in bytes per bulk indexing request. Individual documents larger than this limit are sent as single-document requests. " +
+            "5–15 MB works well; keep it at or under the largest request the target accepts: its http.max_content_length, " +
+            "or a smaller limit set in front of it."),
+    bulkRequestTraceMaxBytes: z.number().int().nonnegative().default(1024*1024).optional()
+        .describe("Maximum request or response body bytes included in each BulkRequestTrace log entry. " +
+            "Set to 0 to log complete bodies. The trace contains document contents and can produce logs rapidly. " +
+            "Default: 1048576 (1 MiB)."),
+    maxDocumentSizeBytes: z.number().int().min(1).optional()
+        .describe("Documents bigger than this many bytes are not sent to the target. They are recorded in the failed " +
+            "document stream with failureType 'document_too_large' and the backfill moves past them. The limit applies " +
+            "to each document body after transformation, or to the original document body when no transform is " +
+            "configured. It excludes bulk action metadata and NDJSON separators, so leave room for that overhead " +
+            "under the target's request limit. Unset means no limit.")
+        .checksumFor('replayer')
+        .changeRestriction('impossible'),
     initialLeaseDuration: z.string()
-        .regex(/^[-+]?P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?)?$/)
+        .regex(ISO_DURATION_PATTERN)
         .default("PT1H").optional()
         .describe("[Expert] ISO 8601 duration for the initial work item lease in the coordination store (e.g. 'PT1H' = 1 hour, 'PT10M' = 10 minutes). " +
             "If a worker fails to complete a shard within this duration, the lease expires and another worker can pick it up, doubling the lease duration on each retry. " +
-            "Increase for very large shards (>200GB) to reduce the number of re-downloads per shard needed to complete the migration.")
-        .changeRestriction('gated'),
+            "Increase for very large shards (>200GB) to reduce the number of re-downloads per shard needed to complete the migration. " +
+            "Safe to change on a running migration: it only affects leases granted after the change."),
+    maxLeaseDuration: z.string()
+        .regex(ISO_DURATION_PATTERN)
+        .default("P1D").optional()
+        .describe("[Expert] ISO 8601 upper bound on a work item lease (e.g. 'P1D' = 1 day). The lease doubles each time " +
+            "a shard is picked up again after its lease expired; once the doubled lease would reach this value, it stays " +
+            "at this value. Must be at least initialLeaseDuration."),
+    bulkResponseTimeout: z.string()
+        .regex(ISO_DURATION_PATTERN)
+        .refine(d => (isoDurationSeconds(d) ?? 0) > 0, {message: "bulkResponseTimeout must be positive"})
+        .default("PT310S").optional()
+        .describe("[Expert] ISO 8601 duration each bulk request waits for its response once sent, before it is retried as " +
+            "a request that got no response. The target keeps working on a bulk it has received, so a retry adds a second " +
+            "copy of the work; this should outlast the slowest bulk the target completes. The default is just over the " +
+            "300 s idle timeout common to load balancers in front of a cluster, so behind one a stuck bulk is answered " +
+            "with a 504 first. " +
+            "Work coordination and other requests keep their shorter timeout."),
     maxConnections: z.number().default(10).optional()
-        .describe("Maximum number of concurrent HTTP connections from each RFS worker to the target cluster for bulk indexing.")
-        .changeRestriction('gated'),
+        .describe("M, the most bulk requests each RFS worker may have in flight to the target at once (and so the most " +
+            "connections it uses for them). The worker's limit L starts at 1: each success while L is in use adds 1 " +
+            "(1/L above the threshold), each throttle (429, rejected execution, response timeout) multiplies it by a " +
+            "random 0.5-0.7, " +
+            "and it stays within [1/32, M]; below 1 the worker paces its one request. So M is the ceiling, not what a " +
+            "worker always uses. " +
+            "On a running migration, lowering it applies immediately; raising it adds load to the target and needs approval.")
+        .gatedOnIncrease(),
     maxShardSizeBytes: z.number().default(80*1024*1024*1024).optional()
         .describe("Expected maximum shard size in bytes. Used to auto-calculate ephemeral storage requirements as ceil(2.5 * maxShardSizeBytes). Set this to match your largest shard to ensure sufficient disk space for Lucene segment processing.")
         .changeRestriction('gated'),
@@ -1141,8 +1302,14 @@ export const USER_RFS_PROCESS_OPTIONS = withOtelExportOptions(z.object({
             "Each RFS run writes under <prefix>/session=<workflow-uid>/. " +
             "Defaults to 'rfs-failed-document-stream/'."),
     failedDocumentStreamS3Bucket: z.string().optional()
-        .describe("S3 bucket for the failed document stream, and the switch that enables it. Omit it and terminal " +
-            "document failures are not recorded; there is no separate enable flag and no default bucket."),
+        .describe("S3 bucket for the failed document stream, where documents that can't be written are recorded. " +
+            "Either this or disableFailedDocumentStream is required; there is no default bucket.")
+        .changeRestriction('gated'),
+    disableFailedDocumentStream: z.boolean().optional()
+        .describe("Set to true to run without a failed document stream. Documents that can't be written are then " +
+            "logged and counted but not recorded anywhere, and a batch that exhausts its retries fails its work item. " +
+            "Either this or failedDocumentStreamS3Bucket is required.")
+        .changeRestriction('gated'),
     failedDocumentStreamS3Region: z.string().optional()
         .describe("AWS region for the failed document stream S3 bucket. Resolved by the config processor before " +
             "submission (user value, else the snapshot repo's region, else the deployment default). " +
@@ -1195,6 +1362,8 @@ export const USER_RFS_OPTIONS = withOtelExportOptions(z.object({
 })
     .superRefine((data, ctx) => {
         validateMinPodReplicas(ctx, data);
+        validateFailedDocumentStreamChoice(ctx, data);
+        validateMaxLeaseDuration(ctx, data);
         validatePipelineRawConfigConflict(ctx, data, "documentTransforms", [
             "docTransformerConfig",
             "docTransformerConfigBase64",
@@ -1320,11 +1489,17 @@ export const CLUSTER_CONFIG = z.object({
 export const TARGET_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
     endpoint:  z.string().regex(new RegExp(HTTP_ENDPOINT_PATTERN))
         .describe("HTTP(S) endpoint URL for the target cluster (e.g. 'https://target-cluster:9200/'). Required for target clusters."),
+    collectionRouted: z.boolean().optional()
+        .describe("Set to true when the endpoint is an OpenSearch Serverless per-account endpoint (<account-id>.aoss.<region>.on.aws), " +
+            "which selects the collection from a request header. Requires SigV4 auth with service 'aoss', and every snapshot migration " +
+            "to this target must define staticCollectionRouting or regexCollectionRouting. " +
+            "A replayer to this target needs a request transform that adds the x-amz-aoss-collection-name header. " +
+            "Migration console cluster commands don't send the collection header, so most of them don't work against this target."),
 }).describe("Connection configuration for a target OpenSearch cluster. Extends the base cluster config with a required endpoint.");
 
 export const SOURCE_CLUSTER_REPOS_RECORD =
     z.record(z.string(), REPO_CONFIG)
-    .describe("Map of snapshot repository names to their backing-store configurations. Keys are the repository names as registered in the source cluster. Each value's repoPathUri scheme determines the backend (s3:// or gs://).");
+    .describe("Map of snapshot repository names to their backing-store configurations. Keys are the repository names as registered in the source cluster. Each value's repoPathUri scheme determines the backend (s3://, gs://, or azure://).");
 
 export const CAPTURE_CONFIG = z.object({
     kafka: z.string().regex(K8S_NAMING_PATTERN).default("default").optional()
@@ -1691,6 +1866,25 @@ export const NORMALIZED_COMPLETE_SNAPSHOT_CONFIG = z.object({
         .describe("Resolved name of the snapshot to use for migration.")
 }).describe("A fully resolved snapshot configuration with a concrete snapshot name.");
 
+export const STATIC_COLLECTION_ROUTING = z.array(z.object({
+    sourceIndex: z.string().regex(/\S/, "must not be blank")
+        .describe("Exact source index name."),
+    collection: z.string().regex(/\S/, "must not be blank")
+        .describe("OpenSearch Serverless collection name, used as is."),
+}).describe("Routes one source index to one OpenSearch Serverless collection."))
+    .describe("Exact source index to collection mappings for a collection-routed target. A static match wins over every regex entry. " +
+        "Each sourceIndex may appear only once.");
+
+export const REGEX_COLLECTION_ROUTING = z.array(z.object({
+    sourceIndex: z.string().regex(/\S/, "must not be blank")
+        .describe("Java regular expression that must match the whole source index name (e.g. '(.+)-\\d{4}')."),
+    collection: z.string().regex(/\S/, "must not be blank")
+        .describe("Collection name replacement pattern, which may reference the regex's capture groups by number or name (e.g. '$1' or '${tenant}')."),
+}).describe("Routes source indices that match a regex to an OpenSearch Serverless collection."))
+    .describe("Ordered regex mappings for a collection-routed target, used when no static entry matches. The first regex that matches " +
+        "the whole index name wins. Patterns and group references are validated with JavaScript's regex engine, which " +
+        "rejects Java-only syntax such as (?i), a++ and (?>a), and then fully by Java when the migration starts.");
+
 export const USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG = z.object({
     label: z.string().regex(/^[a-zA-Z][a-zA-Z0-9]*/).default("").optional()
         .describe("Unique label for this migration within its snapshot group. Auto-generated as 'migration-<index>' if not specified. Must start with a letter and contain only alphanumeric characters."),
@@ -1698,6 +1892,13 @@ export const USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG = z.object({
         .describe("Configuration for migrating index metadata (mappings, settings, templates) from the snapshot to the target. Omit to skip metadata migration."),
     documentBackfillConfig: USER_RFS_OPTIONS.optional()
         .describe("Configuration for backfilling documents from the snapshot to the target using Reindex From Snapshot. Omit to skip document backfill."),
+    staticCollectionRouting: STATIC_COLLECTION_ROUTING.optional()
+        .describe("Exact source index to OpenSearch Serverless collection mappings. With regexCollectionRouting, needs at least one entry " +
+            "when the target is collectionRouted and is not allowed otherwise. Shared by metadata migration and document backfill " +
+            "so an index's metadata and documents reach the same collection. Templates aren't migrated to collection-routed targets."),
+    regexCollectionRouting: REGEX_COLLECTION_ROUTING.optional()
+        .describe("Ordered regex source index to OpenSearch Serverless collection mappings, used when no static entry matches. " +
+            "Same rules as staticCollectionRouting."),
 }).describe("Configuration for a single migration pass from a snapshot. At least one of metadataMigrationConfig or documentBackfillConfig must be provided.").refine(data =>
         data.metadataMigrationConfig !== undefined ||
         data.documentBackfillConfig !== undefined,
@@ -1750,7 +1951,7 @@ function validateDeltaDocumentOptions(
 ) {
     if (options.serverGeneratedIds === "ALWAYS" || options.enableSourcelessMigrations ||
         options.useRecoverySource || options.docTransformerConfig || options.docTransformerConfigBase64 ||
-        options.docTransformerConfigFile || options.documentTransforms) {
+        options.docTransformerConfigFile || (options.documentTransforms?.length ?? 0) > 0) {
         ctx.addIssue({
             code: z.ZodIssueCode.custom,
             message: "Repeated backfills require preserved document IDs and _source, without document transformations",
@@ -1770,6 +1971,8 @@ export const REPEATED_BACKFILL_CONFIG = z.object({
         .describe("Optional metadata migration options reused for every round."),
     documentBackfillConfig: USER_RFS_OPTIONS.prefault({})
         .describe("Document backfill options reused for every round."),
+    staticCollectionRouting: USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG.shape.staticCollectionRouting,
+    regexCollectionRouting: USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG.shape.regexCollectionRouting,
     repeat: BACKFILL_REPEAT_POLICY.default({maxRuns: 1}),
 }).superRefine((data, ctx) => validateDeltaDocumentOptions(
     data.documentBackfillConfig, ctx, ["documentBackfillConfig"],
@@ -1827,7 +2030,8 @@ export const NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG = z.object({
                 path: ["snapshotSequence"],
             });
         }
-        const initialOptions = perSnapshotConfig[sequence[0]]?.[0]?.documentBackfillConfig;
+        const initialMigration = perSnapshotConfig[sequence[0]]?.[0];
+        const initialOptions = initialMigration?.documentBackfillConfig;
         for (const snapshot of sequence) {
             const migrations = perSnapshotConfig[snapshot];
             const options = migrations?.[0]?.documentBackfillConfig;
@@ -1846,6 +2050,15 @@ export const NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG = z.object({
                     path: ["perSnapshotConfig", snapshot, "documentBackfillConfig", "indexAllowlist"],
                 });
             }
+            for (const key of ["staticCollectionRouting", "regexCollectionRouting"] as const) {
+                if (JSON.stringify(migrations[0][key] ?? []) !== JSON.stringify(initialMigration?.[key] ?? [])) {
+                    ctx.addIssue({
+                        code: z.ZodIssueCode.custom,
+                        message: "A snapshot sequence must use the same collection routing for every snapshot",
+                        path: ["perSnapshotConfig", snapshot, 0, key],
+                    });
+                }
+            }
             validateDeltaDocumentOptions(options, ctx, ["perSnapshotConfig", snapshot, "documentBackfillConfig"]);
         }
     }
@@ -1857,6 +2070,129 @@ export const SOURCE_CLUSTERS_MAP = z.record(z.string(), SOURCE_CLUSTER_CONFIG)
     .describe("Map of source cluster names to their configurations. Keys are used as labels throughout the migration workflow.");
 export const TARGET_CLUSTERS_MAP = z.record(z.string(), TARGET_CLUSTER_CONFIG)
     .describe("Map of target cluster names to their configurations. Keys are used as labels and must be referenced by snapshotMigrationConfigs and traffic replayers.");
+
+// Keep in sync with REPLACEMENT_TOKEN in ServerlessCollectionRouting.java. In order: an escaped character, ${name},
+// $n, then the incomplete forms ${, $ and a trailing backslash.
+const COLLECTION_REPLACEMENT_TOKEN = /\\.|\$\{([^}]*)}|\$(\d)|\$\{|\$|\\/gs;
+
+/** Returns why a regex route's collection can't work with its pattern, or undefined when it can. */
+function collectionReplacementProblem(collection: string, groupCount: number, groupNames: string[]): string | undefined {
+    for (const [token, groupName, groupNumber] of collection.matchAll(COLLECTION_REPLACEMENT_TOKEN)) {
+        if (groupName !== undefined) {
+            if (!groupNames.includes(groupName)) {
+                return `references undefined group '${groupName}'`;
+            }
+        } else if (groupNumber !== undefined) {
+            if (Number(groupNumber) > groupCount) {
+                return `references undefined group ${groupNumber}`;
+            }
+        } else if (token === "${") {
+            return "has an unclosed '${'";
+        } else if (token === "$") {
+            return "has '$' that is not a group reference";
+        } else if (token === "\\") {
+            return "ends with an unescaped backslash";
+        }
+    }
+    return undefined;
+}
+
+function validateRegexRoute(
+    route: z.infer<typeof REGEX_COLLECTION_ROUTING>[number],
+    routePath: (string | number)[],
+    ctx: z.RefinementCtx
+) {
+    let compiled: RegExp;
+    try {
+        compiled = new RegExp(route.sourceIndex);
+    } catch {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `regexCollectionRouting sourceIndex '${route.sourceIndex}' is not a valid regular expression. ` +
+                `This check uses JavaScript's engine, so it also rejects Java-only syntax such as (?i), a++ and (?>a).`,
+            path: [...routePath, 'sourceIndex']
+        });
+        return;
+    }
+    // An empty alternative always matches, which exposes the groups without needing an index name that fits the pattern
+    const groups = new RegExp(`${compiled.source}|`).exec("")!;
+    const problem = collectionReplacementProblem(route.collection, groups.length - 1, Object.keys(groups.groups ?? {}));
+    if (problem !== undefined) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `Collection '${route.collection}' for regex '${route.sourceIndex}' in regexCollectionRouting ${problem}.`,
+            path: [...routePath, 'collection']
+        });
+    }
+}
+
+function validateCollectionRouting(
+    targetCluster: z.infer<typeof TARGET_CLUSTER_CONFIG> | undefined,
+    mc: z.infer<typeof NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG>,
+    i: number,
+    ctx: z.RefinementCtx
+) {
+    if (!targetCluster) {
+        return;
+    }
+    const routed = targetCluster.collectionRouted === true;
+    if (routed) {
+        const sigv4 = HTTP_AUTH_SIGV4.safeParse(targetCluster.authConfig);
+        if (!sigv4.success || sigv4.data.sigv4.service !== "aoss") {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: `Target '${mc.toTarget}' is collectionRouted, which requires sigv4 authConfig with service 'aoss'.`,
+                path: ['targetClusters', mc.toTarget, 'authConfig']
+            });
+        }
+    }
+    const entries = Object.entries(mc.perSnapshotConfig ?? {}).flatMap(([snapName, migrations]) =>
+        migrations.map((migration, j) => ({
+            migration,
+            entryPath: ['snapshotMigrationConfigs', i, 'perSnapshotConfig', snapName, j],
+            entryName: `perSnapshotConfig['${snapName}'][${j}]`,
+        })));
+    if (mc.backfill) {
+        entries.push({
+            migration: mc.backfill,
+            entryPath: ['snapshotMigrationConfigs', i, 'backfill'],
+            entryName: "backfill",
+        });
+    }
+    for (const {migration, entryPath, entryName} of entries) {
+        const staticRoutes = migration.staticCollectionRouting;
+        const regexRoutes = migration.regexCollectionRouting;
+        const hasRoutingField = staticRoutes !== undefined || regexRoutes !== undefined;
+        const routeCount = (staticRoutes?.length ?? 0) + (regexRoutes?.length ?? 0);
+        if (routed && routeCount === 0) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: `Target '${mc.toTarget}' is collectionRouted, so ${entryName} needs at least one ` +
+                    `staticCollectionRouting or regexCollectionRouting entry.`,
+                path: [...entryPath, 'staticCollectionRouting']
+            });
+        } else if (!routed && hasRoutingField) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: `${entryName} sets collection routing, but target '${mc.toTarget}' is not collectionRouted.`,
+                path: [...entryPath, staticRoutes !== undefined ? 'staticCollectionRouting' : 'regexCollectionRouting']
+            });
+        }
+        const seen = new Set<string>();
+        (staticRoutes ?? []).forEach((route, k) => {
+            if (seen.has(route.sourceIndex)) {
+                ctx.addIssue({
+                    code: z.ZodIssueCode.custom,
+                    message: `staticCollectionRouting lists source index '${route.sourceIndex}' more than once.`,
+                    path: [...entryPath, 'staticCollectionRouting', k, 'sourceIndex']
+                });
+            }
+            seen.add(route.sourceIndex);
+        });
+        (regexRoutes ?? []).forEach((route, k) =>
+            validateRegexRoute(route, [...entryPath, 'regexCollectionRouting', k], ctx));
+    }
+}
 
 export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
 (
@@ -1984,6 +2320,8 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
                     path: ['snapshotMigrationConfigs', i, 'toTarget']
                 });
             }
+
+            validateCollectionRouting(data.targetClusters[mc.toTarget], mc, i, ctx);
 
             if (mc.perSnapshotConfig) {
                 const sourceCluster = data.sourceClusters[mc.fromSource];
@@ -2127,6 +2465,15 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
                             path: ['traffic', 'replayers', replayerName, 'dependsOnSnapshotMigrations', j, 'source']
                         });
                     }
+                }
+
+                if (data.targetClusters[rc.toTarget]?.collectionRouted && !hasRequestTransform(rc.replayerConfig)) {
+                    ctx.addIssue({
+                        code: z.ZodIssueCode.custom,
+                        message: `Replayer '${replayerName}' targets '${rc.toTarget}', which is collectionRouted, so it needs ` +
+                            `a request transform that adds the x-amz-aoss-collection-name header to each request.`,
+                        path: ['traffic', 'replayers', replayerName, 'toTarget']
+                    });
                 }
 
                 // When the target has sigv4 or basic auth, the workflow auto-derives the replayer's auth

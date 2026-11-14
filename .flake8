@@ -18,5 +18,6 @@ per-file-ignores =
     # hurts readability more than the long lines do.
     deployment/k8s/scripts/generate-capture-replay-dashboard.py: E501
     deployment/k8s/scripts/generate-capture-replay-grafana-dashboard.py: E501
+    deployment/k8s/scripts/generate-rfs-dashboards.py: E501
     # Verbatim CLI table output used as a parser fixture.
     migrationConsole/lib/integ_test/tests/test_log_kafka_consumer_group_state.py: E501

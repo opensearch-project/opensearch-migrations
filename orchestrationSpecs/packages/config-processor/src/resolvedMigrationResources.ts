@@ -125,9 +125,11 @@ function stableEqual(left: unknown, right: unknown): boolean {
 const CREATE_SNAPSHOT_EMPTY_STRING_DEFAULT_FIELDS =
     ["otelTraceCollectorEndpoint", "otelMetricsCollectorEndpoint"] as const;
 const METADATA_EMPTY_STRING_DEFAULT_FIELDS =
-    ["otelTraceCollectorEndpoint", "otelMetricsCollectorEndpoint", "transformerConfig", "transformerConfigFile"] as const;
+    ["otelTraceCollectorEndpoint", "otelMetricsCollectorEndpoint", "transformerConfig", "transformerConfigFile",
+        "collectionRouting"] as const;
 const DOCUMENT_BACKFILL_EMPTY_STRING_DEFAULT_FIELDS =
-    ["otelTraceCollectorEndpoint", "otelMetricsCollectorEndpoint", "docTransformerConfig", "docTransformerConfigFile"] as const;
+    ["otelTraceCollectorEndpoint", "otelMetricsCollectorEndpoint", "docTransformerConfig", "docTransformerConfigFile",
+        "collectionRouting"] as const;
 
 function withEmptyStringDefaults(
     value: Record<string, unknown> | undefined,
@@ -165,7 +167,7 @@ function connectionIdentityParameters(
 ): Record<string, unknown> {
     return {
         [prefixedKey(prefix, "label")]: identity.label,
-        ...(options.includeVersion === false ? {} : {[prefixedKey(prefix, "version")]: identity.version}),
+        ...(options.includeVersion ? {[prefixedKey(prefix, "version")]: identity.version} : {}),
         [prefixedKey(prefix, "endpoint")]: identity.endpoint,
         [prefixedKey(prefix, "allowInsecure")]: identity.allowInsecure,
         ...(options.includeAuth === false ? {} : {
@@ -435,8 +437,7 @@ function snapshotMigrationParameters(migration: SnapshotMigrationConfig): Record
         ),
         ...connectionIdentityParameters(
             "target",
-            migration.targetConnectionIdentity as Record<string, unknown>,
-            {includeVersion: false}
+            migration.targetConnectionIdentity as Record<string, unknown>
         ),
         snapshotLabel: migration.label,
         snapshotSourceType: snapshotSourceType(snapshotNameResolution),
@@ -463,8 +464,7 @@ function trafficReplayParameters(replay: ReplayConfig): Record<string, unknown> 
         sourceLabel: replay.sourceLabel,
         ...connectionIdentityParameters(
             "target",
-            replay.targetConnectionIdentity as Record<string, unknown>,
-            {includeVersion: false}
+            replay.targetConnectionIdentity as Record<string, unknown>
         ),
     };
 }
@@ -602,7 +602,11 @@ export function dryRunResourcePolicy(
             // "gated" fields use the same equality-or-approval shape as the VAP:
             // unchanged values pass, changed values require an ApprovalGate for
             // the workflow run. The caller supplies that approval state here.
-            if (field.changeRestriction === "gated" && !options.approved) {
+            // A field gated only on increase applies without approval when it goes down.
+            const gatedDecrease = field.gatedOnIncreaseOnly === true && previousHasValue && pendingHasValue &&
+                typeof previousValue === "number" && typeof pendingValue === "number" &&
+                pendingValue <= previousValue;
+            if (field.changeRestriction === "gated" && !gatedDecrease && !options.approved) {
                 changes.push({
                     path,
                     previousValue,

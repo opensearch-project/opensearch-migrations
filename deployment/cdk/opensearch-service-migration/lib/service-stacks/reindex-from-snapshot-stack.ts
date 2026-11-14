@@ -94,6 +94,11 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
         command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--max-shard-size-bytes", `${Math.ceil(maxShardSizeBytes)}`)
         command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--max-connections", props.reindexFromSnapshotWorkerSize === "maximum" ? "100" : "20")
         command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--initial-lease-duration", "PT60M")
+        // RFS requires either a failed document stream bucket or an explicit opt-out. This deployment doesn't
+        // provision a stream, so opt out unless extraArgs names a bucket.
+        if (!extraArgsDict["--failed-document-stream-s3-bucket"]) {
+            command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--disable-failed-document-stream")
+        }
         if (props.clusterAuthDetails.sigv4) {
             command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--target-aws-service-signing-name", props.clusterAuthDetails.sigv4.serviceSigningName)
             command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--target-aws-region", props.clusterAuthDetails.sigv4.region)

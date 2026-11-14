@@ -143,6 +143,21 @@ public class ItemsTest {
     }
 
     @Test
+    void testTemplatesSkippedOnCollectionRoutedTarget_areWarningsNotErrors() {
+        var items = createEmptyItemsBuilder()
+            .indexTemplates(List.of(CreationResult.builder().name("it1")
+                .failureType(CreationFailureType.SKIPPED_ON_COLLECTION_ROUTED_TARGET).build()))
+            .build();
+
+        assertThat(items.asCliOutput(),
+            containsString("WARN - it1 skipped because templates aren't migrated to collection-routed targets"));
+        assertThat(items.getAllErrors(), equalTo(List.of()));
+        var failure = items.asJsonOutput().get("indexTemplates").get(0).get("failure");
+        assertThat(failure.get("type").asText(), equalTo("SKIPPED_ON_COLLECTION_ROUTED_TARGET"));
+        assertThat(failure.get("fatal").asBoolean(), is(false));
+    }
+
+    @Test
     void testIndexTemplatesFailures() throws Exception {
         var items = createEmptyItemsBuilder()
             .indexTemplates(List.of(

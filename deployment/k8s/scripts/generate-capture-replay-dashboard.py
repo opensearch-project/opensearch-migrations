@@ -20,14 +20,20 @@ import sys
 NS = "OpenSearchMigrations"
 Q = "MA_QUALIFIER"
 R = "placeholder-region"
+EKS_CLUSTER = "EKS_CLUSTER_NAME"
+MA_NAMESPACE = "MA_NAMESPACE"
+WARNING_UTILIZATION = "placeholder-warning-utilization"
+CRITICAL_UTILIZATION = "placeholder-critical-utilization"
+INODE_UTILIZATION = "placeholder-inode-utilization"
 
 
 class W:
     """One metric widget; collects metric rows and returns a dashboard widget dict."""
 
-    def __init__(self, title, view="timeSeries", stacked=False, yleft=None, yright=None, period=60, stat="Sum"):
+    def __init__(self, title, view="timeSeries", stacked=False, yleft=None, yright=None, period=60, stat="Sum",
+                 annotations=None):
         self.title, self.view, self.stacked, self.period, self.stat = title, view, stacked, period, stat
-        self.rows, self.n, self.yleft, self.yright = [], 0, yleft, yright
+        self.rows, self.n, self.yleft, self.yright, self.annotations = [], 0, yleft, yright, annotations
 
     def _id(self, p):
         self.n += 1
@@ -50,9 +56,12 @@ class W:
         self.rows.append(row + [dict({"id": i, "stat": stat, "visible": False}, **opts)])
         return i
 
-    def e(self, expr, label, visible=True, **opts):
+    def e(self, expr, label=None, visible=True, **opts):
         i = self._id("e")
-        self.rows.append([dict({"expression": expr, "label": label, "id": i, "visible": visible}, **opts)])
+        properties = {"expression": expr, "id": i, "visible": visible}
+        if label is not None:
+            properties["label"] = label
+        self.rows.append([dict(properties, **opts)])
         return i
 
     # --- semantic helpers -------------------------------------------------
@@ -101,6 +110,8 @@ class W:
             yaxis["right"] = self.yright
         if yaxis:
             p["yAxis"] = yaxis
+        if self.annotations:
+            p["annotations"] = self.annotations
         if self.view == "singleValue":
             p["sparkline"] = True
             p.pop("stacked")
@@ -112,7 +123,7 @@ def text(md, x, y, w, h=1):
 
 
 def tuple_search(match=None, period=60):
-    """Both tupleComparison schemas: with sourceStatusCode and without it (source response missing).
+    """Separate tupleComparison schemas: with sourceStatusCode and without it (source response missing).
 
     period=None leaves SEARCH's period unset, so each point covers the graph's own period.
     """
@@ -125,6 +136,13 @@ def tuple_search(match=None, period=60):
     return with_src, no_src
 
 
+def all_tuples_search(match=None, period=60):
+    """All tupleComparison series, regardless of whether optional dimensions are present."""
+    m = f" statusCodesMatch=\"{match}\"" if match else ""
+    return (f"SEARCH('Namespace=\"{NS}\" MetricName=\"tupleComparison\" OTelLib=\"replayer\" "
+            f"qualifier=\"{Q}\"{m}', 'Sum', {period})")
+
+
 def es(w, metric, stat, label, domain_var="TARGET_DOMAIN", scale=None, **opts):
     q = f"SEARCH('{{AWS/ES,ClientId,DomainName}} MetricName=\"{metric}\" DomainName=\"{domain_var}\"', '{stat}', 60)"
     expr = f"MAX({q})" if stat in ("Maximum", "Average") else f"SUM({q})"
@@ -134,9 +152,11 @@ def es(w, metric, stat, label, domain_var="TARGET_DOMAIN", scale=None, **opts):
 
 
 MIB = 1048576
+GIB = 1073741824
 # Metric math keeps a source metric's unit, so a millisecond metric divided by 1000 would still be
 # labelled as milliseconds (4,200 s drawn as "4.2s"). Axes for rescaled durations drop the unit.
 SECONDS_AXIS = {"label": "seconds", "showUnits": False}
+UTILIZATION_AXIS = {"min": 0, "max": 100, "label": "utilization %", "showUnits": False}
 
 # ----------------------------------------------------------------------------------------------
 # Widget catalogue.  Each entry builds a W; layouts below only decide placement.
@@ -162,8 +182,7 @@ def kpis():
     w.rate("fullRequest", "Captured req/s", lib="captureProxy")
     out.append(w)
     w = W("Replayed tuples/s", "singleValue")
-    a, b = tuple_search()
-    w.e(f"(SUM({a}) + FILL(SUM({b}), 0)) / 60", "Replayed tuples/s")
+    w.e(f"SUM({all_tuples_search()}) / 60", "Replayed tuples/s")
     out.append(w)
     w = W("Mean replay lag (s)", "singleValue")
     lag = w.unitless_mean("lagBetweenSourceAndTargetRequests")
@@ -179,9 +198,8 @@ def kpis():
     w.e(f"IF(DIFF_TIME({s}) > PERIOD({s}), 0/0, 1 - RATE({s}))", "Speedup")
     out.append(w)
     w = W("Status-code match %", "singleValue")
-    a, b = tuple_search()
-    ma, _ = tuple_search("true")
-    w.e(f"100 * SUM({ma}) / (SUM({a}) + FILL(SUM({b}), 0))", "Match %")
+    total = f"SUM({all_tuples_search()})"
+    w.e(f"IF({total} > 0, 100 * SUM({all_tuples_search('true')}) / {total})", "Match %")
     out.append(w)
     w = W("Target CPU / JVM pressure (max node %)", "singleValue")
     es(w, "CPUUtilization", "Maximum", "CPU %")
@@ -198,8 +216,7 @@ def flow_requests():
         "Proxy Kafka records published/s")
     w.rate("kafkaSourceRecordsRead", "Replayer Kafka records read/s")
     w.rate("targetTransactionCount", "Replayer target transactions/s")
-    a, b = tuple_search()
-    w.e(f"(SUM({a}) + FILL(SUM({b}), 0)) / 60", "Tuples compared/s")
+    w.e(f"SUM({all_tuples_search()}) / 60", "Tuples compared/s")
     return w
 
 
@@ -388,6 +405,295 @@ def kafka_brokers():
     return w
 
 
+KAFKA_PVC_SCHEMA = (
+    f"{{{NS},EKSClusterName,qualifier,namespace,persistentvolumeclaim}} "
+    f'EKSClusterName="{EKS_CLUSTER}" qualifier="{Q}" namespace="{MA_NAMESPACE}"'
+)
+KAFKA_DISK_THRESHOLDS = {
+    "horizontal": [
+        {"label": "Warning", "value": WARNING_UTILIZATION, "color": "#ff9900"},
+        {"label": "Critical", "value": CRITICAL_UTILIZATION, "color": "#d13212"},
+    ]
+}
+KAFKA_INODE_THRESHOLD = {
+    "horizontal": [
+        {"label": "Low free inodes", "value": INODE_UTILIZATION, "color": "#d13212"},
+    ]
+}
+
+
+KAFKA_PVC_PERIOD = 300
+
+
+def kafka_pvc_search(metric, stat="Maximum"):
+    return f"SEARCH('{KAFKA_PVC_SCHEMA} MetricName=\"{metric}\"', '{stat}', {KAFKA_PVC_PERIOD})"
+
+
+def filled_kafka_pvc_search(metric, stat="Maximum"):
+    # Each PVC is scraped by the collector on its node, so samples do not all
+    # arrive in the same second. Repeat-fill short gaps before fleet reduction
+    # to prevent an incomplete current interval from looking like capacity
+    # disappeared.
+    return f"FILL({kafka_pvc_search(metric, stat)}, REPEAT)"
+
+
+def kafka_fleet_disk_utilization():
+    """Capacity-weighted fleet utilization.
+
+    SEARCH returns an array of time series. CloudWatch cannot divide two such
+    arrays element by element, but reducing each array to one fleet total
+    before division is valid and preserves the available/capacity definition.
+    """
+    available = filled_kafka_pvc_search("kubelet_volume_stats_available_bytes", "Minimum")
+    capacity = filled_kafka_pvc_search("kubelet_volume_stats_capacity_bytes")
+    return f"100 * (1 - SUM({available}) / SUM({capacity}))"
+
+
+def kafka_storage_summary():
+    w = W(
+        "Kafka storage utilization (fleet, capacity-weighted)",
+        yleft=UTILIZATION_AXIS,
+        period=KAFKA_PVC_PERIOD,
+        annotations=KAFKA_DISK_THRESHOLDS,
+    )
+    w.e(kafka_fleet_disk_utilization(), "Fleet utilization")
+    return w
+
+
+def kafka_storage_free_by_pvc():
+    w = W(
+        "Kafka free space by broker volume (GiB)",
+        yleft={"min": 0, "label": "GiB", "showUnits": False},
+        period=KAFKA_PVC_PERIOD,
+    )
+    w.e(
+        f"{filled_kafka_pvc_search('kubelet_volume_stats_available_bytes', 'Minimum')} / {GIB}",
+        None,
+    )
+    return w
+
+
+def kafka_storage_capacity():
+    w = W(
+        "Kafka storage totals (GiB)",
+        "singleValue",
+        yleft={"min": 0, "label": "GiB", "showUnits": False},
+        period=KAFKA_PVC_PERIOD,
+    )
+    available = w.e(
+        f"SUM({filled_kafka_pvc_search('kubelet_volume_stats_available_bytes', 'Minimum')})",
+        "Fleet available bytes",
+        visible=False,
+    )
+    capacity = w.e(
+        f"SUM({filled_kafka_pvc_search('kubelet_volume_stats_capacity_bytes')})",
+        "Fleet capacity bytes",
+        visible=False,
+    )
+    w.e(f"{available} / {GIB}", "Free (GiB)")
+    w.e(f"({capacity} - {available}) / {GIB}", "Used (GiB)")
+    w.e(f"{capacity} / {GIB}", "Capacity (GiB)")
+    return w
+
+
+def kafka_storage_inodes():
+    w = W(
+        "Kafka inode utilization (fleet, capacity-weighted)",
+        yleft=UTILIZATION_AXIS,
+        period=KAFKA_PVC_PERIOD,
+        annotations=KAFKA_INODE_THRESHOLD,
+    )
+    free = filled_kafka_pvc_search("kubelet_volume_stats_inodes_free", "Minimum")
+    total = filled_kafka_pvc_search("kubelet_volume_stats_inodes")
+    w.e(f"100 * (1 - SUM({free}) / SUM({total}))", "Fleet inode utilization")
+    return w
+
+
+def kafka_storage_health():
+    w = W(
+        "Kafka abnormal volume health",
+        yleft={"min": 0, "max": 1, "label": "1 = abnormal", "showUnits": False},
+        period=KAFKA_PVC_PERIOD,
+    )
+    w.e(
+        kafka_pvc_search("kubelet_volume_stats_health_status_abnormal"),
+        None,
+    )
+    return w
+
+
+KAFKA_BROKER_PERIOD = 60
+KAFKA_BROKER_DIMENSIONS = [
+    "EKSClusterName",
+    "qualifier",
+    "namespace",
+    "kafka_cluster",
+    "pod",
+]
+
+
+def kafka_broker_search(metric, stat="Maximum", extra_dimensions=(), filters=()):
+    dimensions = ",".join([NS, *KAFKA_BROKER_DIMENSIONS, *extra_dimensions])
+    filter_text = "".join(f' {name}="{value}"' for name, value in filters)
+    selector = (
+        f'{{{dimensions}}} EKSClusterName="{EKS_CLUSTER}" '
+        f'qualifier="{Q}" namespace="{MA_NAMESPACE}"{filter_text} MetricName="{metric}"'
+    )
+    return f"SEARCH('{selector}', '{stat}', {KAFKA_BROKER_PERIOD})"
+
+
+def kafka_broker_replication():
+    w = W("Kafka replication and ISR health", period=KAFKA_BROKER_PERIOD)
+    w.e(
+        f"SUM({kafka_broker_search('kafka_server_replicamanager_under_replicated_partitions')})",
+        "Under-replicated partitions",
+    )
+    w.e(
+        f"SUM({kafka_broker_search('kafka_controller_offline_partitions_count')})",
+        "Offline partitions",
+    )
+    w.e(
+        f"SUM({kafka_broker_search('kafka_server_replicamanager_isr_expands_total', 'Sum')}) "
+        f"/ {KAFKA_BROKER_PERIOD}",
+        "ISR expands/s",
+    )
+    w.e(
+        f"SUM({kafka_broker_search('kafka_server_replicamanager_isr_shrinks_total', 'Sum')}) "
+        f"/ {KAFKA_BROKER_PERIOD}",
+        "ISR shrinks/s",
+    )
+    return w
+
+
+def kafka_broker_controller():
+    w = W(
+        "Kafka controller, quorum, and uptime",
+        period=KAFKA_BROKER_PERIOD,
+        yright={"label": "hours", "showUnits": False},
+    )
+    w.e(
+        f"SUM({kafka_broker_search('kafka_controller_active_controller_count')})",
+        "Active controllers",
+    )
+    w.e(
+        f"MIN({kafka_broker_search('kafka_server_raft_current_leader')})",
+        "Current quorum leader (minimum reported ID)",
+    )
+    w.e(
+        f"MAX({kafka_broker_search('kafka_server_raft_current_epoch')})",
+        "Current quorum epoch",
+    )
+    w.e(
+        f"MIN({kafka_broker_search('kafka_jvm_uptime_milliseconds')}) / 3600000",
+        "Youngest broker uptime",
+        yAxis="right",
+    )
+    return w
+
+
+def kafka_broker_requests():
+    w = W(
+        "Kafka produce/fetch errors and throttling",
+        period=KAFKA_BROKER_PERIOD,
+        yright={"label": "throttle ms", "showUnits": False},
+    )
+    for request, label in (
+        ("Produce", "Produce"),
+        ("FetchConsumer", "Consumer fetch"),
+        ("FetchFollower", "Follower fetch"),
+    ):
+        filters = (("request", request),)
+        errors = kafka_broker_search(
+            "kafka_network_request_errors_total",
+            "Sum",
+            ("request", "error"),
+            filters,
+        )
+        w.e(
+            f"SUM({errors}) / {KAFKA_BROKER_PERIOD}",
+            f"{label} errors/s",
+        )
+        throttle = kafka_broker_search(
+            "kafka_network_request_throttle_time_milliseconds",
+            "Maximum",
+            ("request",),
+            filters,
+        )
+        w.e(
+            f"MAX({throttle})",
+            f"{label} max throttle",
+            yAxis="right",
+        )
+    return w
+
+
+def kafka_broker_handlers():
+    w = W(
+        "Kafka broker/controller request-handler utilization (average)",
+        period=KAFKA_BROKER_PERIOD,
+        yleft={"min": 0, "max": 100, "label": "busy %", "showUnits": False},
+    )
+    idle = kafka_broker_search("kafka_server_request_handler_idle_ratio", "Average")
+    # Kafka 4.0 combined-role brokers add the broker and controller request
+    # handler idle fractions into this legacy metric. Normalize the two pools
+    # back to a 0..1 fraction before converting it to busy percent.
+    w.e(f"100 * (1 - AVG({idle}) / 2)", "Fleet average busy")
+    w.e(f"100 * (1 - MIN({idle}) / 2)", "Busiest broker")
+    return w
+
+
+def kafka_broker_jvm():
+    w = W(
+        "Kafka JVM heap and process CPU",
+        period=KAFKA_BROKER_PERIOD,
+        yleft=UTILIZATION_AXIS,
+    )
+    used = kafka_broker_search("kafka_jvm_heap_used_bytes")
+    capacity = kafka_broker_search("kafka_jvm_heap_max_bytes")
+    w.e(f"100 * SUM({used}) / SUM({capacity})", "Fleet heap utilization")
+    w.e(
+        f"100 * MAX({kafka_broker_search('kafka_jvm_process_cpu_ratio')})",
+        "Hottest broker process CPU",
+    )
+    return w
+
+
+def kafka_broker_gc():
+    w = W(
+        "Kafka JVM garbage collection (G1)",
+        period=KAFKA_BROKER_PERIOD,
+        yright={"label": "collections/s", "showUnits": False},
+    )
+    for collector, label in (
+        ("G1 Young Generation", "G1 young"),
+        ("G1 Old Generation", "G1 old"),
+        ("G1 Concurrent GC", "G1 concurrent"),
+    ):
+        filters = (("collector", collector),)
+        collection_time = kafka_broker_search(
+            "kafka_jvm_gc_collection_time_milliseconds_total",
+            "Sum",
+            ("collector",),
+            filters,
+        )
+        collections = kafka_broker_search(
+            "kafka_jvm_gc_collections_total",
+            "Sum",
+            ("collector",),
+            filters,
+        )
+        w.e(
+            f"SUM({collection_time}) / 1000 / {KAFKA_BROKER_PERIOD}",
+            f"{label} GC time (fleet seconds/s)",
+        )
+        w.e(
+            f"SUM({collections}) / {KAFKA_BROKER_PERIOD}",
+            f"{label} collections/s",
+            yAxis="right",
+        )
+    return w
+
+
 def pct(w, name, label, lib="replayer", scale=1):
     for p in ("p10", "p50", "p90", "Maximum"):
         i = w.m(name, p, lib)
@@ -568,9 +874,8 @@ def fleet_target():
 # --- correctness -----------------------------------------------------------------------------
 def status_match_pct():
     w = W("Status-code match % (includes missing source responses)", yleft={"min": 0, "max": 100})
-    a, b = tuple_search()
-    ma, _ = tuple_search("true")
-    w.e(f"100 * SUM({ma}) / (SUM({a}) + FILL(SUM({b}), 0))", "Match %")
+    total = f"SUM({all_tuples_search()})"
+    w.e(f"IF({total} > 0, 100 * SUM({all_tuples_search('true')}) / {total})", "Match %")
     return w
 
 
@@ -627,8 +932,11 @@ def response_time_diff():
         slower, faster = (response_search(name, "Sum", dims, f" span=\"{span}\" targetSlower=\"{t}\"")
                           for t in ("true", "false"))
         count = response_search(name, "SampleCount", dims, f" span=\"{span}\"")
+        total = f"SUM({count})"
         # The exact signed mean: magnitudes where the target was slower, less those where it was not, over all pairs.
-        w.e(f"(FILL(SUM({slower}), 0) - FILL(SUM({faster}), 0)) / SUM({count})", label)
+        # Omit idle periods instead of dividing by an empty or zero sample count, which CloudWatch reports as an
+        # arithmetic warning even though it drops the resulting non-numeric point.
+        w.e(f"IF({total} > 0, (FILL(SUM({slower}), 0) - FILL(SUM({faster}), 0)) / {total})", label)
     return w
 
 
@@ -708,6 +1016,44 @@ NOTE = ("**How to read this dashboard.** Rates are fleet totals per second. Gaug
         "are empty when the capture proxy is scaled to 0.")
 
 
+def layout_kafka_brokers(ws, y):
+    """Append the managed-Kafka storage and broker-internals sections; returns the next free row."""
+    ws.append(text("## Kafka broker storage", 0, y, 24))
+    y += 1
+    ws.append(text(
+        "These panels cover the complete Migration Assistant-managed Kafka cluster; no broker-volume selection "
+        "is required. Fleet disk and inode utilization are capacity-weighted five-minute views. Free space and "
+        "abnormal health retain per-volume legends to expose imbalance or a specific failing volume. Missing inode or "
+        "abnormal-health data means the kubelet/CSI driver did not publish that metric; it is not treated as "
+        "zero or healthy.",
+        0, y, 24, 2,
+    ))
+    y += 2
+    for i, b in enumerate([kafka_storage_summary, kafka_storage_free_by_pvc, kafka_storage_capacity]):
+        ws.append(b().widget(i * 8, y, 8, 7))
+    y += 7
+    for i, b in enumerate([kafka_storage_inodes, kafka_storage_health]):
+        ws.append(b().widget(i * 12, y, 12, 7))
+    y += 7
+    ws.append(text("## Kafka broker internals", 0, y, 24))
+    y += 1
+    ws.append(text(
+        "One-minute managed-broker JMX metrics exported to CloudWatch. Request/error dimensions are limited to "
+        "Produce, FetchConsumer, and FetchFollower; topic and partition labels are not exported. Kafka 4.0 "
+        "combined-role brokers report the request-handler idle fractions for both broker and controller pools, "
+        "so the saturation panel normalizes their sum by two.",
+        0, y, 24,
+    ))
+    y += 1
+    for i, b in enumerate([kafka_broker_replication, kafka_broker_controller, kafka_broker_requests]):
+        ws.append(b().widget(i * 8, y, 8, 7))
+    y += 7
+    for i, b in enumerate([kafka_broker_handlers, kafka_broker_jvm, kafka_broker_gc]):
+        ws.append(b().widget(i * 8, y, 8, 7))
+    y += 7
+    return y
+
+
 def layout_columns():
     """Stage per column (proxy | Kafka | replayer | target); each row compares one signal type across stages."""
     ws, y = [], 0
@@ -760,6 +1106,7 @@ def layout_columns():
     for i, b in enumerate([tuple_flow, tuple_latency, tuple_errors]):
         ws.append(b().widget(i * 8, y, 8, 6))
     y += 6
+    y = layout_kafka_brokers(ws, y)
     ws.append(text("## Source cluster and replayer internals", 0, y, 24))
     y += 1
     for i, b in enumerate([source_domain, contexts_by_activity, ops_by_type, resources_owned]):
@@ -778,6 +1125,10 @@ VARIABLES = [
      "defaultValue": "placeholder-stage", "visible": False},
     {"type": "pattern", "pattern": "MA_QUALIFIER", "inputType": "input", "id": "MA_QUALIFIER", "label": "Migration Qualifier",
      "defaultValue": "placeholder-qualifier", "visible": False},
+    {"type": "pattern", "pattern": "EKS_CLUSTER_NAME", "inputType": "input", "id": "EKS_CLUSTER_NAME",
+     "label": "EKS cluster", "defaultValue": "placeholder-cluster", "visible": False},
+    {"type": "pattern", "pattern": "MA_NAMESPACE", "inputType": "input", "id": "MA_NAMESPACE",
+     "label": "Kubernetes namespace", "defaultValue": "placeholder-namespace", "visible": False},
     {"type": "pattern", "pattern": "CATCHUP_FLOOR_SECONDS", "inputType": "select", "id": "CATCHUP_FLOOR_SECONDS",
      "label": "Catch-up lag floor", "defaultValue": "5",
      "values": [{"label": "1 second", "value": "1"}, {"label": "5 seconds", "value": "5"}, {"label": "1 minute", "value": "60"}],

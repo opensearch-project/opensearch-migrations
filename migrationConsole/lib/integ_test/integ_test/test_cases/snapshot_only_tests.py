@@ -106,7 +106,7 @@ class Test0010ExternalSnapshotMigration(MATestBase):
             },
             "migrations": [{
                 "metadataMigrationConfig": {},
-                "documentBackfillConfig": {"podReplicas": self.pod_replicas}
+                "documentBackfillConfig": {"disableFailedDocumentStream": True, "podReplicas": self.pod_replicas}
             }]
         }]
 

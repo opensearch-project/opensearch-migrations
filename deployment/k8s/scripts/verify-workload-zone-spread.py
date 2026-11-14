@@ -20,6 +20,7 @@ EKS_SETTINGS = [
     "--set-string", "stageName=verify",
     "--set-string", "aws.region=us-east-2",
     "--set-string", "aws.account=123456789012",
+    "--set-string", "aws.eksClusterName=verify-cluster",
 ]
 ZONE_SPREAD = re.compile(r'^\s*workloadZoneSpread:\s*"([^"]*)"\s*$', re.MULTILINE)
 # A quoted YAML scalar holding JSON, e.g. "{\"minDomains\":3}".

@@ -1,6 +1,7 @@
 package org.opensearch.migrations.bulkload.workcoordination;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.util.function.Consumer;
 
 import org.opensearch.migrations.Version;
@@ -16,6 +17,7 @@ public class WorkCoordinatorFactory {
     private final Version version;
     private final String indexNameSuffix;
     private final OpenSearchWorkCoordinator.CompletionRetryConfig completionRetryConfig;
+    private final Duration maxLeaseDuration;
 
     public WorkCoordinatorFactory(Version version) {
         this(version, "", OpenSearchWorkCoordinator.CompletionRetryConfig.DEFAULT);
@@ -27,9 +29,17 @@ public class WorkCoordinatorFactory {
 
     public WorkCoordinatorFactory(Version version, String indexNameSuffix,
                                   OpenSearchWorkCoordinator.CompletionRetryConfig completionRetryConfig) {
+        this(version, indexNameSuffix, completionRetryConfig, null);
+    }
+
+    /** @param maxLeaseDuration cap on every lease the coordinators grant; null for no cap */
+    public WorkCoordinatorFactory(Version version, String indexNameSuffix,
+                                  OpenSearchWorkCoordinator.CompletionRetryConfig completionRetryConfig,
+                                  Duration maxLeaseDuration) {
         this.version = version;
         this.indexNameSuffix = indexNameSuffix;
         this.completionRetryConfig = completionRetryConfig;
+        this.maxLeaseDuration = maxLeaseDuration;
     }
 
     public OpenSearchWorkCoordinator get(
@@ -52,6 +62,7 @@ public class WorkCoordinatorFactory {
 
     private OpenSearchWorkCoordinator applyConfig(OpenSearchWorkCoordinator coordinator) {
         coordinator.setCompletionRetryConfig(completionRetryConfig);
+        coordinator.setMaxLeaseDuration(maxLeaseDuration);
         return coordinator;
     }
 

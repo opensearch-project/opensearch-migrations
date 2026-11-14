@@ -199,7 +199,7 @@ resource "google_container_cluster" "migration_standard" {
   }
 
   # Manage every node pool as a standalone google_container_node_pool resource
-  # (see the "default" and "kafka" pools below). Mixing an inline node_pool block
+  # (see the "default" pool below). Mixing an inline node_pool block
   # with standalone pools makes node-pool changes force-replace the whole cluster;
   # a half-failed apply would then recreate the cluster and take all pools with it.
   # GKE requires a node pool at creation, so create a throwaway one and remove it.
@@ -209,9 +209,9 @@ resource "google_container_cluster" "migration_standard" {
   depends_on = [google_compute_router_nat.migration_nat]
 }
 
-# Default node pool for Migration Assistant workloads. Defined as a standalone
-# resource (like the kafka pool) so its config can change without forcing the
-# cluster to be replaced.
+# Default node pool for Migration Assistant workloads, including in-cluster Kafka
+# brokers. Defined as a standalone resource so its config can change without
+# forcing the cluster to be replaced.
 resource "google_container_node_pool" "default" {
   name     = "default-pool"
   cluster  = google_container_cluster.migration_standard.name
@@ -286,44 +286,6 @@ resource "google_storage_bucket" "migration_snapshots" {
   force_destroy = true
 
   uniform_bucket_level_access = true
-}
-
-# Dedicated node pool for Kafka brokers (Strimzi-managed).
-# Tainted so only Kafka pods schedule here. Skipped when deploy_kafka = false
-# (external Kafka configured via kafka_brokers variable).
-resource "google_container_node_pool" "kafka" {
-  count = var.deploy_kafka ? 1 : 0
-
-  name     = "kafka-pool"
-  cluster  = google_container_cluster.migration_standard.name
-  location = var.region
-
-  node_count = var.kafka_broker_count
-
-  node_locations = local.node_locations
-
-  node_config {
-    machine_type    = var.kafka_machine_type
-    disk_size_gb    = var.kafka_disk_size_gb
-    disk_type       = var.kafka_disk_type
-    service_account = google_service_account.migration_nodes.email
-    oauth_scopes    = var.node_oauth_scopes
-
-    labels = {
-      "opensearch-migrations/role" = "kafka"
-    }
-
-    taint {
-      key    = "opensearch-migrations/role"
-      value  = "kafka"
-      effect = "NO_SCHEDULE"
-    }
-  }
-
-  management {
-    auto_repair  = true
-    auto_upgrade = true
-  }
 }
 
 # ── Optional per-leg private connectivity (mode = none by default) ──────────
@@ -468,13 +430,13 @@ resource "helm_release" "migration_assistant" {
     }
   ]
 
-  # The default node pool must be listed, not just the cluster and the Kafka pool.
+  # The default node pool must be listed, not just the cluster.
   #
   # Terraform destroys in reverse dependency order, so anything named here is torn down
   # after this release is uninstalled. Omitting the default pool leaves Terraform free to
-  # delete it first. Every chart workload then becomes unschedulable, because the only
-  # nodes left are the Kafka pool's, which are tainted and dedicated. The uninstall waits
-  # for workloads that can never start and fails with:
+  # delete it first. Every chart workload then becomes unschedulable, because the cluster
+  # has no other nodes. The uninstall waits for workloads that can never start and fails
+  # with:
   #
   #   Error: Error uninstalling release
   #   Unable to uninstall Helm release ma: timed out waiting for the condition
@@ -485,7 +447,6 @@ resource "helm_release" "migration_assistant" {
   # 50 GiB persistent disk that keeps billing after the cluster is gone.
   depends_on = [
     google_container_cluster.migration_standard,
-    google_container_node_pool.default,
-    google_container_node_pool.kafka
+    google_container_node_pool.default
   ]
 }

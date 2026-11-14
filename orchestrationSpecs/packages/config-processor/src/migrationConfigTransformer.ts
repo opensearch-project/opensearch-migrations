@@ -19,7 +19,8 @@ import {
     TRANSFORM_CONTEXT_VALUE,
     DEPLOYMENT_DEFAULTS_CONFIG,
     SNAPSHOT_MIGRATION_CONFIG,
-    CLUSTER_CONNECTION_IDENTITY,
+    SOURCE_CLUSTER_CONNECTION_IDENTITY,
+    TARGET_CLUSTER_CONNECTION_IDENTITY,
     snapshotLagDurationSeconds,
 } from '@opensearch-migrations/schemas';
 import {StreamSchemaTransformer} from './streamSchemaTransformer';
@@ -420,9 +421,27 @@ function lowerFileBackedContextValues(
     return {files, literalValues};
 }
 
+type CollectionRouting = Pick<z.infer<typeof USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG>,
+    "staticCollectionRouting" | "regexCollectionRouting">;
+
+/** Both lists travel to the Java tools together as one JSON object, matching their --collection-routing argument. */
+function collectionRoutingFields(routing: CollectionRouting | undefined): {collectionRouting?: string} {
+    const {staticCollectionRouting, regexCollectionRouting} = routing ?? {};
+    if (staticCollectionRouting === undefined && regexCollectionRouting === undefined) {
+        return {};
+    }
+    return {
+        collectionRouting: JSON.stringify({
+            ...(staticCollectionRouting === undefined ? {} : {staticCollectionRouting}),
+            ...(regexCollectionRouting === undefined ? {} : {regexCollectionRouting}),
+        })
+    };
+}
+
 function prepareMetadataConfig(
     config: z.infer<typeof USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG>["metadataMigrationConfig"],
-    skipApprovals: boolean
+    skipApprovals: boolean,
+    collectionRouting?: CollectionRouting
 ) {
     if (config === undefined) {
         return undefined;
@@ -433,10 +452,14 @@ function prepareMetadataConfig(
     const generatedConfig = lowerTransformPipeline(metadataTransforms, fileSourceRegistry);
     return ARGO_METADATA_OPTIONS.parse({
         ...rest,
+        logLevels: {
+            root: rest.logLevels?.root ?? "info",
+        },
         resources: rest.resources,
         skipEvaluateApproval: rest.skipEvaluateApproval ?? skipApprovals,
         skipMigrateApproval: rest.skipMigrateApproval ?? skipApprovals,
         ...fileSourceRegistry.resolvedFields,
+        ...collectionRoutingFields(collectionRouting),
         ...(generatedConfig === undefined ? {} : {transformerConfig: generatedConfig}),
     });
 }
@@ -496,7 +519,8 @@ function prepareDocumentBackfillConfig(
     config: z.infer<typeof USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG>["documentBackfillConfig"],
     repoConfig: { awsRegion?: string; endpoint?: string } | undefined,
     deploymentDefaults: z.infer<typeof DEPLOYMENT_DEFAULTS_CONFIG>,
-    skipApprovals: boolean
+    skipApprovals: boolean,
+    collectionRouting?: CollectionRouting
 ) {
     if (config === undefined) {
         return undefined;
@@ -507,9 +531,15 @@ function prepareDocumentBackfillConfig(
     const generatedConfig = lowerTransformPipeline(documentTransforms, fileSourceRegistry);
     return ARGO_RFS_OPTIONS.parse({
         ...rest,
+        logLevels: {
+            root: rest.logLevels?.root ?? "info",
+            bulkRequestTrace: rest.logLevels?.bulkRequestTrace ?? "off",
+            failedRequests: rest.logLevels?.failedRequests ?? "warn",
+        },
         ...resolveFailedDocumentStreamS3(rest, repoConfig, deploymentDefaults),
         skipApproval: rest.skipApproval ?? skipApprovals,
         ...fileSourceRegistry.resolvedFields,
+        ...collectionRoutingFields(collectionRouting),
         ...(generatedConfig === undefined ? {} : {docTransformerConfig: generatedConfig}),
     });
 }
@@ -517,6 +547,7 @@ function prepareDocumentBackfillConfig(
 function prepareReplayerConfig(
     config: NonNullable<NonNullable<z.infer<typeof OVERALL_MIGRATION_CONFIG>["traffic"]>["replayers"][string]["replayerConfig"]> | undefined
 ) {
+    const configuredLogLevels = config && "logLevels" in config ? config.logLevels : undefined;
     const {requestTransforms, tupleTransforms, ...rest} = config ?? {};
     const fileSourceRegistry = new FileSourceRegistry();
     const generatedRequestConfig = lowerTransformPipeline(requestTransforms, fileSourceRegistry);
@@ -524,6 +555,9 @@ function prepareReplayerConfig(
 
     return ARGO_REPLAYER_OPTIONS.parse({
         ...rest,
+        logLevels: {
+            root: configuredLogLevels?.root ?? "info",
+        },
         ...fileSourceRegistry.resolvedFields,
         ...(generatedRequestConfig === undefined ? {} : {transformerConfig: generatedRequestConfig}),
         ...(generatedTupleConfig === undefined ? {} : {tupleTransformerConfig: generatedTupleConfig}),
@@ -535,6 +569,9 @@ function prepareProxyConfig(
 ) {
     const fileSourceRegistry = new FileSourceRegistry();
     const tls = config.tls;
+    const logLevels = {
+        root: config.logLevels?.root ?? "info",
+    };
 
     if (tls !== undefined && "clientAuth" in tls && tls.clientAuth !== undefined) {
         const {clientAuth} = tls;
@@ -548,6 +585,7 @@ function prepareProxyConfig(
             };
         return ARGO_PROXY_OPTIONS.parse({
             ...config,
+            logLevels,
             ...trustCertConfig,
             requireClientAuth: clientAuth.required ?? true,
             ...fileSourceRegistry.resolvedFields,
@@ -556,6 +594,7 @@ function prepareProxyConfig(
 
     return ARGO_PROXY_OPTIONS.parse({
         ...config,
+        logLevels,
         ...fileSourceRegistry.resolvedFields,
     });
 }
@@ -1016,7 +1055,9 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                     configChecksum: proxyChecksumForSnapshot.get(dep.name) ?? '',
                 }));
                 const sourceConnectionIdentity =
-                    MigrationConfigTransformer.clusterConnectionIdentity(s.sourceConfig as Record<string, unknown>);
+                    MigrationConfigTransformer.sourceClusterConnectionIdentity(
+                        s.sourceConfig as Record<string, unknown>
+                    );
                 const repoIdentity = MigrationConfigTransformer.repoIdentity(item.repo as Record<string, unknown>);
                 return {
                     ...item,
@@ -1209,7 +1250,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                 throw new Error(`Proxy '${proxyName}' references unknown source cluster '${proxy.source}'`);
             }
             const topic = proxy.kafkaTopic || proxyName;
-            const sourceConnectionIdentity = MigrationConfigTransformer.clusterConnectionIdentity({
+            const sourceConnectionIdentity = MigrationConfigTransformer.sourceClusterConnectionIdentity({
                 ...sourceCluster,
                 label: proxy.source,
             });
@@ -1301,7 +1342,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                     createConfigs.push({
                         label: snapshotName,
                         snapshotPrefix: snapshotConfig.createSnapshotConfig.snapshotPrefix || snapshotName,
-                        sourceConnectionIdentity: MigrationConfigTransformer.clusterConnectionIdentity({
+                        sourceConnectionIdentity: MigrationConfigTransformer.sourceClusterConnectionIdentity({
                             ...sourceCluster,
                             label: sourceName,
                         }),
@@ -1320,7 +1361,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                     createConfigs.push({
                         label: snapshotName,
                         snapshotPrefix: snapshotName,
-                        sourceConnectionIdentity: MigrationConfigTransformer.clusterConnectionIdentity({
+                        sourceConnectionIdentity: MigrationConfigTransformer.sourceClusterConnectionIdentity({
                             ...sourceCluster,
                             label: sourceName,
                         }),
@@ -1429,23 +1470,25 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                     const solrCollectionAllowlist = isSolrSourceVersion(sourceCluster.version)
                         ? solrCollectionAllowlistForSnapshot(snapshotDef)
                         : [];
-                    const sourceConnectionIdentity = MigrationConfigTransformer.clusterConnectionIdentity({
+                    const sourceConnectionIdentity = MigrationConfigTransformer.sourceClusterConnectionIdentity({
                         ...sourceCluster,
                         label: fromSource,
                     });
-                    const targetConnectionIdentity = MigrationConfigTransformer.clusterConnectionIdentity({
+                    const targetConnectionIdentity = MigrationConfigTransformer.targetClusterConnectionIdentity({
                         ...targetCluster,
                         label: toTarget,
                     });
                     const metadataMigrationConfig = prepareMetadataConfig(
                         applySolrCollectionAllowlist(migration.metadataMigrationConfig, solrCollectionAllowlist),
-                        skipApprovals
+                        skipApprovals,
+                        migration
                     );
                     const documentBackfillConfig = prepareDocumentBackfillConfig(
                         applySolrCollectionAllowlist(migration.documentBackfillConfig, solrCollectionAllowlist),
                         repoConfig,
                         this.deploymentDefaults,
-                        skipApprovals
+                        skipApprovals,
+                        migration
                     );
                     const current: PendingSnapshotMigration = {
                         label: snapshotName,
@@ -1456,8 +1499,8 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                         documentBackfillConfig: mc.snapshotSequence && documentBackfillConfig
                             ? {...documentBackfillConfig, serverGeneratedIds: "NEVER"}
                             : documentBackfillConfig,
-                        sourceConnectionIdentity: CLUSTER_CONNECTION_IDENTITY.parse(sourceConnectionIdentity),
-                        targetConnectionIdentity: CLUSTER_CONNECTION_IDENTITY.parse(targetConnectionIdentity),
+                        sourceConnectionIdentity: SOURCE_CLUSTER_CONNECTION_IDENTITY.parse(sourceConnectionIdentity),
+                        targetConnectionIdentity: TARGET_CLUSTER_CONNECTION_IDENTITY.parse(targetConnectionIdentity),
                         sourceVersion: sourceCluster.version || "",
                         sourceLabel: fromSource,
                         ...(sourceCluster.endpoint ? {sourceEndpoint: sourceCluster.endpoint} : {}),
@@ -1529,7 +1572,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             const replayerConfig = prepareReplayerConfig(
                 replayer.replayerConfig
             );
-            const targetConnectionIdentity = MigrationConfigTransformer.clusterConnectionIdentity({
+            const targetConnectionIdentity = MigrationConfigTransformer.targetClusterConnectionIdentity({
                 ...targetCluster,
                 label: replayer.toTarget,
             });
@@ -1660,15 +1703,24 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
         };
     }
 
-    static clusterConnectionIdentity(clusterConfig: Record<string, unknown>): Record<string, unknown> {
+    static targetClusterConnectionIdentity(clusterConfig: Record<string, unknown>): Record<string, unknown> {
         const authIdentity = MigrationConfigTransformer.authIdentity(clusterConfig.authConfig as ClusterAuthConfig);
         return {
             label: clusterConfig.label,
-            version: clusterConfig.version ?? "",
             endpoint: clusterConfig.endpoint ?? "",
             allowInsecure: clusterConfig.allowInsecure ?? false,
             solrContextPath: clusterConfig.solrContextPath ?? "",
             ...authIdentity,
+        };
+    }
+
+    static sourceClusterConnectionIdentity(clusterConfig: Record<string, unknown>): Record<string, unknown> {
+        const {label, ...identityWithoutVersion} =
+            MigrationConfigTransformer.targetClusterConnectionIdentity(clusterConfig);
+        return {
+            label,
+            version: clusterConfig.version ?? "",
+            ...identityWithoutVersion,
         };
     }
 

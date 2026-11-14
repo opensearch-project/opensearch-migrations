@@ -28,9 +28,9 @@ function sequenceConfig() {
             toTarget: "target",
             snapshotSequence: ["first", "second", "third"],
             perSnapshotConfig: {
-                first: [{metadataMigrationConfig: {}, documentBackfillConfig: {skipApproval: false}}],
-                second: [{metadataMigrationConfig: {}, documentBackfillConfig: {skipApproval: false}}],
-                third: [{metadataMigrationConfig: {}, documentBackfillConfig: {skipApproval: false}}],
+                first: [{metadataMigrationConfig: {}, documentBackfillConfig: {skipApproval: false, disableFailedDocumentStream: true}}],
+                second: [{metadataMigrationConfig: {}, documentBackfillConfig: {skipApproval: false, disableFailedDocumentStream: true}}],
+                third: [{metadataMigrationConfig: {}, documentBackfillConfig: {skipApproval: false, disableFailedDocumentStream: true}}],
             },
         }],
     };
@@ -114,6 +114,29 @@ describe("successive snapshot backfill plans", () => {
         });
         expect(all.snapshotMigrations.slice(0, 3)).toEqual(prefix.snapshotMigrations);
     });
+
+    it.each(["staticCollectionRouting", "regexCollectionRouting"] as const)(
+        "rejects changes to %s between snapshots before deploying", async key => {
+            const config = sequenceConfig();
+            const migrationConfig = config.snapshotMigrationConfigs[0];
+            await expect(new MigrationConfigTransformer().processFromObject({
+                ...config,
+                targetClusters: {target: {
+                    endpoint: "https://123456789012.aoss.us-east-1.on.aws",
+                    collectionRouted: true,
+                    authConfig: {sigv4: {region: "us-east-1", service: "aoss"}},
+                }},
+                snapshotMigrationConfigs: [{
+                    ...migrationConfig,
+                    perSnapshotConfig: Object.fromEntries(Object.entries(migrationConfig.perSnapshotConfig)
+                        .map(([name, migrations]) => [name, [{
+                            ...migrations[0],
+                            [key]: [{sourceIndex: "orders", collection: name === "third" ? "new" : "original"}],
+                        }]])),
+                }],
+            })).rejects.toThrow(/same collection routing/);
+        },
+    );
 
     it("records reset dependencies and makes the baseline and phase immutable", async () => {
         const output = await new MigrationConfigTransformer().processFromObject(sequenceConfig());
@@ -214,7 +237,10 @@ describe("successive snapshot backfill plans", () => {
         const config = sequenceConfig();
         config.snapshotMigrationConfigs[0].perSnapshotConfig.second = [{
             metadataMigrationConfig: {},
-            documentBackfillConfig: {...documentBackfillConfig, skipApproval: false},
+            documentBackfillConfig: {
+                ...config.snapshotMigrationConfigs[0].perSnapshotConfig.second[0].documentBackfillConfig,
+                ...documentBackfillConfig,
+            },
         }];
         await expect(new MigrationConfigTransformer().processFromObject(config)).rejects.toThrow();
     });

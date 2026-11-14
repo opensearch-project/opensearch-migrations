@@ -40,7 +40,7 @@ snapshotMigrationConfigs:
     perSnapshotConfig:
       snap1:
         - metadataMigrationConfig: {}
-          documentBackfillConfig: {}
+          documentBackfillConfig: { disableFailedDocumentStream: true }
 
 kafkaClusterConfiguration:
   default:

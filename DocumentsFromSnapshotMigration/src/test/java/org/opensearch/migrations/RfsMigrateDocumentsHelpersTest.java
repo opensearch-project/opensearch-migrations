@@ -3,8 +3,16 @@ package org.opensearch.migrations;
 import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 
+import org.opensearch.migrations.bulkload.common.CollectionRoutedTarget;
 import org.opensearch.migrations.bulkload.common.DeltaMode;
+import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
+import org.opensearch.migrations.bulkload.common.ServerlessCollectionRouting;
+import org.opensearch.migrations.bulkload.common.ServerlessCollectionType;
+import org.opensearch.migrations.bulkload.pipeline.source.DocumentSource;
 import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator;
 import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
 import org.opensearch.migrations.jcommander.JsonCommandLineParser;
@@ -12,7 +20,10 @@ import org.opensearch.migrations.reindexer.faileddocumentstream.FailedDocumentSt
 import org.opensearch.migrations.reindexer.tracing.RootDocumentMigrationContext;
 
 import com.beust.jcommander.ParameterException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import reactor.core.publisher.Mono;
 
 import static org.hamcrest.MatcherAssert.assertThat;
@@ -24,11 +35,15 @@ import static org.hamcrest.Matchers.notNullValue;
 import static org.hamcrest.Matchers.nullValue;
 import static org.hamcrest.Matchers.startsWith;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -134,9 +149,9 @@ class RfsMigrateDocumentsHelpersTest {
     }
 
     @Test
-    void failedDocumentStreamDisabledReason_namesTheMissingBucket() {
+    void failedDocumentStreamDisabledReason_namesTheOptOutFlag() {
         assertThat(RfsMigrateDocuments.FAILED_DOCUMENT_STREAM_DISABLED_REASON,
-            equalTo("failed document stream disabled: no --failed-document-stream-s3-bucket configured"));
+            org.hamcrest.Matchers.containsString("--disable-failed-document-stream"));
     }
 
     @Test
@@ -304,12 +319,236 @@ class RfsMigrateDocumentsHelpersTest {
         args.luceneDir = "/tmp/lucene";
         args.sourceVersion = Version.fromString("ES_7.10");
         args.repoUri = "/tmp/snapshot";  // bare absolute path -> file:// repo
+        args.failedDocumentStreamArgs.disableFailedDocumentStream = true;
         return args;
+    }
+
+    @Test
+    void validateArgs_rejectsAMaxLeaseShorterThanTheInitialLease() {
+        var args = validEsArgs();
+        args.initialLeaseDuration = java.time.Duration.ofHours(2);
+        args.maxLeaseDuration = java.time.Duration.ofHours(1);
+        var thrown = assertThrows(ParameterException.class, () -> RfsMigrateDocuments.validateArgs(args));
+        assertThat(thrown.getMessage(), org.hamcrest.Matchers.containsString("--max-lease-duration"));
+    }
+
+    @Test
+    void validateArgs_acceptsAMaxLeaseEqualToTheInitialLease() {
+        var args = validEsArgs();
+        args.initialLeaseDuration = java.time.Duration.ofHours(1);
+        args.maxLeaseDuration = java.time.Duration.ofHours(1);
+        assertDoesNotThrow(() -> RfsMigrateDocuments.validateArgs(args));
+    }
+
+    @Test
+    void bulkResponseTimeoutDefaultsTo310SecondsAndIsReadFromInlineJson() {
+        assertThat(new RfsMigrateDocuments.Args().bulkResponseTimeout, equalTo(Duration.ofSeconds(310)));
+        var args = new RfsMigrateDocuments.Args();
+        JsonCommandLineParser.newBuilder().addObject(args).build()
+            .parse(new String[]{"---INLINE-JSON", "{\"bulkResponseTimeout\": \"PT2M\"}"});
+        assertThat(args.bulkResponseTimeout, equalTo(Duration.ofMinutes(2)));
+    }
+
+    @Test
+    void validateArgs_rejectsANonPositiveBulkResponseTimeout() {
+        var args = validEsArgs();
+        args.bulkResponseTimeout = Duration.ZERO;
+        assertThrows(ParameterException.class, () -> RfsMigrateDocuments.validateArgs(args));
+    }
+
+    @Test
+    void expertLimitsHaveTodaysDefaultsAndAreReadFromInlineJson() {
+        var defaults = new RfsMigrateDocuments.Args();
+        assertThat(defaults.maxLeaseDuration, equalTo(java.time.Duration.ofDays(1)));
+
+        var args = new RfsMigrateDocuments.Args();
+        JsonCommandLineParser.newBuilder().addObject(args).build()
+            .parse(new String[]{"---INLINE-JSON", "{\"maxLeaseDuration\": \"PT6H\"}"});
+        assertThat(args.maxLeaseDuration, equalTo(java.time.Duration.ofHours(6)));
+    }
+
+    @Test
+    void validateArgs_requiresAFailedDocumentStreamOrAnExplicitOptOut() {
+        var args = validEsArgs();
+        args.failedDocumentStreamArgs.disableFailedDocumentStream = false;
+        var thrown = assertThrows(ParameterException.class, () -> RfsMigrateDocuments.validateArgs(args));
+        assertThat(thrown.getMessage(), org.hamcrest.Matchers.containsString("--failed-document-stream-s3-bucket"));
+        assertThat(thrown.getMessage(), org.hamcrest.Matchers.containsString("--disable-failed-document-stream"));
+    }
+
+    @Test
+    void validateArgs_rejectsABucketTogetherWithTheOptOut() {
+        var args = validEsArgs();
+        args.failedDocumentStreamArgs.failedDocumentStreamS3Bucket = "bucket";
+        var thrown = assertThrows(ParameterException.class, () -> RfsMigrateDocuments.validateArgs(args));
+        assertThat(thrown.getMessage(), org.hamcrest.Matchers.containsString("can't both be set"));
+    }
+
+    @Test
+    void validateArgs_acceptsABucketWithoutTheOptOut() {
+        var args = validEsArgs();
+        args.failedDocumentStreamArgs.disableFailedDocumentStream = false;
+        args.failedDocumentStreamArgs.failedDocumentStreamS3Bucket = "bucket";
+        assertDoesNotThrow(() -> RfsMigrateDocuments.validateArgs(args));
+    }
+
+    @Test
+    void validateArgs_treatsABlankBucketAsMissing() {
+        var args = validEsArgs();
+        args.failedDocumentStreamArgs.disableFailedDocumentStream = false;
+        args.failedDocumentStreamArgs.failedDocumentStreamS3Bucket = "  ";
+        assertThrows(ParameterException.class, () -> RfsMigrateDocuments.validateArgs(args));
+    }
+
+    @Test
+    void disableFailedDocumentStream_isReadFromInlineJson() {
+        var args = new RfsMigrateDocuments.Args();
+        JsonCommandLineParser.newBuilder().addObject(args).build()
+            .parse(new String[]{"---INLINE-JSON", "{\"disableFailedDocumentStream\": true}"});
+        assertThat(args.failedDocumentStreamArgs.disableFailedDocumentStream, is(true));
+    }
+
+    @Test
+    void bulkRequestTraceMaxBytes_isReadFromCli() {
+        var args = new RfsMigrateDocuments.Args();
+        JsonCommandLineParser.newBuilder().addObject(args).build()
+            .parse(new String[]{
+                "--target-host", "http://localhost",
+                "--bulk-request-trace-max-bytes", "500"
+            });
+        assertThat(args.bulkRequestTraceMaxBytes, equalTo(500));
+    }
+
+    @Test
+    void validateArgs_rejectsNegativeBulkRequestTraceMaxBytes() {
+        var args = validEsArgs();
+        args.bulkRequestTraceMaxBytes = -1;
+        var thrown = assertThrows(ParameterException.class, () -> RfsMigrateDocuments.validateArgs(args));
+        assertThat(thrown.getMessage(), org.hamcrest.Matchers.containsString("--bulk-request-trace-max-bytes"));
     }
 
     @Test
     void validateArgs_acceptsFileRepoUriOnly() {
         assertDoesNotThrow(() -> RfsMigrateDocuments.validateArgs(validEsArgs()));
+    }
+
+    @Test
+    void validateArgs_targetIsCollectionRoutedOnlyWithARoutingTable() {
+        var routed = validEsArgs();
+        routed.targetArgs.host = "https://123456789012.aoss.us-east-1.on.aws";
+        routed.targetArgs.awsRegion = "us-east-1";
+        routed.targetArgs.awsServiceSigningName = "aoss";
+        routed.collectionRouting = "{\"staticCollectionRouting\": [{\"sourceIndex\": \"a\", \"collection\": \"c\"}]}";
+        assertDoesNotThrow(() -> RfsMigrateDocuments.validateArgs(routed));
+        assertTrue(routed.targetArgs.toConnectionContext().isCollectionRouted());
+
+        var unset = validEsArgs();
+        assertDoesNotThrow(() -> RfsMigrateDocuments.validateArgs(unset));
+        assertFalse(unset.targetArgs.isCollectionRouted());
+
+        // The workflow writes an empty string when a migration has no routing
+        var workflowDefault = validEsArgs();
+        workflowDefault.collectionRouting = "";
+        assertDoesNotThrow(() -> RfsMigrateDocuments.validateArgs(workflowDefault));
+        assertFalse(workflowDefault.targetArgs.isCollectionRouted());
+
+        var invalidTable = validEsArgs();
+        invalidTable.collectionRouting = "[]";
+        assertThrows(ParameterException.class, () -> RfsMigrateDocuments.validateArgs(invalidTable));
+    }
+
+    @Test
+    void inlineJson_collectionRoutingArgsParseAsTheWorkflowSendsThem() throws Exception {
+        // The workflow sends the routing table as a JSON string
+        var routing = "{\"regexCollectionRouting\": [{\"sourceIndex\": \"(.+)-\\\\d{4}\", \"collection\": \"$1\"}]}";
+        var json = new ObjectMapper().writeValueAsString(Map.of(
+            "targetHost", "https://123456789012.aoss.us-east-1.on.aws",
+            "targetAwsRegion", "us-east-1",
+            "targetAwsServiceSigningName", "aoss",
+            "collectionRouting", routing));
+        var args = new RfsMigrateDocuments.Args();
+        JsonCommandLineParser.newBuilder().addObject(args).build()
+            .parse(new String[]{"---INLINE-JSON", json});
+
+        assertThat(args.collectionRouting, equalTo(routing));
+        var parsed = ServerlessCollectionRouting.fromJson(args.collectionRouting);
+        assertThat(parsed.orElseThrow().resolve("tenant-a-2024"), equalTo(Optional.of("tenant-a")));
+    }
+
+    @Test
+    void buildCollectionRoutedTarget_onlyForRoutedTargets() {
+        var factory = mock(OpenSearchClientFactory.class);
+        when(factory.detectServerlessCollectionType("tenant-a")).thenReturn(ServerlessCollectionType.VECTOR);
+
+        assertThat(RfsMigrateDocuments.buildCollectionRoutedTarget(validEsArgs(), factory), nullValue());
+
+        var args = validEsArgs();
+        args.collectionRouting = "{\"regexCollectionRouting\": [{\"sourceIndex\": \"(.+)-\\\\d{4}\", \"collection\": \"$1\"}]}";
+        var target = RfsMigrateDocuments.buildCollectionRoutedTarget(args, factory);
+
+        assertThat(target.collectionFor("tenant-a-2024"), equalTo("tenant-a"));
+        assertTrue(target.requiresServerGeneratedIds("tenant-a"));
+    }
+
+    @Test
+    void resolveUseServerGeneratedIds_skipsGlobalProbeForRoutedTargets() {
+        var factory = mock(OpenSearchClientFactory.class);
+        when(factory.detectServerlessCollectionType()).thenReturn(ServerlessCollectionType.TIMESERIES);
+        var routedTarget = mock(CollectionRoutedTarget.class);
+
+        assertFalse(RfsMigrateDocuments.resolveUseServerGeneratedIds(RfsMigrateDocuments.ServerGeneratedIdMode.AUTO, factory, routedTarget));
+        verify(factory, times(0)).detectServerlessCollectionType();
+        assertTrue(RfsMigrateDocuments.resolveUseServerGeneratedIds(RfsMigrateDocuments.ServerGeneratedIdMode.AUTO, factory, null));
+        assertTrue(RfsMigrateDocuments.resolveUseServerGeneratedIds(RfsMigrateDocuments.ServerGeneratedIdMode.ALWAYS, factory, routedTarget));
+        assertFalse(RfsMigrateDocuments.resolveUseServerGeneratedIds(RfsMigrateDocuments.ServerGeneratedIdMode.NEVER, factory, null));
+    }
+
+    @Test
+    void validateCollectionRouting_checksOnlyAllowlistedIndices() {
+        var source = mock(DocumentSource.class);
+        when(source.listCollections()).thenReturn(List.of("tenant-a-2024", "unrouted", ".system"));
+        var routing = ServerlessCollectionRouting.fromJson(
+            "{\"regexCollectionRouting\": [{\"sourceIndex\": \"(.+)-\\\\d{4}\", \"collection\": \"$1\"}]}").orElseThrow();
+        var target = new CollectionRoutedTarget(routing, collection -> false);
+
+        assertDoesNotThrow(() -> RfsMigrateDocuments.validateCollectionRouting(null, source, List.of(), null));
+        assertDoesNotThrow(() -> RfsMigrateDocuments.validateCollectionRouting(target, source, List.of("tenant-a-2024"), null));
+        var e = assertThrows(IllegalArgumentException.class,
+            () -> RfsMigrateDocuments.validateCollectionRouting(target, source, List.of(), null));
+        assertThat(e.getMessage(), equalTo("No collection routing entry matches source indices [unrouted]"));
+    }
+
+    @ParameterizedTest
+    @EnumSource(DeltaMode.class)
+    void validateCollectionRouting_deltaRequiresSourceIdsInEveryIncludedCollection(DeltaMode deltaMode) {
+        var source = mock(DocumentSource.class);
+        when(source.listCollections()).thenReturn(List.of("search-2024", "vector-2024", ".system"));
+        var routing = ServerlessCollectionRouting.fromJson(
+            "{\"regexCollectionRouting\": [{\"sourceIndex\": \"(.+)-\\\\d{4}\", \"collection\": \"$1\"}]}").orElseThrow();
+        var target = new CollectionRoutedTarget(routing, "vector"::equals);
+
+        assertDoesNotThrow(() -> RfsMigrateDocuments.validateCollectionRouting(target, source, List.of(), null));
+        assertDoesNotThrow(() -> RfsMigrateDocuments.validateCollectionRouting(
+            target, source, List.of("search-2024"), deltaMode));
+        var e = assertThrows(ParameterException.class,
+            () -> RfsMigrateDocuments.validateCollectionRouting(target, source, List.of(), deltaMode));
+        assertThat(e.getMessage(), equalTo(
+            "Delta migration requires source document IDs, but target collection 'vector' uses server-generated IDs."));
+    }
+
+    @Test
+    void requiresServerGeneratedIds_probesOnlyInAutoMode() {
+        var factory = mock(OpenSearchClientFactory.class);
+        when(factory.detectServerlessCollectionType("ts"))
+            .thenReturn(ServerlessCollectionType.TIMESERIES);
+        when(factory.detectServerlessCollectionType("search"))
+            .thenReturn(ServerlessCollectionType.SEARCH);
+
+        assertTrue(RfsMigrateDocuments.requiresServerGeneratedIds(RfsMigrateDocuments.ServerGeneratedIdMode.AUTO, factory, "ts"));
+        assertFalse(RfsMigrateDocuments.requiresServerGeneratedIds(RfsMigrateDocuments.ServerGeneratedIdMode.AUTO, factory, "search"));
+        assertTrue(RfsMigrateDocuments.requiresServerGeneratedIds(RfsMigrateDocuments.ServerGeneratedIdMode.ALWAYS, factory, "search"));
+        assertFalse(RfsMigrateDocuments.requiresServerGeneratedIds(RfsMigrateDocuments.ServerGeneratedIdMode.NEVER, factory, "ts"));
+        verify(factory, times(2)).detectServerlessCollectionType(anyString());
     }
 
     @Test
@@ -330,12 +569,41 @@ class RfsMigrateDocumentsHelpersTest {
     }
 
     @Test
+    void validateArgs_acceptsAzureRepoWithLocalDir() {
+        var args = validEsArgs();
+        args.repoUri = "azure://mystorageacct/my-container/path";
+        args.localDir = "/tmp/azure";
+        assertDoesNotThrow(() -> RfsMigrateDocuments.validateArgs(args));
+    }
+
+    @Test
     void validateArgs_rejectsGcsRepoWithoutLocalDir() {
         var args = validEsArgs();
         args.repoUri = "gs://bucket/key";
         var thrown = assertThrows(ParameterException.class,
             () -> RfsMigrateDocuments.validateArgs(args));
         assertThat(thrown.getMessage(), equalTo("If a GCS repo is being used, --local-dir must be set."));
+    }
+
+    @Test
+    void validateArgs_rejectsAzureRepoWithoutLocalDir() {
+        var args = validEsArgs();
+        args.repoUri = "azure://mystorageacct/my-container/path";
+        var thrown = assertThrows(ParameterException.class,
+            () -> RfsMigrateDocuments.validateArgs(args));
+        assertThat(thrown.getMessage(), equalTo("If an Azure repo is being used, --local-dir must be set."));
+    }
+
+    @Test
+    void validateArgs_rejectsAzureRepoWithBothAccountKeyAndSasToken() {
+        var args = validEsArgs();
+        args.repoUri = "azure://mystorageacct/my-container/path";
+        args.localDir = "/tmp/azure";
+        args.azureStorageAccountKey = "key";
+        args.azureStorageSasToken = "token";
+        var thrown = assertThrows(ParameterException.class,
+            () -> RfsMigrateDocuments.validateArgs(args));
+        assertThat(thrown.getMessage(), equalTo("Supply either --azure-storage-account-key or --azure-storage-sas-token, not both."));
     }
 
     @Test
@@ -465,6 +733,20 @@ class RfsMigrateDocumentsHelpersTest {
     }
 
     @Test
+    void validateArgs_solr_rejectsAzureRepoUpFront() {
+        // Same reasoning as the gs:// case above: azure:// is rejected during validation
+        // rather than later in buildSolrSourceFactory.
+        var args = new RfsMigrateDocuments.Args();
+        args.sourceVersion = Version.fromString("SOLR_8.11");
+        args.repoUri = "azure://mystorageacct/my-container/path";
+        args.localDir = "/tmp/azure";
+        args.coordinatorArgs.host = "http://localhost:9200";
+        var thrown = assertThrows(ParameterException.class,
+            () -> RfsMigrateDocuments.validateArgs(args));
+        assertThat(thrown.getMessage(), org.hamcrest.Matchers.containsString("file:// or s3://"));
+    }
+
+    @Test
     void validateArgs_solr_rejectsMissingBackupSource() {
         var args = new RfsMigrateDocuments.Args();
         args.sourceVersion = Version.fromString("SOLR_8.11");
@@ -562,6 +844,81 @@ class RfsMigrateDocumentsHelpersTest {
     void getSuccessorWorkItemIds_throwsWhenWorkItemNull() {
         assertThrows(IllegalStateException.class,
             () -> RfsMigrateDocuments.getSuccessorWorkItemIds(null, new WorkItemCursor(0L)));
+    }
+
+    // ---- executeCleanShutdownProcess --------------------------------------
+
+    @Test
+    void shutdownWithoutProgressUsesEarlyReleaseSemantics() throws Exception {
+        var workItem = new IWorkCoordinator.WorkItemAndDuration.WorkItem("movies", 2, 0L);
+        var coordinator = mock(IWorkCoordinator.class);
+        var cleanShutdownCompleted = new java.util.concurrent.atomic.AtomicBoolean();
+
+        RfsMigrateDocuments.executeCleanShutdownProcess(
+            new java.util.concurrent.atomic.AtomicReference<>(
+                new IWorkCoordinator.WorkItemAndDuration(Instant.now().plusSeconds(60), workItem)
+            ),
+            new java.util.concurrent.atomic.AtomicReference<>(),
+            coordinator,
+            cleanShutdownCompleted,
+            new org.opensearch.migrations.bulkload.workcoordination.WorkItemTimeProvider(),
+            Duration.ofMinutes(1),
+            Duration.ofDays(1),
+            () -> null,
+            () -> null,
+            null,
+            (w, c) -> java.util.Map.of()
+        );
+
+        verify(coordinator).releaseWorkItem(
+            org.mockito.ArgumentMatchers.eq(workItem.toString()),
+            org.mockito.ArgumentMatchers.eq(IWorkCoordinator.LeaseReleaseReason.EARLY_EXIT),
+            any()
+        );
+        assertThat(cleanShutdownCompleted.get(), is(true));
+    }
+
+    @Test
+    void shutdownSizesTheSuccessorsLeaseFromThisLeaseAndShardSetupTime() throws Exception {
+        var initialLease = Duration.ofMinutes(1);
+        // The lease had doubled six times (64 min) to fit a slow shard; setup this time took 30 s of it, under the
+        // 2.5% threshold, so the successor gets one doubling less: exponent 5. A fixed 1 would cut it to 2 min.
+        var leaseExpiration = Instant.EPOCH.plus(initialLease.multipliedBy(64));
+        var timeProvider = new org.opensearch.migrations.bulkload.workcoordination.WorkItemTimeProvider();
+        timeProvider.getLeaseAcquisitionTimeRef().set(Instant.EPOCH);
+        timeProvider.getDocumentMigraionStartTimeRef().set(Instant.EPOCH.plusSeconds(30));
+        var workItem = new IWorkCoordinator.WorkItemAndDuration.WorkItem("movies", 2, 0L);
+        var coordinator = mock(IWorkCoordinator.class);
+
+        RfsMigrateDocuments.executeCleanShutdownProcess(
+            new java.util.concurrent.atomic.AtomicReference<>(
+                new IWorkCoordinator.WorkItemAndDuration(leaseExpiration, workItem)),
+            new java.util.concurrent.atomic.AtomicReference<>(new WorkItemCursor(42L)),
+            coordinator, new java.util.concurrent.atomic.AtomicBoolean(), timeProvider, initialLease, Duration.ofDays(1),
+            () -> null, () -> null, null, (w, c) -> java.util.Map.of());
+
+        verify(coordinator).createSuccessorWorkItemsAndMarkComplete(
+            org.mockito.ArgumentMatchers.eq(workItem.toString()),
+            org.mockito.ArgumentMatchers.eq(java.util.List.of(
+                new IWorkCoordinator.WorkItemAndDuration.WorkItem("movies", 2, 42L).toString())),
+            org.mockito.ArgumentMatchers.eq(5), org.mockito.ArgumentMatchers.isNull(), any(), any());
+    }
+
+    @Test
+    void shutdownSuccessorLeaseExponentIsCappedAndFallsBackToOneWithoutTimes() {
+        var initialLease = Duration.ofMinutes(1);
+        var timeProvider = new org.opensearch.migrations.bulkload.workcoordination.WorkItemTimeProvider();
+        var leaseExpiration = Instant.EPOCH.plus(initialLease.multipliedBy(64));
+        assertThat(RfsMigrateDocuments.getShutdownSuccessorLeaseExponent(timeProvider, initialLease,
+            Duration.ofDays(1), leaseExpiration), is(1));
+
+        timeProvider.getLeaseAcquisitionTimeRef().set(Instant.EPOCH);
+        // Setup took half the lease, so the uncapped successor exponent would be 7; an 8-minute cap stops it at 3.
+        timeProvider.getDocumentMigraionStartTimeRef().set(Instant.EPOCH.plus(initialLease.multipliedBy(32)));
+        assertThat(RfsMigrateDocuments.getShutdownSuccessorLeaseExponent(timeProvider, initialLease,
+            Duration.ofDays(1), leaseExpiration), is(7));
+        assertThat(RfsMigrateDocuments.getShutdownSuccessorLeaseExponent(timeProvider, initialLease,
+            Duration.ofMinutes(8), leaseExpiration), is(3));
     }
 
     // ---- NoWorkLeftException ---------------------------------------------

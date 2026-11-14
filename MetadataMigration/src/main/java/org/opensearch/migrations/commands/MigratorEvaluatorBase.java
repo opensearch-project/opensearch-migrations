@@ -9,6 +9,7 @@ import org.opensearch.migrations.MigrateOrEvaluateArgs;
 import org.opensearch.migrations.MigrationMode;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.FilterScheme;
+import org.opensearch.migrations.bulkload.common.ServerlessCollectionRouting;
 import org.opensearch.migrations.bulkload.common.SnapshotReadFailures;
 import org.opensearch.migrations.bulkload.transformers.FanOutCompositeTransformer;
 import org.opensearch.migrations.bulkload.transformers.Transformer;
@@ -26,6 +27,7 @@ import org.opensearch.migrations.metadata.GlobalMetadataCreatorResults;
 import org.opensearch.migrations.metadata.tracing.RootMetadataMigrationContext;
 import org.opensearch.migrations.transform.TransformerConfigUtils;
 
+import com.beust.jcommander.ParameterException;
 import lombok.extern.slf4j.Slf4j;
 
 /** Shared functionality between migration and evaluation commands */
@@ -39,13 +41,31 @@ public abstract class MigratorEvaluatorBase {
 
     protected final MigrateOrEvaluateArgs arguments;
     protected final ClusterReaderExtractor clusterReaderCliExtractor;
+    private ServerlessCollectionRouting collectionRouting;
+    private boolean collectionRoutingParsed;
 
     protected MigratorEvaluatorBase(MigrateOrEvaluateArgs arguments) {
         this.arguments = arguments;
         this.clusterReaderCliExtractor = new ClusterReaderExtractor(arguments);
     }
 
+    /** Parses the routing table once; empty unless one was configured. */
+    Optional<ServerlessCollectionRouting> getCollectionRouting() {
+        if (!collectionRoutingParsed) {
+            try {
+                collectionRouting = ServerlessCollectionRouting.fromJson(arguments.collectionRouting).orElse(null);
+            } catch (IllegalArgumentException e) {
+                throw new ParameterException(e.getMessage(), e);
+            }
+            collectionRoutingParsed = true;
+        }
+        return Optional.ofNullable(collectionRouting);
+    }
+
     protected Clusters createClusters() {
+        // Also rejects a bad routing table before connecting to anything
+        arguments.targetArgs.setCollectionRouted(getCollectionRouting().isPresent());
+
         var clusters = Clusters.builder();
         var sourceCluster = clusterReaderCliExtractor.extractClusterReader();
         clusters.source(sourceCluster);
@@ -115,6 +135,7 @@ public abstract class MigratorEvaluatorBase {
         items.dryRun(migrationMode.equals(MigrationMode.SIMULATE));
         items.succeedOnEmpty(arguments.succeedOnEmpty);
         items.allowExistingIndexes(arguments.allowExistingIndexes);
+        validateCollectionRouting(clusters);
         var metadataResults = migrateGlobalMetadata(migrationMode, clusters, transformer, context);
 
         var indexTemplates = new ArrayList<CreationResult>();
@@ -140,7 +161,32 @@ public abstract class MigratorEvaluatorBase {
         return items.build();
     }
 
-    private GlobalMetadataCreatorResults migrateGlobalMetadata(MigrationMode mode, Clusters clusters, Transformer transformer, RootMetadataMigrationContext context) {
+    /**
+     * Resolves the collection of every selected source index before anything is written, so a
+     * routing table that misses an index fails fast.
+     */
+    void validateCollectionRouting(Clusters clusters) {
+        var routing = getCollectionRouting();
+        if (routing.isEmpty()) {
+            return;
+        }
+        var allowed = FilterScheme.filterByAllowList(arguments.dataFilterArgs.indexAllowlist, FilterScheme.FilterContext.INDEX);
+        var sourceIndices = clusters.getSource().getIndexMetadata().getRepoDataProvider()
+            .getIndicesInSnapshot(arguments.snapshotName).stream()
+            .map(index -> index.getName())
+            .filter(allowed)
+            .toList();
+        try {
+            var collections = routing.get().resolveAll(sourceIndices);
+            log.atInfo().setMessage("Collection routing sends {} source indices to collections {}")
+                .addArgument(sourceIndices.size()).addArgument(collections).log();
+        } catch (IllegalArgumentException e) {
+            throw new ParameterException(e.getMessage(), e);
+        }
+    }
+
+    private GlobalMetadataCreatorResults migrateGlobalMetadata(MigrationMode mode, Clusters clusters, Transformer transformer,
+                                                               RootMetadataMigrationContext context) {
         var metadataRunner = new MetadataRunner(
             arguments.snapshotName,
             clusters.getSource().getGlobalMetadata(),
@@ -159,7 +205,8 @@ public abstract class MigratorEvaluatorBase {
             clusters.getTarget().getIndexCreator(),
             transformer,
             arguments.dataFilterArgs.indexAllowlist,
-            clusters.getTarget().getAwarenessAttributeSettings()
+            clusters.getTarget().getAwarenessAttributeSettings(),
+            getCollectionRouting().orElse(null)
         );
         var indexResults = indexRunner.migrateIndices(mode, context.createIndexContext());
         log.info("Index copy complete.");
@@ -229,7 +276,7 @@ public abstract class MigratorEvaluatorBase {
         }
 
         if (!sourcelessIndices.isEmpty() && !arguments.enableSourcelessMigrations) {
-            throw new com.beust.jcommander.ParameterException(
+            throw new ParameterException(
                 "The following indices have _source disabled or partial (includes/excludes): " + sourcelessIndices + ". "
                 + "Document backfill will not be able to migrate these indices without the "
                 + "--enable-sourceless-migrations flag on both metadata migration and backfill commands. "

@@ -34,6 +34,24 @@ class WorkItemMetricsReporterTest {
     }
 
     @Test
+    void includesTheBulkFlowControlTotals() {
+        var summary = new org.opensearch.migrations.bulkload.common.retry.BulkFlowStats.Summary(
+            3, 2, 1500, 250, 1, 4.2, 10.0, 7.5);
+        var metrics = RfsMigrateDocuments.committedMetricsReporter("snapshot", null, null, () -> 0, () -> summary)
+            .apply(new WorkItem("idx", 0, 0L), new WorkItemCursor(1, MigrationMetrics.ZERO, false, null));
+
+        var flow = (Map<?, ?>) ((Map<?, ?>) metrics.get("metrics")).get("flowControl");
+        assertEquals(3L, ((Number) flow.get("throttleRetries")).longValue());
+        assertEquals(2L, ((Number) flow.get("transientRetries")).longValue());
+        assertEquals(1500L, ((Number) flow.get("budgetWaitMillis")).longValue());
+        assertEquals(250L, ((Number) flow.get("slotWaitMillis")).longValue());
+        assertEquals(1L, ((Number) flow.get("limitCuts")).longValue());
+        assertEquals(4.2, ((Number) flow.get("lowestLimit")).doubleValue());
+        assertEquals(10.0, ((Number) flow.get("highestLimit")).doubleValue());
+        assertEquals(7.5, ((Number) flow.get("finalLimit")).doubleValue());
+    }
+
+    @Test
     void includesDeltaCountsAndAdditiveRequestTotals() {
         var totals = new MigrationMetrics(new MigrationMetrics.Operations(3, 1, 300),
             new MigrationMetrics.Operations(6, 1, 600),
@@ -53,6 +71,17 @@ class WorkItemMetricsReporterTest {
         assertEquals(90L, ((Number) requests.get("durationMillis")).longValue());
         var workItem = (Map<?, ?>) groups.get("workItem");
         assertEquals(1200L, ((Number) workItem.get("durationMillis")).longValue());
+    }
+
+    @Test
+    void includesTerminalFailuresByClass() {
+        var totals = new MigrationMetrics(MigrationMetrics.Operations.ZERO, MigrationMetrics.Operations.ZERO,
+            MigrationMetrics.Requests.ZERO, new MigrationMetrics.Failures(3, 2));
+        var metrics = RfsMigrateDocuments.committedMetricsReporter("snapshot", null, null, () -> 0)
+            .apply(new WorkItem("idx", 0, 0L), new WorkItemCursor(5, totals, false, null));
+
+        var failures = (Map<?, ?>) ((Map<?, ?>) metrics.get("metrics")).get("failures");
+        assertEquals(Map.of("nonRetryable", 3L, "retryableExhausted", 2L), failures);
     }
 
     @Test

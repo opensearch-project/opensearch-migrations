@@ -97,6 +97,13 @@ tasks.register('testCaptureReplayGamedayScript', Exec) {
     commandLine 'bash', layout.projectDirectory.file('scripts/capture-replay-gameday.sh').asFile, 'self-test'
 }
 
+tasks.register('test', Exec) {
+    description = 'Runs the Kubernetes deployment helper unit tests'
+    group = 'verification'
+    workingDir layout.projectDirectory
+    commandLine 'python3', '-m', 'unittest', 'discover', '-s', 'scripts/tests', '-p', 'test_*.py', '-v'
+}
+
 // The verification tasks below render the chart with `helm template`. Rather than requiring a local install, resolve
 // a pinned Helm release through Gradle, as the node plugin does for Node, so it is downloaded once into the Gradle
 // cache and works offline afterward. The version matches migrationConsole/Dockerfile, whose Jobs run the chart.
@@ -169,6 +176,19 @@ tasks.register('verifyCaptureReplayObservability', Exec) {
     dependsOn 'installHelmClient'
 }
 
+tasks.register('verifyKafkaObservability', Exec) {
+    description = 'Validates Kafka PVC selection, dashboard policy, and opt-in Prometheus alerts'
+    group = 'verification'
+    commandLine(
+            'python3',
+            layout.projectDirectory.file('scripts/verify-kafka-observability.py').asFile,
+            chartSourceDir.asFile,
+            '--helm',
+            helmExecutable.get().asFile
+    )
+    dependsOn 'installHelmClient'
+}
+
 tasks.register('verifyHelmUninstallTeardown', Exec) {
     description = 'Validates rendered Migration Assistant pre-delete teardown'
     group = 'verification'
@@ -196,6 +216,7 @@ tasks.register('verifyWorkloadZoneSpread', Exec) {
 }
 
 tasks.named('check') {
-    dependsOn 'testCaptureReplayGamedayScript', 'verifyCaptureReplayObservability',
+    dependsOn 'test', 'testCaptureReplayGamedayScript', 'verifyCaptureReplayObservability',
+            'verifyKafkaObservability',
             'verifyHelmUninstallTeardown', 'verifyWorkloadZoneSpread'
 }

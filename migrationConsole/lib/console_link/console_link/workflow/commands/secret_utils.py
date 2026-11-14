@@ -45,6 +45,7 @@ def validate_and_find_secrets(raw_yaml: str) -> dict:
         the config that pass naming rules
       - ``invalidSecrets``: optional list of basic-auth secret names that fail
         naming rules
+      - ``azureSecrets``: optional list of Azure storage credential secret names
     """
     runner = ScriptRunner()
     result = runner.get_basic_creds_secrets_in_config(raw_yaml)
@@ -62,6 +63,8 @@ def process_secrets(secret_store: SecretStore, result: dict, interactive: bool =
     if invalid_secrets:
         raise click.ClickException(f"Invalidly named secret{'s' if len(invalid_secrets) > 1 else ''} found:"
                                    f" {invalid_secrets}")
+
+    _verify_azure_secrets(secret_store, result.get('azureSecrets') or [])
 
     valid_secrets = result.get('validSecrets', [])
     if not valid_secrets:
@@ -84,6 +87,20 @@ def verify_configured_secrets_exist(secret_store: SecretStore, raw_yaml: str) ->
     """
     result = validate_and_find_secrets(raw_yaml)
     process_secrets(secret_store, result, interactive=False)
+
+
+def _verify_azure_secrets(secret_store: SecretStore, names) -> None:
+    unusable = [n for n in sorted(set(names))
+                if not {"accountKey", "sasToken"} & set(secret_store.get_secret_keys(n) or [])]
+    if not unusable:
+        return
+    raise click.ClickException(
+        f"Found {len(unusable)} Azure storage credential secret{'s' if len(unusable) > 1 else ''} "
+        f"that {'do' if len(unusable) > 1 else 'does'} not exist or {'have' if len(unusable) > 1 else 'has'} "
+        f"neither an 'accountKey' nor a 'sasToken' key:\n  " + "\n  ".join(unusable) +
+        "\n\nCreate each one with `kubectl create secret generic <name> --from-literal=accountKey=<key>` "
+        "(or `--from-literal=sasToken=<token>`)."
+    )
 
 
 def _notify_existing_secrets(existing, interactive: bool) -> None:

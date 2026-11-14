@@ -7,8 +7,8 @@ snapshot after the preceding backfill and its approval finish.
 
 The [complete example](../orchestrationSpecs/examples/successive-snapshots.yaml)
 allows up to three rounds, stopping when snapshot lag is at most two minutes.
-Configure its endpoints, snapshot
-repository, authentication, and index selection for your deployment, then use the
+Configure its endpoints, snapshot repository, failed-document bucket,
+authentication, and index selection for your deployment, then use the
 usual workflow configuration and start commands.
 
 ```yaml
@@ -23,6 +23,7 @@ snapshotMigrationConfigs:
       metadataMigrationConfig: {}
       documentBackfillConfig:
         indexAllowlist: [orders]
+        failedDocumentStreamS3Bucket: migration-failures
       repeat:
         maxRuns: 3
         until:
@@ -31,6 +32,10 @@ snapshotMigrationConfigs:
 
 `repoName` refers to `sourceClusters.source.snapshotInfo.repos.migration`. No
 snapshot names or `perSnapshotConfig` entries are needed.
+
+Set `failedDocumentStreamS3Bucket` to record documents that cannot be written.
+Alternatively, explicitly set `disableFailedDocumentStream: true` to log and
+count failures without storing them. Configure exactly one of these options.
 
 - `maxRuns` includes the initial full backfill. Later rounds apply deltas.
   Without `until`, the workflow performs exactly that many rounds.
@@ -76,13 +81,16 @@ snapshotMigrationConfigs:
     perSnapshotConfig:
       baseline:
         - metadataMigrationConfig: {}
-          documentBackfillConfig: {}
+          documentBackfillConfig:
+            failedDocumentStreamS3Bucket: migration-failures
       catchup:
         - metadataMigrationConfig: {}
-          documentBackfillConfig: {}
+          documentBackfillConfig:
+            failedDocumentStreamS3Bucket: migration-failures
       final:
         - metadataMigrationConfig: {}
-          documentBackfillConfig: {}
+          documentBackfillConfig:
+            failedDocumentStreamS3Bucket: migration-failures
 ```
 
 The labels must also exist in `sourceClusters.source.snapshotInfo.snapshots`.
@@ -141,6 +149,10 @@ the target from the baseline.
 - Preserve source document IDs and complete stored `_source`. Sequences reject
   server-generated IDs, source reconstruction, and document transformations.
   Both snapshots are checked for disabled or filtered `_source`.
+- For collection-routed targets, configure `backfill.staticCollectionRouting`
+  or `backfill.regexCollectionRouting` once for all rounds. Explicit
+  `snapshotSequence` entries must use the same routing in every snapshot.
+  Every destination collection must preserve source document IDs.
 - Retain both snapshots until their delta finishes, including retries. A missing
   or unreadable baseline fails the migration. Provision worker disk and
   `maxShardSizeBytes` for the **combined** old and new shard sizes.

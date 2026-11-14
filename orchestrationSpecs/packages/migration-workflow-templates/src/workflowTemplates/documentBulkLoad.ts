@@ -41,7 +41,11 @@ import {CommonWorkflowParameters, workflowIdentityEnvVars, workflowScriptCommand
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 import {makeTargetParamDict, makeRfsCoordinatorParamDict} from "./commonUtils/clusterSettingManipulators";
 import {getHttpAuthSecretName} from "./commonUtils/clusterSettingManipulators";
-import {getTargetHttpAuthCredsEnvVars, getCoordinatorHttpAuthCredsEnvVars} from "./commonUtils/basicCredsGetters";
+import {
+    getAzureStorageCredsEnvVars,
+    getCoordinatorHttpAuthCredsEnvVars,
+    getTargetHttpAuthCredsEnvVars
+} from "./commonUtils/basicCredsGetters";
 import {K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
 import {RfsCoordinatorCluster, getRfsCoordinatorClusterName, makeRfsCoordinatorConfig} from "./rfsCoordinatorCluster";
 import {makePodDisruptionBudgetDefinition} from "./commonUtils/podDisruptionBudget";
@@ -55,8 +59,16 @@ import {
     COMPONENT_LABEL,
     COMPONENTS,
     MIGRATION_RESOURCE_UID_LABEL,
+    WORKLOAD_SELECTOR_LABEL_KEYS,
     workloadSelectorLabels,
 } from "./commonUtils/resourceLabels";
+import {
+    workloadNodePoolResolvedInput,
+    workloadNodeSelector,
+    workloadNodeTolerations,
+    workloadZoneSpreadConstraints,
+    workloadZoneSpreadResolvedInput,
+} from "./commonUtils/workloadNodePool";
 
 function shouldCreateRfsWorkCoordinationCluster(
     documentBackfillConfig: BaseExpression<Serialized<z.infer<typeof ARGO_RFS_OPTIONS>>>
@@ -134,9 +146,13 @@ const startHistoricalBackfillInputs = {
     rfsJsonConfig: defineRequiredParam<string>(),
     targetBasicCredsSecretNameOrEmpty: defineRequiredParam<string>(),
     coordinatorBasicCredsSecretNameOrEmpty: defineRequiredParam<string>(),
+    azureCredsSecretNameOrEmpty: defineRequiredParam<string>(),
     ...SCALABLE_WORKLOAD_INPUTS,
     jvmArgs: defineRequiredParam<string>(),
     loggingConfigurationOverrideConfigMap: defineRequiredParam<string>(),
+    rootLogLevel: defineRequiredParam<string>(),
+    bulkRequestTraceLogLevel: defineRequiredParam<string>(),
+    failedRequestsLogLevel: defineRequiredParam<string>(),
     fileSourceVolumes: defineRequiredParam<z.infer<typeof ARGO_FILE_SOURCE_VOLUME>[]>(),
     fileSourceVolumeMounts: defineRequiredParam<z.infer<typeof ARGO_FILE_SOURCE_VOLUME_MOUNT>[]>(),
     useLocalStack: defineRequiredParam<boolean>({description: "Only used for local testing"}),
@@ -148,6 +164,8 @@ const startHistoricalBackfillInputs = {
     snapshotK8sLabel: defineRequiredParam<string>(),
     fromSnapshotMigrationK8sLabel: defineRequiredParam<string>(),
     taskK8sLabel: defineParam<string>({expression: expr.literal("reindexFromSnapshot")}),
+    ...workloadNodePoolResolvedInput("rfsNodePoolName"),
+    ...workloadZoneSpreadResolvedInput(),
     ...makeRequiredImageParametersForKeys(["ReindexFromSnapshot"])
 };
 
@@ -160,10 +178,14 @@ function getRfsDeploymentManifest
     podReplicas: BaseExpression<number>,
     targetBasicCredsSecretNameOrEmpty: AllowLiteralOrExpression<string>,
     coordinatorBasicCredsSecretNameOrEmpty: AllowLiteralOrExpression<string>,
+    azureCredsSecretNameOrEmpty: AllowLiteralOrExpression<string>,
 
     useLocalstackAwsCreds: BaseExpression<boolean>,
     loggingConfigMap: BaseExpression<string>,
     jvmArgs: BaseExpression<string>,
+    rootLogLevel: BaseExpression<string>,
+    bulkRequestTraceLogLevel: BaseExpression<string>,
+    failedRequestsLogLevel: BaseExpression<string>,
     fileSourceVolumes: BaseExpression<any[]>,
     fileSourceVolumeMounts: BaseExpression<any[]>,
 
@@ -177,7 +199,10 @@ function getRfsDeploymentManifest
     targetK8sLabel: BaseExpression<string>,
     snapshotK8sLabel: BaseExpression<string>,
     fromSnapshotMigrationK8sLabel: BaseExpression<string>,
-    taskK8sLabel: BaseExpression<string>
+    taskK8sLabel: BaseExpression<string>,
+    workloadNodePoolName: BaseExpression<string>,
+    workloadZoneSpread: BaseExpression<string>,
+    workloadZoneSpreadExtras: BaseExpression<string>,
 }): Deployment {
     const ownerReferences: OwnerReference[] = [{
         apiVersion: "migrations.opensearch.org/v1alpha1",
@@ -196,16 +221,21 @@ function getRfsDeploymentManifest
         env: [
             ...getTargetHttpAuthCredsEnvVars(args.targetBasicCredsSecretNameOrEmpty),
             ...getCoordinatorHttpAuthCredsEnvVars(args.coordinatorBasicCredsSecretNameOrEmpty),
-            // Terminal RFS document failures go to a durable S3 failed document stream
-            // (see RFS/.../reindexer/faileddocumentstream). The previous OFF override turned off the
-            // pod-local FailedRequests log because no durable replacement existed; we can now keep the
-            // in-pod logger at WARN as a local-dev safety net. The S3 sink is enabled via the
-            // --failed-document-stream-s3-* args, which the config processor resolves (including the
-            // deployment default) before submission — RFS no longer reads any S3 default from the pod
-            // environment. Per-pod session id comes from the workflow.
+            ...getAzureStorageCredsEnvVars(args.azureCredsSecretNameOrEmpty),
+            // Log levels from documentBackfillConfig.logLevels, read by RFS's log4j2.properties. Terminal
+            // document failures go to the durable S3 failed document stream; the pod-local FailedRequests log
+            // defaults to WARN as a local-dev safety net.
+            {
+                name: "MIGRATIONS_ROOT_LOG_LEVEL",
+                value: makeStringTypeProxy(args.rootLogLevel)
+            },
+            {
+                name: "BULK_REQUEST_TRACE_LOG_LEVEL",
+                value: makeStringTypeProxy(args.bulkRequestTraceLogLevel)
+            },
             {
                 name: "FAILED_REQUESTS_LOGGER_LEVEL",
-                value: "WARN"
+                value: makeStringTypeProxy(args.failedRequestsLogLevel)
             },
             {
                 name: "CONSOLE_LOG_FORMAT",
@@ -278,6 +308,15 @@ function getRfsDeploymentManifest
                 },
                 spec: {
                     serviceAccountName: "argo-workflow-executor",
+                    nodeSelector: makeDirectTypeProxy(workloadNodeSelector(args.workloadNodePoolName)),
+                    tolerations: makeDirectTypeProxy(workloadNodeTolerations(args.workloadNodePoolName)),
+                    topologySpreadConstraints: makeDirectTypeProxy(
+                        workloadZoneSpreadConstraints(
+                            args.workloadZoneSpread,
+                            args.workloadZoneSpreadExtras,
+                            WORKLOAD_SELECTOR_LABEL_KEYS,
+                        )
+                    ),
                     containers: [finalContainerDefinition.container],
                     volumes: finalContainerDefinition.volumes
                 }
@@ -463,12 +502,16 @@ function makeRfsDeploymentDefinition(
             podReplicas: expr.deserializeRecord(inputs.podReplicas),
             loggingConfigMap: inputs.loggingConfigurationOverrideConfigMap,
             jvmArgs: inputs.jvmArgs,
+            rootLogLevel: inputs.rootLogLevel,
+            bulkRequestTraceLogLevel: inputs.bulkRequestTraceLogLevel,
+            failedRequestsLogLevel: inputs.failedRequestsLogLevel,
             fileSourceVolumes: expr.deserializeRecord(inputs.fileSourceVolumes),
             fileSourceVolumeMounts: expr.deserializeRecord(inputs.fileSourceVolumeMounts),
             useLocalstackAwsCreds: expr.deserializeRecord(inputs.useLocalStack),
             sessionName: inputs.sessionName,
             targetBasicCredsSecretNameOrEmpty: inputs.targetBasicCredsSecretNameOrEmpty,
             coordinatorBasicCredsSecretNameOrEmpty: inputs.coordinatorBasicCredsSecretNameOrEmpty,
+            azureCredsSecretNameOrEmpty: inputs.azureCredsSecretNameOrEmpty,
             rfsImageName: inputs.imageReindexFromSnapshotLocation,
             rfsImagePullPolicy: inputs.imageReindexFromSnapshotPullPolicy,
             workflowName: expr.getWorkflowValue("name"),
@@ -481,6 +524,9 @@ function makeRfsDeploymentDefinition(
             snapshotK8sLabel: inputs.snapshotK8sLabel,
             fromSnapshotMigrationK8sLabel: inputs.fromSnapshotMigrationK8sLabel,
             taskK8sLabel: inputs.taskK8sLabel,
+            workloadNodePoolName: inputs.workloadNodePoolName,
+            workloadZoneSpread: inputs.workloadZoneSpread,
+            workloadZoneSpreadExtras: inputs.workloadZoneSpreadExtras,
         })
     };
 }
@@ -565,8 +611,12 @@ export const DocumentBulkLoad = documentBulkLoadBaseBuilder
                     minPodReplicas: scaling.minPodReplicas,
                     targetBasicCredsSecretNameOrEmpty: getHttpAuthSecretName(b.inputs.targetConfig),
                     coordinatorBasicCredsSecretNameOrEmpty: getHttpAuthSecretName(b.inputs.rfsCoordinatorConfig),
+                    azureCredsSecretNameOrEmpty: expr.dig(expr.deserializeRecord(b.inputs.snapshotConfig), ["repoConfig", "azureCredentialsSecretName"], ""),
                     loggingConfigurationOverrideConfigMap: expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["loggingConfigurationOverrideConfigMap"], ""),
                     jvmArgs: expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["jvmArgs"], ""),
+                    rootLogLevel: expr.getLoose(expr.getLoose(expr.deserializeRecord(b.inputs.documentBackfillConfig), "logLevels"), "root"),
+                    bulkRequestTraceLogLevel: expr.getLoose(expr.getLoose(expr.deserializeRecord(b.inputs.documentBackfillConfig), "logLevels"), "bulkRequestTrace"),
+                    failedRequestsLogLevel: expr.getLoose(expr.getLoose(expr.deserializeRecord(b.inputs.documentBackfillConfig), "logLevels"), "failedRequests"),
                     fileSourceVolumes: expr.serialize(expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["fileSourceVolumes"], [])),
                     fileSourceVolumeMounts: expr.serialize(expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["fileSourceVolumeMounts"], [])),
                     useLocalStack: expr.dig(expr.deserializeRecord(b.inputs.snapshotConfig), ["repoConfig", "useLocalStack"], false),

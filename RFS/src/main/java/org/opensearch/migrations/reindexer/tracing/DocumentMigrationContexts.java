@@ -1,5 +1,6 @@
 package org.opensearch.migrations.reindexer.tracing;
 
+import org.opensearch.migrations.bulkload.pipeline.PipelineMetrics;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 import org.opensearch.migrations.bulkload.tracing.IWorkCoordinationContexts;
 import org.opensearch.migrations.bulkload.tracing.RfsContexts;
@@ -151,6 +152,10 @@ public interface DocumentMigrationContexts extends IDocumentMigrationContexts {
                 docsMigrated = meter.counterBuilder(MetricNames.DOCS_MIGRATED).setUnit("count").build();
                 bytesMigrated = meter.counterBuilder(MetricNames.BYTES_MIGRATED).setUnit("bytes").build();
                 pipelineErrors = meter.counterBuilder(MetricNames.PIPELINE_ERRORS).setUnit("count").build();
+                // Start the series at 0: a process migrates one shard, and a Prometheus series that first appears
+                // at a nonzero value contributes nothing to rate() or increase().
+                docsMigrated.add(0);
+                bytesMigrated.add(0);
             }
         }
 
@@ -183,6 +188,11 @@ public interface DocumentMigrationContexts extends IDocumentMigrationContexts {
         @Override
         public void recordPipelineError() {
             meterIncrementEvent(getMetrics().pipelineErrors);
+        }
+
+        @Override
+        public PipelineMetrics getPipelineMetrics() {
+            return rootInstrumentationScope.pipelineInstruments;
         }
 
         @Override

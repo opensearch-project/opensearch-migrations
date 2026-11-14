@@ -30,6 +30,8 @@ export function expandBackfillPolicies(config: UserConfig): UserConfig {
             perSnapshotConfig: Object.fromEntries(labels.map(label => [label, [{
                 metadataMigrationConfig: backfill.metadataMigrationConfig,
                 documentBackfillConfig: backfill.documentBackfillConfig,
+                staticCollectionRouting: backfill.staticCollectionRouting,
+                regexCollectionRouting: backfill.regexCollectionRouting,
             }]])),
         };
     });
