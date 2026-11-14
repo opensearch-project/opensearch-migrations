@@ -1,6 +1,9 @@
 import importlib.util
 import os
 from pathlib import Path
+import subprocess
+import sys
+import tempfile
 import unittest
 
 
@@ -8,6 +11,16 @@ GENERATOR = Path(os.environ.get(
     "RFS_DASHBOARD_GENERATOR",
     Path(__file__).resolve().parents[1] / "generate-rfs-dashboards.py",
 ))
+K8S_DIRECTORY = Path(__file__).resolve().parents[2]
+CHART_DIRECTORY = K8S_DIRECTORY / "charts/aggregates/migrationAssistantWithArgo"
+COMMITTED_CLOUDWATCH_DASHBOARD = (
+    CHART_DIRECTORY
+    / "files/cloudwatch-dashboards/reindex-from-snapshot-dashboard.json"
+)
+COMMITTED_GRAFANA_DASHBOARD = (
+    CHART_DIRECTORY
+    / "templates/resources/rfsGrafanaDashboard.yaml"
+)
 SPEC = importlib.util.spec_from_file_location("generate_rfs_dashboards", GENERATOR)
 dashboard_generator = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(dashboard_generator)
@@ -23,6 +36,38 @@ class GeneratedDashboardTest(unittest.TestCase):
     def setUp(self):
         self.cloudwatch = dashboard_generator.cloudwatch()
         self.grafana = dashboard_generator.grafana()
+
+    def test_committed_dashboards_match_generator_output(self):
+        with tempfile.TemporaryDirectory() as output_directory:
+            output_directory = Path(output_directory)
+            generated_cloudwatch = output_directory / "cloudwatch.json"
+            generated_grafana = output_directory / "grafana.yaml"
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(GENERATOR),
+                    str(generated_cloudwatch),
+                    str(generated_grafana),
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+            for committed, generated in (
+                (COMMITTED_CLOUDWATCH_DASHBOARD, generated_cloudwatch),
+                (COMMITTED_GRAFANA_DASHBOARD, generated_grafana),
+            ):
+                with self.subTest(dashboard=committed.name):
+                    self.assertEqual(
+                        committed.read_bytes(),
+                        generated.read_bytes(),
+                        (
+                            f"{committed} does not match the dashboard generator; "
+                            "run deployment/k8s/scripts/generate-rfs-dashboards.py "
+                            f"{COMMITTED_CLOUDWATCH_DASHBOARD} {COMMITTED_GRAFANA_DASHBOARD}"
+                        ),
+                    )
 
     def cloudwatch_widget(self, title):
         return next((w for w in self.cloudwatch["widgets"]
