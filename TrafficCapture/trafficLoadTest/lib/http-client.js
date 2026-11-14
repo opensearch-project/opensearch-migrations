@@ -46,16 +46,28 @@ const BASIC_AUTH_HEADER = MODE === 'basic'
   ? { Authorization: `Basic ${encoding.b64encode(`${USERNAME}:${PASSWORD}`)}` }
   : null;
 
-let sigv4Signer = null;
+const SIGV4_CONFIG = {
+  accessKeyId: __ENV.AWS_ACCESS_KEY_ID,
+  secretAccessKey: __ENV.AWS_SECRET_ACCESS_KEY,
+  sessionToken: __ENV.AWS_SESSION_TOKEN,
+  region: __ENV.AWS_REGION,
+  service: __ENV.SIGV4_SERVICE || 'es',
+  endpoint: __ENV.SIGV4_SIGNING_ENDPOINT || '',
+};
+
 if (MODE === 'sigv4') {
-  sigv4Signer = createSigV4Signer({
-    accessKeyId: __ENV.AWS_ACCESS_KEY_ID,
-    secretAccessKey: __ENV.AWS_SECRET_ACCESS_KEY,
-    sessionToken: __ENV.AWS_SESSION_TOKEN,
-    region: __ENV.AWS_REGION,
-    service: __ENV.SIGV4_SERVICE || 'es',
-    endpoint: __ENV.SIGV4_SIGNING_ENDPOINT || '',
-  });
+  if (!SIGV4_CONFIG.region) throw new Error('SigV4 authentication requires AWS_REGION');
+  if (!SIGV4_CONFIG.endpoint) {
+    throw new Error('SigV4 authentication requires SIGV4_SIGNING_ENDPOINT');
+  }
+}
+
+let sigv4Signer;
+function getSigV4Signer() {
+  if (!sigv4Signer) {
+    sigv4Signer = createSigV4Signer(SIGV4_CONFIG);
+  }
+  return sigv4Signer;
 }
 
 function decodeQueryComponent(value) {
@@ -93,7 +105,7 @@ function withBasicAuth(params) {
 function withSigV4Auth(method, url, body, params) {
   const p = params || {};
   const parsedUrl = parseRequestUrl(url);
-  const signedHeaders = sigv4Signer.sign({
+  const signedHeaders = getSigV4Signer().sign({
     method: method.toUpperCase(),
     path: parsedUrl.path,
     query: parsedUrl.query,

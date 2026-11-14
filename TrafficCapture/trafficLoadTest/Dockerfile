@@ -24,6 +24,22 @@ COPY lib/sigv4.js /tmp/sigv4/lib/sigv4.js
 COPY tests/sigv4.js /tmp/sigv4/tests/sigv4.js
 RUN /tmp/k6 run --quiet /tmp/sigv4/tests/sigv4.js
 
+# The operator archives scripts without ambient system credentials. Verify that importing the
+# SigV4 client remains credential-free and credentials are required only when a request is signed.
+COPY lib/ /tmp/http-client/lib/
+COPY k6-config/ /tmp/http-client/k6-config/
+COPY tests/http-client.js /tmp/http-client/tests/http-client.js
+RUN /tmp/k6 archive /tmp/http-client/tests/http-client.js \
+      -e K6_AUTH_MODE=sigv4 \
+      -e AWS_REGION=us-east-2 \
+      -e SIGV4_SIGNING_ENDPOINT=https://source.example.com \
+      -O /tmp/http-client.tar \
+    && /tmp/k6 run --quiet \
+      -e K6_AUTH_MODE=sigv4 \
+      -e AWS_REGION=us-east-2 \
+      -e SIGV4_SIGNING_ENDPOINT=https://source.example.com \
+      /tmp/http-client/tests/http-client.js
+
 COPY lib/ /tmp/sequences/lib/
 COPY k6-config/ /tmp/sequences/k6-config/
 COPY tests/sequences.js /tmp/sequences/tests/sequences.js

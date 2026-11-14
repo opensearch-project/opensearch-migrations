@@ -1240,7 +1240,7 @@ class TestRenderedChartMatchesTheValues:
                 "migrations.opensearch.org/workload-pool": "k6-work-pool"
             }, name
 
-    def test_pod_identity_auth_configures_only_the_load_runners(self):
+    def test_pod_identity_auth_configures_load_runners_but_not_archive_initializers(self):
         pod_identity_args = (
             "--set", "podIdentityAuth.enabled=true",
             "--set-string", "podIdentityAuth.region=us-east-2",
@@ -1260,8 +1260,10 @@ class TestRenderedChartMatchesTheValues:
             ).replace("{{workflow.name}}", "a-run")
             test_run = yaml.safe_load(substituted)["spec"]
 
-            assert "serviceAccountName" not in test_run["initializer"], name
-            assert "volumes" not in test_run["initializer"], name
+            initializer = test_run["initializer"]
+            assert "serviceAccountName" not in initializer, name
+            assert "volumes" not in initializer, name
+            assert "volumeMounts" not in initializer, name
             runner = test_run["runner"]
             assert runner["serviceAccountName"] == "argo-workflow-executor", name
             assert runner["volumes"][0]["configMap"]["name"] == "k6-pod-identity-wrapper", name

@@ -385,9 +385,11 @@ helm upgrade k6-load-test "$CHART" -n ma \
   --set-string podIdentityAuth.signingEndpoint=https://search-source.us-east-2.es.amazonaws.com
 ```
 
-No auth Secret is needed on this path. The index-setup pod and TestRun runners use the associated
-service account; the initializer that only builds the k6 archive remains credential-free. The
-signing endpoint is the real source endpoint even though requests are sent to the capture proxy.
+No auth Secret is needed on this path. The index-setup pod and every TestRun runner use the
+associated service account and fetch their own credentials immediately before starting k6. The
+archive initializer does not send requests, so SigV4 signer construction is deferred until the
+first request and the initializer remains credential-free. The signing endpoint is the real source
+endpoint even though requests are sent to the capture proxy.
 
 | Key | Default | Meaning |
 |---|---|---|
