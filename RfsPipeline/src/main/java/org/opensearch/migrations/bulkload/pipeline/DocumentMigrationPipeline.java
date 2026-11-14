@@ -13,6 +13,7 @@ import java.util.TreeMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.ToLongFunction;
 
 import org.opensearch.migrations.bulkload.pipeline.model.BatchResult;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
@@ -308,7 +309,11 @@ public class DocumentMigrationPipeline {
         String collectionName
     ) {
         return Flux.defer(() -> {
-            var packer = new PreparedBatchPacker<P>(maxDocsPerBatch, maxBytesPerBatch);
+            var packer = new PreparedBatchPacker<GroupedDocumentSink.PreparedDocument<P>>(
+                maxDocsPerBatch,
+                maxBytesPerBatch,
+                GroupedDocumentSink.PreparedDocument::sizeBytes
+            );
             var preparedChunks = documents
                 .bufferUntil(new BatchSizePredicate<>(
                     preparationChunkDocuments,
@@ -335,7 +340,7 @@ public class DocumentMigrationPipeline {
     }
 
     private <P> List<PackedBatch<P>> releaseAndPack(
-        PreparedBatchPacker<P> packer,
+        PreparedBatchPacker<GroupedDocumentSink.PreparedDocument<P>> packer,
         PreparedChunk<P> preparedChunk
     ) {
         long releasedNanos = System.nanoTime();
@@ -353,7 +358,9 @@ public class DocumentMigrationPipeline {
         return toPackedBatches(completed);
     }
 
-    private <P> List<PackedBatch<P>> toPackedBatches(List<PreparedBatch<P>> batches) {
+    private <P> List<PackedBatch<P>> toPackedBatches(
+        List<PreparedBatch<GroupedDocumentSink.PreparedDocument<P>>> batches
+    ) {
         return batches.stream().map(batch -> {
             pipelineMetrics.onBatchPacked(
                 batch.documents().size(),
@@ -437,7 +444,11 @@ public class DocumentMigrationPipeline {
         RequestConcurrencyGate requestGate
     ) {
         return Flux.defer(() -> {
-            var packer = new LanePreparedBatchPacker<P>(maxDocsPerBatch, maxBytesPerBatch);
+            var packer = new PreparedBatchPacker<LanePreparedDocument<P>>(
+                maxDocsPerBatch,
+                maxBytesPerBatch,
+                document -> document.document().sizeBytes()
+            );
             return sourceChunks
                 .concatMap(sourceChunk -> Mono.fromCallable(
                     () -> prepareLaneChunk(preparedSink, collectionName, sourceChunk)
@@ -448,6 +459,9 @@ public class DocumentMigrationPipeline {
                 // packed batch while waiting, but a productive lane can consume every otherwise-idle permit.
                 .concatMap(
                     packedBatch -> requestGate.acquire()
+                        // A permit may be handed over by a completed HTTP request. Return to this lane before the
+                        // sink transforms or otherwise prepares the next request.
+                        .publishOn(laneScheduler)
                         .map(permit -> new PermittedLanePackedBatch<>(packedBatch, permit)),
                     1
                 )
@@ -478,7 +492,7 @@ public class DocumentMigrationPipeline {
     }
 
     private <P> List<LanePackedBatch<P>> releaseAndPack(
-        LanePreparedBatchPacker<P> packer,
+        PreparedBatchPacker<LanePreparedDocument<P>> packer,
         LanePreparedChunk<P> preparedChunk
     ) {
         long releasedNanos = System.nanoTime();
@@ -497,7 +511,7 @@ public class DocumentMigrationPipeline {
     }
 
     private <P> List<LanePackedBatch<P>> toLanePackedBatches(
-        List<LanePreparedBatch<P>> batches
+        List<PreparedBatch<LanePreparedDocument<P>>> batches
     ) {
         return batches.stream().map(batch -> {
             pipelineMetrics.onBatchPacked(
@@ -658,21 +672,17 @@ public class DocumentMigrationPipeline {
     }
 
     private static final class PreparedBatchPacker<P> {
-        private final BatchSizePredicate<GroupedDocumentSink.PreparedDocument<P>> startsNewBatch;
-        private List<GroupedDocumentSink.PreparedDocument<P>> pending = new ArrayList<>();
+        private final BatchSizePredicate<P> startsNewBatch;
+        private final ToLongFunction<P> sizeBytes;
+        private List<P> pending = new ArrayList<>();
         private long pendingBytes;
 
-        private PreparedBatchPacker(int maxDocuments, long maxBytes) {
-            startsNewBatch = new BatchSizePredicate<>(
-                maxDocuments,
-                maxBytes,
-                GroupedDocumentSink.PreparedDocument::sizeBytes
-            );
+        private PreparedBatchPacker(int maxDocuments, long maxBytes, ToLongFunction<P> sizeBytes) {
+            this.sizeBytes = Objects.requireNonNull(sizeBytes);
+            startsNewBatch = new BatchSizePredicate<>(maxDocuments, maxBytes, sizeBytes);
         }
 
-        private List<PreparedBatch<P>> add(
-            List<GroupedDocumentSink.PreparedDocument<P>> preparedChunk
-        ) {
+        private List<PreparedBatch<P>> add(List<P> preparedChunk) {
             List<PreparedBatch<P>> completed = null;
             for (var document : preparedChunk) {
                 if (startsNewBatch.test(document)) {
@@ -684,7 +694,7 @@ public class DocumentMigrationPipeline {
                     pendingBytes = 0;
                 }
                 pending.add(document);
-                pendingBytes += document.sizeBytes();
+                pendingBytes += sizeBytes.applyAsLong(document);
             }
             return completed == null ? List.of() : completed;
         }
@@ -698,48 +708,6 @@ public class DocumentMigrationPipeline {
             pending = new ArrayList<>();
             pendingBytes = 0;
             return List.of(new PreparedBatch<>(finalBatch, finalBytes));
-        }
-    }
-
-    private static final class LanePreparedBatchPacker<P> {
-        private final BatchSizePredicate<LanePreparedDocument<P>> startsNewBatch;
-        private List<LanePreparedDocument<P>> pending = new ArrayList<>();
-        private long pendingBytes;
-
-        private LanePreparedBatchPacker(int maxDocuments, long maxBytes) {
-            startsNewBatch = new BatchSizePredicate<>(
-                maxDocuments,
-                maxBytes,
-                document -> document.document().sizeBytes()
-            );
-        }
-
-        private List<LanePreparedBatch<P>> add(List<LanePreparedDocument<P>> preparedChunk) {
-            List<LanePreparedBatch<P>> completed = null;
-            for (var document : preparedChunk) {
-                if (startsNewBatch.test(document)) {
-                    if (completed == null) {
-                        completed = new ArrayList<>();
-                    }
-                    completed.add(new LanePreparedBatch<>(pending, pendingBytes));
-                    pending = new ArrayList<>();
-                    pendingBytes = 0;
-                }
-                pending.add(document);
-                pendingBytes += document.document().sizeBytes();
-            }
-            return completed == null ? List.of() : completed;
-        }
-
-        private List<LanePreparedBatch<P>> finish() {
-            if (pending.isEmpty()) {
-                return List.of();
-            }
-            var finalBatch = pending;
-            long finalBytes = pendingBytes;
-            pending = new ArrayList<>();
-            pendingBytes = 0;
-            return List.of(new LanePreparedBatch<>(finalBatch, finalBytes));
         }
     }
 
@@ -842,10 +810,7 @@ public class DocumentMigrationPipeline {
         long completedNanos
     ) {}
 
-    private record PreparedBatch<P>(
-        List<GroupedDocumentSink.PreparedDocument<P>> documents,
-        long preparedBytes
-    ) {}
+    private record PreparedBatch<P>(List<P> documents, long preparedBytes) {}
 
     private record PackedBatch<P>(
         List<GroupedDocumentSink.PreparedDocument<P>> documents,
@@ -862,11 +827,6 @@ public class DocumentMigrationPipeline {
         List<LanePreparedDocument<P>> documents,
         long preparedBytes,
         long completedNanos
-    ) {}
-
-    private record LanePreparedBatch<P>(
-        List<LanePreparedDocument<P>> documents,
-        long preparedBytes
     ) {}
 
     private record LanePackedBatch<P>(

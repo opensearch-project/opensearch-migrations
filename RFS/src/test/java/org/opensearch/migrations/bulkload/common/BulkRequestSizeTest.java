@@ -2,18 +2,21 @@ package org.opensearch.migrations.bulkload.common;
 
 import java.io.ByteArrayInputStream;
 import java.net.URI;
-import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.LockSupport;
 import java.util.zip.GZIPInputStream;
 
 import org.opensearch.migrations.Version;
-import org.opensearch.migrations.bulkload.common.bulk.BulkNdjson;
 import org.opensearch.migrations.bulkload.common.http.CompressionMode;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
-import org.opensearch.migrations.bulkload.common.http.GzipPayloadRequestTransformer;
 import org.opensearch.migrations.bulkload.common.http.HttpResponse;
 import org.opensearch.migrations.bulkload.common.retry.AdaptiveLimit;
 import org.opensearch.migrations.bulkload.common.retry.BulkFlowMetrics;
@@ -30,17 +33,14 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.ArgumentCaptor;
-import org.mockito.MockedStatic;
 import reactor.core.publisher.Mono;
+import reactor.core.publisher.Sinks;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.Answers.CALLS_REAL_METHODS;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.mockStatic;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -54,7 +54,7 @@ class BulkRequestSizeTest {
     }
 
     @Test
-    void aRequestWaitingForASlotIsNotCountedAsSent() {
+    void aRequestWaitingForASlotIsNotCountedAsSent() throws Exception {
         var restClient = mock(RestClient.class);
         var connection = mock(ConnectionContext.class);
         when(connection.getUri()).thenReturn(URI.create("http://localhost/"));
@@ -63,12 +63,15 @@ class BulkRequestSizeTest {
         when(restClient.postAsyncBytes(any(), any(), any(), any())).thenReturn(Mono.never());
         var client = new OpenSearchClient_OS_2_11(restClient, new FailedRequestsLogger(), Version.fromString("OS 2.11"),
             CompressionMode.UNCOMPRESSED, 100, 10_000_000);
-        client.setBulkInFlightLimit(new AdaptiveLimit(1));
+        var limit = new AdaptiveLimit(1);
+        client.setBulkInFlightLimit(limit);
         var bodies = new ArrayList<Body>();
+        var firstBodyPrepared = new CountDownLatch(1);
         client.setBulkFlowMetrics(new BulkFlowMetrics() {
             @Override
             public void onRequestBody(int documents, long bytes, long sentBytes) {
                 bodies.add(new Body(documents, bytes, sentBytes));
+                firstBodyPrepared.countDown();
             }
         });
         var source = "{}".getBytes(StandardCharsets.UTF_8);
@@ -76,6 +79,8 @@ class BulkRequestSizeTest {
             client.sendBulkRequestRaw("idx", List.of(new Document(id, source, Document.Operation.UPSERT, Map.of(),
                 Map.of())), null, false, DocumentExceptionAllowlist.empty()).subscribe();
         }
+        waitForWaiters(limit, 1);
+        assertTrue(firstBodyPrepared.await(10, TimeUnit.SECONDS));
         assertEquals(1, bodies.size(), bodies.toString());
     }
 
@@ -89,24 +94,104 @@ class BulkRequestSizeTest {
         when(restClient.postAsyncBytes(any(), any(), any(), any())).thenReturn(Mono.never());
         var client = new OpenSearchClient_OS_2_11(restClient, new FailedRequestsLogger(), Version.fromString("OS 2.11"),
             CompressionMode.GZIP_BODY_COMPRESSION, 100, 10_000_000);
-        client.setBulkInFlightLimit(new AdaptiveLimit(1));
+        var limit = new AdaptiveLimit(1);
+        client.setBulkInFlightLimit(limit);
+        var prepared = new AtomicInteger();
+        var firstPrepared = new CountDownLatch(1);
+        client.setBulkFlowMetrics(new BulkFlowMetrics() {
+            @Override
+            public void onRequestPrepared(boolean retry, double assemblyMillis, double compressionMillis) {
+                prepared.incrementAndGet();
+                firstPrepared.countDown();
+            }
+        });
         var source = ("{\"field\":\"" + "x".repeat(2000) + "\"}").getBytes(StandardCharsets.UTF_8);
         var subscriptions = new ArrayList<reactor.core.Disposable>();
 
-        try (MockedStatic<BulkNdjson> ndjson = mockStatic(BulkNdjson.class, CALLS_REAL_METHODS);
-             MockedStatic<GzipPayloadRequestTransformer> gzip =
-                 mockStatic(GzipPayloadRequestTransformer.class, CALLS_REAL_METHODS)) {
+        try {
             for (var id : List.of("a", "b")) {
                 subscriptions.add(client.sendBulkRequestRaw("idx",
                     List.of(new Document(id, source, Document.Operation.UPSERT, Map.of(), Map.of())),
                     null, false, DocumentExceptionAllowlist.empty()).subscribe());
             }
 
-            ndjson.verify(() -> BulkNdjson.assemblePooled(anyList(), any()), times(1));
-            gzip.verify(() -> GzipPayloadRequestTransformer.gzip(any(ByteBuffer[].class)), times(1));
+            assertTrue(firstPrepared.await(10, TimeUnit.SECONDS));
+            waitForWaiters(limit, 1);
+            assertEquals(1, prepared.get());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError(e);
         } finally {
             subscriptions.forEach(reactor.core.Disposable::dispose);
         }
+    }
+
+    @Test
+    void requestPreparationAfterSlotHandoffRunsOnTheCpuScheduler() throws Exception {
+        var restClient = mock(RestClient.class);
+        var connection = mock(ConnectionContext.class);
+        when(connection.getUri()).thenReturn(URI.create("http://localhost/"));
+        when(restClient.getConnectionContext()).thenReturn(connection);
+        var firstResponse = Sinks.<HttpResponse>one();
+        var requests = new AtomicInteger();
+        var firstPosted = new CountDownLatch(1);
+        when(restClient.postAsyncBytes(any(), any(), any(), any())).thenAnswer(invocation -> {
+            if (requests.getAndIncrement() == 0) {
+                firstPosted.countDown();
+                return firstResponse.asMono();
+            }
+            return created("b");
+        });
+        var client = new OpenSearchClient_OS_2_11(restClient, new FailedRequestsLogger(), Version.fromString("OS 2.11"),
+            CompressionMode.GZIP_BODY_COMPRESSION, 100, 10_000_000);
+        var limit = new AdaptiveLimit(1);
+        client.setBulkInFlightLimit(limit);
+        var preparationThreads = new CopyOnWriteArrayList<String>();
+        client.setBulkFlowMetrics(new BulkFlowMetrics() {
+            @Override
+            public void onRequestPrepared(boolean retry, double assemblyMillis, double compressionMillis) {
+                preparationThreads.add(Thread.currentThread().getName());
+            }
+        });
+        var source = "{}".getBytes(StandardCharsets.UTF_8);
+
+        var first = client.sendBulkRequestRaw("idx",
+            List.of(new Document("a", source, Document.Operation.UPSERT, Map.of(), Map.of())),
+            null, false, DocumentExceptionAllowlist.empty()).toFuture();
+        assertTrue(firstPosted.await(10, TimeUnit.SECONDS));
+        var second = client.sendBulkRequestRaw("idx",
+            List.of(new Document("b", source, Document.Operation.UPSERT, Map.of(), Map.of())),
+            null, false, DocumentExceptionAllowlist.empty()).toFuture();
+        waitForWaiters(limit, 1);
+
+        var releasingThread = new Thread(
+            () -> firstResponse.tryEmitValue(createdResponse("a")),
+            "simulated-netty-event-loop"
+        );
+        releasingThread.start();
+        releasingThread.join();
+        CompletableFuture.allOf(first, second).get(10, TimeUnit.SECONDS);
+
+        assertEquals(2, preparationThreads.size());
+        assertTrue(preparationThreads.get(1).startsWith("parallel-"), preparationThreads.toString());
+        assertNotEquals(releasingThread.getName(), preparationThreads.get(1), preparationThreads.toString());
+    }
+
+    private static void waitForWaiters(AdaptiveLimit limit, int expected) {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (limit.waiters() != expected && System.nanoTime() < deadline) {
+            LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(1));
+        }
+        assertEquals(expected, limit.waiters());
+    }
+
+    private static Mono<HttpResponse> created(String id) {
+        return Mono.just(createdResponse(id));
+    }
+
+    private static HttpResponse createdResponse(String id) {
+        return new HttpResponse(200, "OK", Map.of(),
+            BulkRequestGenerator.bulkItemResponse(false, List.of(BulkRequestGenerator.itemEntry(id))));
     }
 
     @ParameterizedTest

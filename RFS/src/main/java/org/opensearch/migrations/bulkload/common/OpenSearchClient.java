@@ -62,6 +62,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 import reactor.util.retry.Retry;
 
 @Slf4j
@@ -1572,17 +1573,23 @@ public abstract class OpenSearchClient {
     private Mono<AssessedResponse> withBulkSlot(Supplier<Mono<AssessedResponse>> attempt) {
         var limit = bulkInFlightLimit;
         if (limit == null) {
-            return Mono.defer(attempt);
+            return runBulkAttempt(attempt);
         }
         return Mono.defer(() -> {
             long waitStart = System.nanoTime();
             return limit.acquire()
                 .doOnNext(slot -> bulkFlowMetrics.onSlotWait(Duration.ofNanos(System.nanoTime() - waitStart).toMillis()));
-        }).flatMap(slot -> Mono.defer(attempt)
+        }).flatMap(slot -> runBulkAttempt(attempt)
             .doOnNext(assessed -> slot.release(limitSignal(assessed)))
             .doOnError(error -> slot.release(limitSignal(error)))
             // Release is idempotent; this covers cancellation (lease lost, shutdown).
             .doFinally(signal -> slot.release(AdaptiveLimit.Signal.CANCELLED)));
+    }
+
+    private static Mono<AssessedResponse> runBulkAttempt(Supplier<Mono<AssessedResponse>> attempt) {
+        // Both the pipeline request gate and the adaptive limit may grant capacity from an HTTP completion thread.
+        // Keep synchronous request assembly and compression off that event loop.
+        return Mono.defer(attempt).subscribeOn(Schedulers.parallel());
     }
 
     private static AssessedResponse assessResponse(HttpResponse response) {

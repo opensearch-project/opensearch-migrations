@@ -11,6 +11,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
 
 import org.opensearch.migrations.bulkload.pipeline.adapter.EsShardPartition;
@@ -160,7 +161,7 @@ class DocumentMigrationPipelineBatchingTest {
         Mockito.when(source.readDocuments(partition, 0)).thenReturn(Flux.fromIterable(documents));
 
         class ExactPackingSink implements GroupedDocumentSink<String> {
-            final List<List<String>> receivedBatches = new ArrayList<>();
+            final List<List<String>> receivedBatches = new CopyOnWriteArrayList<>();
 
             @Override
             public Mono<Void> createCollection(CollectionMetadata metadata) {
@@ -492,6 +493,84 @@ class DocumentMigrationPipelineBatchingTest {
                 sink.preparationThreads.get("doc-" + (lane + 4))
             );
         }
+    }
+
+    @Test
+    void returnsToThePreparationLaneAfterARequestPermitIsReleased() throws Exception {
+        var partition = new EsShardPartition("snapshot", "index", 0);
+        var documents = Stream.iterate(0, i -> i + 1)
+            .limit(4)
+            .map(i -> new Document("doc-" + i, new byte[] { 1 }, Document.Operation.UPSERT, Map.of(), Map.of()))
+            .toList();
+        var source = Mockito.mock(DocumentSource.class);
+        Mockito.when(source.readDocuments(partition, 0)).thenReturn(Flux.fromIterable(documents));
+
+        class PermitHandoffSink implements GroupedDocumentSink<String> {
+            final AtomicInteger requests = new AtomicInteger();
+            final CountDownLatch firstRequestsStarted = new CountDownLatch(2);
+            final CountDownLatch handedOffRequestStarted = new CountDownLatch(1);
+            final List<Sinks.One<BatchResult>> heldRequests = new CopyOnWriteArrayList<>();
+            final List<String> requestThreads = new CopyOnWriteArrayList<>();
+            final AtomicReference<String> handedOffDocument = new AtomicReference<>();
+
+            @Override
+            public Mono<Void> createCollection(CollectionMetadata metadata) {
+                return Mono.empty();
+            }
+
+            @Override
+            public Mono<BatchResult> writeBatch(String collectionName, List<Document> batch) {
+                throw new AssertionError("The grouped path must be used");
+            }
+
+            @Override
+            public PreparedDocument<String> prepareSourceDocument(String collectionName, Document document) {
+                return new PreparedDocument<>(document, 1, "prepared-" + document.id());
+            }
+
+            @Override
+            public Mono<BatchResult> writePreparedBatchGroup(
+                String collectionName,
+                List<List<PreparedDocument<String>>> sourceBatches,
+                int requestConcurrency
+            ) {
+                var document = sourceBatches.get(0).get(0).document();
+                requestThreads.add(Thread.currentThread().getName());
+                int request = requests.getAndIncrement();
+                if (request < 2) {
+                    var completion = Sinks.<BatchResult>one();
+                    heldRequests.add(completion);
+                    firstRequestsStarted.countDown();
+                    return completion.asMono();
+                }
+                handedOffDocument.compareAndSet(null, document.id());
+                handedOffRequestStarted.countDown();
+                return Mono.just(new BatchResult(1, 1));
+            }
+        }
+
+        var sink = new PermitHandoffSink();
+        var future = new DocumentMigrationPipeline(source, sink, 1, 100, 1, 2)
+            .migratePartition(partition, "index", 0)
+            .collectList()
+            .toFuture();
+        Assertions.assertTrue(sink.firstRequestsStarted.await(10, TimeUnit.SECONDS));
+
+        var releasingThread = new Thread(
+            () -> sink.heldRequests.get(0).tryEmitValue(new BatchResult(1, 1)),
+            "simulated-netty-event-loop"
+        );
+        releasingThread.start();
+        releasingThread.join();
+        Assertions.assertTrue(sink.handedOffRequestStarted.await(10, TimeUnit.SECONDS));
+        sink.heldRequests.get(1).tryEmitValue(new BatchResult(1, 1));
+        future.get(10, TimeUnit.SECONDS);
+
+        Assertions.assertEquals(4, sink.requests.get());
+        Assertions.assertTrue(sink.requestThreads.get(2).startsWith("rfs-preparation-lane-"),
+            sink.requestThreads.toString());
+        Assertions.assertNotEquals(releasingThread.getName(), sink.requestThreads.get(2));
+        Assertions.assertNotNull(sink.handedOffDocument.get());
     }
 
     @Test
