@@ -2,6 +2,7 @@ package org.opensearch.migrations.bulkload.common;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Duration;
@@ -21,6 +22,7 @@ import com.azure.storage.blob.models.ListBlobsOptions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
@@ -32,6 +34,7 @@ import static org.hamcrest.CoreMatchers.instanceOf;
 import static org.hamcrest.CoreMatchers.sameInstance;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
@@ -42,6 +45,7 @@ import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -274,24 +278,57 @@ public class AzureRepoTest {
         assertThat(thrown.getMessage(), containsString("directory/snap-snap1.dat"));
     }
 
+    @ParameterizedTest
+    @ValueSource(ints = {403, 404, 503})
+    void EnsureFileExistsLocally_DoesNotCacheFailedDownloads(int statusCode, @TempDir Path tempDir) throws IOException {
+        var repo = new AzureRepo(tempDir, testRepoUri, mockContainerClient, new BaseSnapshotFileFinder());
+        Path expectedPath = tempDir.resolve("indices/idx1/meta-snap1.dat");
+        HttpResponse response = mock(HttpResponse.class);
+        lenient().when(response.getStatusCode()).thenReturn(statusCode);
+        var azureFailure = new BlobStorageException("service failure", response, null);
+        when(mockBlobClient.downloadToFile(anyString(), eq(true)))
+            .thenAnswer(invocation -> {
+                Files.writeString(Path.of(invocation.getArgument(0, String.class)), "partial");
+                throw azureFailure;
+            })
+            .thenAnswer(invocation -> {
+                Files.writeString(Path.of(invocation.getArgument(0, String.class)), "complete");
+                return null;
+            });
+
+        var thrown = assertThrows(
+            CouldNotReadFromAzure.class,
+            () -> repo.getIndexMetadataFilePath("idx1", "snap1")
+        );
+
+        assertThat(thrown.getCause(), sameInstance(azureFailure));
+        assertFalse(Files.exists(expectedPath), "A failed download must not populate the local cache");
+        assertEquals(expectedPath, repo.getIndexMetadataFilePath("idx1", "snap1"));
+        assertEquals("complete", Files.readString(expectedPath));
+        assertEquals(expectedPath, repo.getIndexMetadataFilePath("idx1", "snap1"));
+        verify(mockBlobClient, times(2)).downloadToFile(expectedPath.toString(), true);
+    }
+
     @Test
-    void EnsureFileExistsLocally_LeavesLocalFilesystemFailuresUnclassified() {
+    void EnsureFileExistsLocally_LeavesLocalFilesystemFailuresUnclassified(@TempDir Path tempDir) {
         // A failure writing the downloaded file is a local problem, not a problem reading the
         // snapshot, so it must not be reported as a snapshot read failure.
-        String snapshotId = "snap1";
-        Path expectedPath = testDir.resolve("snap-" + snapshotId + ".dat");
-        when(mockFileFinder.getSnapshotMetadataFilePath(testDir, snapshotId)).thenReturn(expectedPath);
-        doNothing().when(testRepo).ensureLocalDirectoryExists(any(Path.class));
+        var repo = new AzureRepo(tempDir, testRepoUri, mockContainerClient, new BaseSnapshotFileFinder());
+        Path expectedPath = tempDir.resolve("snap-snap1.dat");
         UncheckedIOException localFailure = new UncheckedIOException(new IOException("disk full"));
-        when(mockBlobClient.downloadToFile(anyString(), Mockito.anyBoolean())).thenThrow(localFailure);
+        when(mockBlobClient.downloadToFile(anyString(), eq(true))).thenAnswer(invocation -> {
+            Files.writeString(Path.of(invocation.getArgument(0, String.class)), "partial");
+            throw localFailure;
+        });
 
         var thrown = assertThrows(
             UncheckedIOException.class,
-            () -> testRepo.getSnapshotMetadataFilePath(snapshotId)
+            () -> repo.getSnapshotMetadataFilePath("snap1")
         );
 
         assertThat(thrown, sameInstance(localFailure));
         assertNull(SnapshotReadFailures.find(thrown));
+        assertFalse(Files.exists(expectedPath), "A failed write must not populate the local cache");
     }
 
     @Test
