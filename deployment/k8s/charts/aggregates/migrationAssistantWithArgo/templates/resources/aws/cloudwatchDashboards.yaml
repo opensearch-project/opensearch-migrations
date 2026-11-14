@@ -12,7 +12,15 @@ metadata:
 spec:
   dashboardName: "MA-{{ .stage }}-{{ .region }}-CaptureReplay"
   {{- /* fromJson | toJson compacts the body: these CRs are inlined into installer Job scripts, and a single exec argument is limited to 128 KiB. */}}
-  dashboardBody: {{ .root.Files.Get "files/cloudwatch-dashboards/capture-replay-dashboard.json" | replace "placeholder-region" .region | replace "placeholder-stage" .stage | replace "placeholder-qualifier" .stage | fromJson | toJson | toJson }}
+  {{- /* The generator emits quoted placeholders where CloudWatch needs numbers, so the quotes are replaced too. */}}
+  {{- $storage := .root.Values.kafkaObservability.storage }}
+  {{- $body := .root.Files.Get "files/cloudwatch-dashboards/capture-replay-dashboard.json" }}
+  {{- $body = $body | replace "placeholder-region" .region | replace "placeholder-stage" .stage | replace "placeholder-qualifier" .stage }}
+  {{- $body = $body | replace "placeholder-cluster" .root.Values.aws.eksClusterName | replace "placeholder-namespace" .root.Release.Namespace }}
+  {{- range $placeholder, $freePercent := dict "warning" $storage.warningFreePercent "critical" $storage.criticalFreePercent "inode" $storage.inodeFreePercent }}
+  {{- $body = $body | replace (printf "\"placeholder-%s-utilization\"" $placeholder) (toString (sub 100 (int $freePercent))) }}
+  {{- end }}
+  dashboardBody: {{ $body | fromJson | toJson | toJson }}
 ---
 apiVersion: cloudwatch.services.k8s.aws/v1alpha1
 kind: Dashboard

@@ -1119,6 +1119,7 @@ validate_helm_values_against_cluster() {
   echo "Validating workload NodePools from --helm-values (${user_helm_values}) against the cluster..."
   nodepool=$(helm template "$namespace" "$ma_chart_dir" --kube-version 1.35.0 -f - "${values_args[@]}" \
     --set stageName="$STAGE" --set aws.region="$AWS_CFN_REGION" --set-string aws.account="$AWS_ACCOUNT" \
+    --set aws.eksClusterName="$MIGRATIONS_EKS_CLUSTER_NAME" \
     --show-only templates/resources/aws/workloadsNodePool.yaml <<< "$eks_values") \
     || { echo "Error: failed to render workload NodePools from --helm-values." >&2; exit 1; }
   kubectl --context="$KUBE_CONTEXT" apply --dry-run=server -f - <<< "$nodepool" >/dev/null \
@@ -2156,6 +2157,7 @@ echo "Set flags:"
 echo "  stageName=${STAGE}"
 echo "  aws.region=${AWS_CFN_REGION}"
 echo "  aws.account=${AWS_ACCOUNT}"
+echo "  aws.eksClusterName=${MIGRATIONS_EKS_CLUSTER_NAME}"
 echo "  defaultBucketConfiguration.snapshotRoleArn=${SNAPSHOT_ROLE}"
 echo "Image flags:"
 echo "  ${IMAGE_FLAGS}"
@@ -2186,6 +2188,7 @@ helm $([[ "$helm_upgrade" == "true" ]] && echo "upgrade --install" || echo insta
   --set stageName="${STAGE}" \
   --set aws.region="${AWS_CFN_REGION}" \
   --set-string aws.account="${AWS_ACCOUNT}" \
+  --set aws.eksClusterName="${MIGRATIONS_EKS_CLUSTER_NAME}" \
   --set defaultBucketConfiguration.snapshotRoleArn="${SNAPSHOT_ROLE}" \
   $IMAGE_FLAGS \
   $TLS_HELM_FLAGS \

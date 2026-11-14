@@ -268,6 +268,8 @@ def main():
             "aws.region=us-east-2",
             "--set-string",
             "aws.account=123456789012",
+            "--set-string",
+            "aws.eksClusterName=verify-cluster",
         ),
     }
     jobs = {

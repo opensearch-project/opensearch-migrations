@@ -355,6 +355,7 @@ spec:
               fi
 
       {{- if $dashboards }}
+        {{- if .Values.metrics.cloudWatch.enabled }}
               echo "Waiting for Dashboard CRD to be established..."
               kubectl wait --for=condition=Established crd/dashboards.cloudwatch.services.k8s.aws --timeout=120s
               echo "Applying CloudWatch Dashboard CRs..."
@@ -363,6 +364,11 @@ spec:
               }
               retry 3 5 "apply CloudWatch Dashboard CRs" -- apply_dashboards
               echo "Dashboard CRs applied."
+        {{- else }}
+              echo "CloudWatch metric export and dashboards are disabled; removing any existing Dashboard CRs..."
+              kubectl wait --for=condition=Established crd/dashboards.cloudwatch.services.k8s.aws --timeout=120s
+              kubectl delete -f /dashboards/dashboards.yaml --ignore-not-found
+        {{- end }}
       {{- end }}
 
               # Combine all notes and create a ConfigMap to store them

@@ -176,6 +176,19 @@ tasks.register('verifyCaptureReplayObservability', Exec) {
     dependsOn 'installHelmClient'
 }
 
+tasks.register('verifyKafkaObservability', Exec) {
+    description = 'Validates Kafka PVC selection, dashboard policy, and opt-in Prometheus alerts'
+    group = 'verification'
+    commandLine(
+            'python3',
+            layout.projectDirectory.file('scripts/verify-kafka-observability.py').asFile,
+            chartSourceDir.asFile,
+            '--helm',
+            helmExecutable.get().asFile
+    )
+    dependsOn 'installHelmClient'
+}
+
 tasks.register('verifyHelmUninstallTeardown', Exec) {
     description = 'Validates rendered Migration Assistant pre-delete teardown'
     group = 'verification'
@@ -204,5 +217,6 @@ tasks.register('verifyWorkloadZoneSpread', Exec) {
 
 tasks.named('check') {
     dependsOn 'test', 'testCaptureReplayGamedayScript', 'verifyCaptureReplayObservability',
+            'verifyKafkaObservability',
             'verifyHelmUninstallTeardown', 'verifyWorkloadZoneSpread'
 }

@@ -11,4 +11,9 @@ data:
   STAGE_NAME: {{ required "Missing required value: .Values.stageName" .Values.stageName | quote }}
   AWS_REGION: {{ required "Missing required value: .Values.aws.region" .Values.aws.region | quote }}
   ACCOUNT: {{ required "Missing required value: .Values.aws.account" (toString .Values.aws.account) | quote }}
+{{- if .Values.metrics.cloudWatch.enabled }}
+  EKS_CLUSTER_NAME: {{ required "Missing required value: .Values.aws.eksClusterName" .Values.aws.eksClusterName | quote }}
+{{- else }}
+  EKS_CLUSTER_NAME: {{ .Values.aws.eksClusterName | quote }}
+{{- end }}
 {{- end }}
