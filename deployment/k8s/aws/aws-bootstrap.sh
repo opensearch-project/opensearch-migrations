@@ -1095,6 +1095,41 @@ else
   kubectl config use-context "${KUBE_CONTEXT}" >/dev/null 2>&1
 fi
 
+# NodeClass that the Helm chart's NodePools will reference. The built-in EKS-managed class is the
+# default, while --tags creates the named class below. On --skip-cfn-deploy this is resolved from
+# the live cluster before any builds or Helm installs.
+auto_mode_node_class="default"
+AUTO_MODE_TAGGED_NODE_CLASS="migrations-tagged"
+AUTO_MODE_BOOTSTRAP_NODE_POOL="migrations-bootstrap-pool"
+configure_tagged_auto_mode_compute_requested=false
+user_node_class_override=""
+
+extract_rendered_node_class_names() {
+  awk '
+    {
+      match($0, /^[[:space:]]*/)
+      indent = RLENGTH
+      line = $0
+      sub(/^[[:space:]]*/, "", line)
+
+      if (in_ref && indent <= ref_indent && line != "") {
+        in_ref = 0
+      }
+      if (line == "nodeClassRef:") {
+        in_ref = 1
+        ref_indent = indent
+        next
+      }
+      if (in_ref && line ~ /^name:[[:space:]]*/) {
+        sub(/^name:[[:space:]]*/, "", line)
+        gsub(/^"|"$/, "", line)
+        print line
+        in_ref = 0
+      }
+    }
+  ' | sort -u
+}
+
 # --- validate --helm-values against the cluster ---
 # This is the first point the cluster is reachable, and it comes before anything slow or
 # cluster-mutating: the Auto Mode compute changes for --tags, image mirroring and --build. Render
@@ -1106,13 +1141,22 @@ validate_helm_values_against_cluster() {
   [[ -z "$user_helm_values" || "$use_general_node_pool" == "true" ]] && return 0
   resolve_chart_source
 
-  local eks_values nodepool f
-  local -a values_args files
+  local eks_values nodepool node_class_probe f node_class_values_file
+  local node_class_sentinel="auto-mode-discovery-sentinel"
+  local -a values_args=() files rendered_node_classes=()
   if [[ -f "$ma_chart_dir" ]]; then
     eks_values=$(tar -xzOf "$ma_chart_dir" migration-assistant/valuesEks.yaml)
   else
     eks_values=$(<"$ma_chart_dir/valuesEks.yaml")
   fi
+
+  # Put a valid sentinel before the deployer's values. If the rendered NodePools replace it, the
+  # deployer explicitly selected aws.nodeClassName and that selection takes precedence over
+  # automatic cluster discovery. A --set flag cannot be used here because Helm always gives it
+  # precedence over values files regardless of argument order.
+  node_class_values_file=$(mktemp)
+  printf 'aws:\n  nodeClassName: %s\n' "$node_class_sentinel" > "$node_class_values_file"
+  values_args=(-f "$node_class_values_file")
   IFS=',' read -ra files <<< "$user_helm_values"
   for f in "${files[@]}"; do values_args+=(-f "$f"); done
 
@@ -1121,12 +1165,44 @@ validate_helm_values_against_cluster() {
     --set stageName="$STAGE" --set aws.region="$AWS_CFN_REGION" --set-string aws.account="$AWS_ACCOUNT" \
     --set aws.eksClusterName="$MIGRATIONS_EKS_CLUSTER_NAME" \
     --show-only templates/resources/aws/workloadsNodePool.yaml <<< "$eks_values") \
-    || { echo "Error: failed to render workload NodePools from --helm-values." >&2; exit 1; }
-  kubectl --context="$KUBE_CONTEXT" apply --dry-run=server -f - <<< "$nodepool" >/dev/null \
-    || { echo "Error: the cluster rejected workload NodePools as rendered from --helm-values:" >&2
-         echo "$nodepool" >&2
-         echo "  Nothing was changed. Fix the workloadsNodePool values and re-run the bootstrap." >&2
+    || { rm -f "$node_class_values_file"
+         echo "Error: failed to render workload NodePools from --helm-values." >&2
          exit 1; }
+  # The workload pools can be disabled by a values file while the dedicated migration-console
+  # NodePool remains enabled. Probe that template too so any effective aws.nodeClassName is still
+  # validated and passed consistently to BuildKit.
+  node_class_probe=$(helm template "$namespace" "$ma_chart_dir" --kube-version 1.35.0 -f - "${values_args[@]}" \
+    --set stageName="$STAGE" --set aws.region="$AWS_CFN_REGION" --set-string aws.account="$AWS_ACCOUNT" \
+    --set aws.eksClusterName="$MIGRATIONS_EKS_CLUSTER_NAME" \
+    --show-only templates/resources/migrationConsole.yaml <<< "$eks_values") \
+    || { rm -f "$node_class_values_file"
+         echo "Error: failed to resolve aws.nodeClassName from --helm-values." >&2
+         exit 1; }
+  rm -f "$node_class_values_file"
+
+  while IFS= read -r f; do
+    [[ -n "$f" ]] && rendered_node_classes+=("$f")
+  done < <(printf '%s\n%s\n' "$nodepool" "$node_class_probe" | extract_rendered_node_class_names)
+  if [[ ${#rendered_node_classes[@]} -gt 1 ]]; then
+    echo "Error: --helm-values rendered workload NodePools with multiple NodeClasses:" >&2
+    printf '  %s\n' "${rendered_node_classes[@]}" >&2
+    exit 1
+  fi
+  if [[ ${#rendered_node_classes[@]} -eq 1 &&
+        "${rendered_node_classes[0]}" != "$node_class_sentinel" ]]; then
+    user_node_class_override="${rendered_node_classes[0]}"
+    echo "  Explicit aws.nodeClassName override: ${user_node_class_override}"
+  fi
+
+  # A values file may deliberately disable the chart-managed NodePools. There is then no manifest
+  # for the API server to validate, and its aws.nodeClassName value is irrelevant to this chart.
+  if [[ -n "${nodepool//[[:space:]]/}" ]]; then
+    kubectl --context="$KUBE_CONTEXT" apply --dry-run=server -f - <<< "$nodepool" >/dev/null \
+      || { echo "Error: the cluster rejected workload NodePools as rendered from --helm-values:" >&2
+           echo "$nodepool" >&2
+           echo "  Nothing was changed. Fix the workloadsNodePool values and re-run the bootstrap." >&2
+           exit 1; }
+  fi
 }
 validate_helm_values_against_cluster
 
@@ -1142,12 +1218,6 @@ validate_helm_values_against_cluster
 # built-in "system"/"general-purpose" NodePools are hard-wired to it. Tagging every node therefore
 # means replacing all three with our own, which is why this only happens when --tags is given.
 # =============================================================================
-
-# NodeClass that the Helm chart's NodePools will reference. Stays "default" (the EKS-managed one)
-# unless tags need to be carried. Must not be named "default": EKS owns that name.
-auto_mode_node_class="default"
-AUTO_MODE_TAGGED_NODE_CLASS="migrations-tagged"
-AUTO_MODE_BOOTSTRAP_NODE_POOL="migrations-bootstrap-pool"
 
 # Inherit the deployed stack's tags when --tags was not passed, so that a re-run (in particular
 # --skip-cfn-deploy, which never touches stack tags) keeps the cluster's tagging in step with the
@@ -1174,19 +1244,210 @@ emit_resource_tags_yaml() {
   done
 }
 
-# Write the tags into a Helm values file. The chart uses them for the StorageClass's
-# tagSpecification parameters and for load balancer annotations, and needs nodeClassName so its
-# NodePools bind to the NodeClass created below rather than to "default".
-emit_tag_helm_values() {
+print_auto_mode_compute_state() {
+  local nodepools_json="$1"
+  local nodeclasses_json="$2"
+  echo "  In-cluster NodePool references:" >&2
+  jq -r '
+    if (.items | length) == 0 then
+      "    <none>"
+    else
+      .items[] |
+        "    NodePool/\(.metadata.name) -> NodeClass/\(.spec.template.spec.nodeClassRef.name // "<missing>")"
+    end
+  ' <<< "$nodepools_json" >&2
+  echo "  In-cluster NodeClasses:" >&2
+  jq -r '
+    if (.items | length) == 0 then
+      "    <none>"
+    else
+      .items[] |
+        ([.status.conditions[]? | select(.type == "Ready") | .status] | last // "Missing") as $ready |
+        "    NodeClass/\(.metadata.name) Ready=\($ready)"
+    end
+  ' <<< "$nodeclasses_json" >&2
+}
+
+restore_auto_mode_node_class() {
+  local node_class_name="$1"
+  local restore_resource_tags="${2:-false}"
+  local nodeclass_json ready_status tag_key tag_value restored_count=0
+
+  if ! nodeclass_json=$(kubectl --context="${KUBE_CONTEXT}" \
+      get nodeclass "$node_class_name" -o json 2>/dev/null); then
+    echo "Error: selected EKS Auto Mode NodeClass '${node_class_name}' does not exist." >&2
+    echo "  Refusing to install NodePools that would remain unusable." >&2
+    return 1
+  fi
+  ready_status=$(jq -r \
+    '[.status.conditions[]? | select(.type == "Ready") | .status] | last // "Missing"' \
+    <<< "$nodeclass_json")
+  if [[ "$ready_status" != "True" ]]; then
+    echo "Error: selected EKS Auto Mode NodeClass '${node_class_name}' is not Ready" >&2
+    echo "  (Ready=${ready_status}). Refusing to install NodePools that cannot provision nodes." >&2
+    return 1
+  fi
+
+  if [[ "$restore_resource_tags" == "true" && "$node_class_name" != "default" ]]; then
+    while IFS= read -r -d '' tag_key && IFS= read -r -d '' tag_value; do
+      validate_and_add_tag "$tag_key" "$tag_value" "NodeClass/${node_class_name} tag"
+      restored_count=$((restored_count + 1))
+    done < <(jq -j '(.spec.tags // {}) | to_entries[] | .key, "\u0000", (.value | tostring), "\u0000"' \
+      <<< "$nodeclass_json")
+    echo "  Restored ${restored_count} resource tag(s) from NodeClass/${node_class_name}."
+  fi
+}
+
+discover_auto_mode_node_class() {
+  local nodepools_json nodeclasses_json candidate="" candidate_source=""
+  local bootstrap_count
+  local -a referenced_node_classes=() available_node_classes=()
+
+  echo "Discovering the existing cluster's EKS Auto Mode NodeClass..."
+  if ! nodepools_json=$(kubectl --context="${KUBE_CONTEXT}" get nodepools -o json); then
+    echo "Error: could not list EKS Auto Mode NodePools in context ${KUBE_CONTEXT}." >&2
+    return 1
+  fi
+  if ! nodeclasses_json=$(kubectl --context="${KUBE_CONTEXT}" get nodeclasses -o json); then
+    echo "Error: could not list EKS Auto Mode NodeClasses in context ${KUBE_CONTEXT}." >&2
+    return 1
+  fi
+
+  # This pool is deliberately kept outside the MA Helm release, so it survives the documented
+  # uninstall/redeploy flow. Its reference is therefore the strongest signal of the class that the
+  # bootstrap previously selected, even if other application NodePools are temporarily present.
+  bootstrap_count=$(jq -r --arg name "$AUTO_MODE_BOOTSTRAP_NODE_POOL" \
+    '[.items[] | select(.metadata.name == $name)] | length' <<< "$nodepools_json")
+  if [[ "$bootstrap_count" -gt 0 ]]; then
+    candidate=$(jq -r --arg name "$AUTO_MODE_BOOTSTRAP_NODE_POOL" \
+      '.items[] | select(.metadata.name == $name) |
+       .spec.template.spec.nodeClassRef.name // empty' <<< "$nodepools_json")
+    if [[ -z "$candidate" ]]; then
+      echo "Error: NodePool/${AUTO_MODE_BOOTSTRAP_NODE_POOL} has no NodeClass reference." >&2
+      print_auto_mode_compute_state "$nodepools_json" "$nodeclasses_json"
+      return 1
+    fi
+    candidate_source="persistent NodePool/${AUTO_MODE_BOOTSTRAP_NODE_POOL}"
+  else
+    while IFS= read -r candidate; do
+      [[ -n "$candidate" ]] && referenced_node_classes+=("$candidate")
+    done < <(jq -r '[.items[].spec.template.spec.nodeClassRef.name // empty] | unique[]' \
+      <<< "$nodepools_json")
+
+    if [[ ${#referenced_node_classes[@]} -eq 1 ]]; then
+      candidate="${referenced_node_classes[0]}"
+      candidate_source="the cluster's NodePool references"
+    elif [[ ${#referenced_node_classes[@]} -gt 1 ]]; then
+      echo "Error: EKS Auto Mode NodeClass discovery is ambiguous; NodePools reference multiple classes." >&2
+      print_auto_mode_compute_state "$nodepools_json" "$nodeclasses_json"
+      echo "  Set aws.nodeClassName explicitly with --helm-values to select one." >&2
+      return 1
+    else
+      while IFS= read -r candidate; do
+        [[ -n "$candidate" ]] && available_node_classes+=("$candidate")
+      done < <(jq -r '[.items[].metadata.name] | unique[]' <<< "$nodeclasses_json")
+      if [[ ${#available_node_classes[@]} -eq 1 ]]; then
+        candidate="${available_node_classes[0]}"
+        candidate_source="the only in-cluster NodeClass"
+      elif [[ ${#available_node_classes[@]} -gt 1 ]]; then
+        echo "Error: EKS Auto Mode NodeClass discovery is ambiguous; no NodePool selects among the classes." >&2
+        print_auto_mode_compute_state "$nodepools_json" "$nodeclasses_json"
+        echo "  Set aws.nodeClassName explicitly with --helm-values to select one." >&2
+        return 1
+      else
+        echo "Error: no EKS Auto Mode NodeClass exists in context ${KUBE_CONTEXT}." >&2
+        print_auto_mode_compute_state "$nodepools_json" "$nodeclasses_json"
+        return 1
+      fi
+    fi
+  fi
+
+  auto_mode_node_class="$candidate"
+  echo "  Preserving NodeClass/${auto_mode_node_class} from ${candidate_source}."
+  restore_auto_mode_node_class "$auto_mode_node_class" true
+}
+
+resolve_auto_mode_configuration() {
+  if [[ "$use_general_node_pool" == "true" ]]; then
+    if [[ ${#tag_keys[@]} -gt 0 ]]; then
+      echo "Error: --use-general-node-pool cannot be combined with resource tags restored from" >&2
+      echo "  the existing stack; the built-in NodeClass/default cannot carry those tags." >&2
+      return 1
+    fi
+    auto_mode_node_class="default"
+    if [[ "$skip_cfn_deploy" == "true" ]]; then
+      restore_auto_mode_node_class "$auto_mode_node_class" false
+    fi
+    return 0
+  fi
+
+  # Capture this before discovery restores tags from an existing class. Only explicit/stack tags
+  # should reconfigure compute; restored tags are for Helm-created storage and load balancers.
+  if [[ ${#tag_keys[@]} -gt 0 ]]; then
+    configure_tagged_auto_mode_compute_requested=true
+    auto_mode_node_class="$AUTO_MODE_TAGGED_NODE_CLASS"
+  fi
+
+  if [[ -n "$user_node_class_override" ]]; then
+    if [[ "$configure_tagged_auto_mode_compute_requested" == "true" &&
+          "$user_node_class_override" == "default" ]]; then
+      echo "Error: --helm-values selects NodeClass/default, but --tags disables and removes it." >&2
+      echo "  Select a Ready custom NodeClass or remove one of those explicit configurations." >&2
+      return 1
+    fi
+    auto_mode_node_class="$user_node_class_override"
+    if [[ "$configure_tagged_auto_mode_compute_requested" != "true" ||
+          "$auto_mode_node_class" != "$AUTO_MODE_TAGGED_NODE_CLASS" ]]; then
+      # Explicit --tags remain authoritative for resourceTags. Without them, restore the selected
+      # custom class's tags so EBS and load-balancer resources stay aligned with its compute.
+      restore_auto_mode_node_class "$auto_mode_node_class" \
+        "$([[ ${#tag_keys[@]} -eq 0 ]] && echo true || echo false)"
+    fi
+    return 0
+  fi
+
+  if [[ "$configure_tagged_auto_mode_compute_requested" == "true" ]]; then
+    return 0
+  fi
+  if [[ "$skip_cfn_deploy" == "true" ]]; then
+    discover_auto_mode_node_class
+  fi
+}
+
+resolve_auto_mode_configuration || exit 1
+
+# Write the resolved NodeClass and resource tags into a generated values file. It is prepended to
+# the deployer's --helm-values files so explicit user values retain their established precedence.
+emit_auto_mode_helm_values() {
   local values_file
   values_file=$(mktemp)
   {
     echo "aws:"
     echo "  nodeClassName: \"${auto_mode_node_class}\""
-    echo "  resourceTags:"
-    emit_resource_tags_yaml
+    if [[ ${#tag_keys[@]} -gt 0 ]]; then
+      echo "  resourceTags:"
+      emit_resource_tags_yaml
+    else
+      echo "  resourceTags: {}"
+    fi
   } > "$values_file"
   printf '%s' "$values_file"
+}
+
+prepend_auto_mode_helm_values() {
+  auto_mode_values_file=$(emit_auto_mode_helm_values)
+  echo "  Auto Mode values written to $auto_mode_values_file"
+  if [[ -n "$extra_helm_values" ]]; then
+    extra_helm_values="$auto_mode_values_file,$extra_helm_values"
+  else
+    extra_helm_values="$auto_mode_values_file"
+  fi
+}
+
+set_buildkit_node_class_helm_arg() {
+  # Put the generated value first so an explicit BUILDKIT_HELM_ARGS value retains precedence.
+  BUILDKIT_HELM_ARGS="--set-string nodeClassName=${auto_mode_node_class}${BUILDKIT_HELM_ARGS:+ $BUILDKIT_HELM_ARGS}"
+  export BUILDKIT_HELM_ARGS
 }
 
 AUTO_MODE_TAG_PROPAGATION_POLICY_NAME="AutoModeTagPropagationPolicy"
@@ -1626,11 +1887,16 @@ EOF
   kubectl --context="${KUBE_CONTEXT}" apply -f "$manifest" \
     || { echo "Error: failed to apply the tagged NodeClass/NodePool." >&2; cat "$manifest" >&2; exit 1; }
   rm -f "$manifest"
+  echo "  Waiting for NodeClass/${AUTO_MODE_TAGGED_NODE_CLASS} to become Ready..."
+  kubectl --context="${KUBE_CONTEXT}" wait --for=condition=Ready \
+    "nodeclass/${AUTO_MODE_TAGGED_NODE_CLASS}" --timeout=5m \
+    || { echo "Error: NodeClass/${AUTO_MODE_TAGGED_NODE_CLASS} did not become Ready." >&2
+         echo "  Refusing to remove the existing compute or install unusable NodePools." >&2
+         exit 1; }
 
   # These are applied outside the Helm release on purpose: the release's own pre-install hook Jobs
   # need a schedulable node before the release exists, and they must outlive `helm uninstall` so a
   # reinstall has somewhere to run.
-  auto_mode_node_class="${AUTO_MODE_TAGGED_NODE_CLASS}"
 
   # Every node from a built-in NodePool uses the untaggable "default" NodeClass, so leaving either
   # enabled would keep producing untagged instances. Removing them from computeConfig deletes the
@@ -1675,21 +1941,18 @@ EOF
   fi
 }
 
-if [[ ${#tag_keys[@]} -gt 0 ]]; then
+if [[ "$configure_tagged_auto_mode_compute_requested" == "true" ]]; then
   configure_tagged_auto_mode_compute
-  # Prepended, not appended, so an explicit --helm-values file still wins.
-  tag_values_file=$(emit_tag_helm_values)
-  echo "  Tag values written to $tag_values_file"
-  if [[ -n "$extra_helm_values" ]]; then
-    extra_helm_values="$tag_values_file,$extra_helm_values"
-  else
-    extra_helm_values="$tag_values_file"
-  fi
 fi
 
-# Check if general-purpose pool is disabled and re-enable if needed for installation. The tagged
-# path already created its replacement pool, so it needs neither this check nor another API call.
-if [[ ${#tag_keys[@]} -eq 0 ]]; then
+# Always carry the resolved class into the MA chart. Prepending the generated file preserves the
+# precedence of an explicit --helm-values file, including an explicit aws.nodeClassName.
+prepend_auto_mode_helm_values
+
+# Check if the general-purpose pool is disabled and re-enable if needed for installation. A custom
+# NodeClass means the cluster intentionally uses custom compute, so do not restore an incompatible
+# built-in pool merely because its tags were discovered rather than passed again.
+if [[ "$auto_mode_node_class" == "default" ]]; then
   CURRENT_NODEPOOLS=$(aws eks describe-cluster --name "${MIGRATIONS_EKS_CLUSTER_NAME}" --region "${AWS_CFN_REGION}" \
     --query 'cluster.computeConfig.nodePools' --output text 2>/dev/null)
   if [[ "$CURRENT_NODEPOOLS" != *"general-purpose"* ]] && [[ "$build" != "true" ]]; then
@@ -1950,29 +2213,28 @@ if [[ "$build" == "true" && -z "$ma_images_source" ]]; then
   # direct access to a local Docker daemon from the target environment.
   source "${base_dir}/buildImages/backends/eksKubernetesBuildkit.sh"
   BUILDER_NAME="builder-${KUBE_CONTEXT//[^a-zA-Z0-9_-]/-}"
+  if [[ "$push_images_to_ecr" == "true" ]]; then
+    # Use the ECR-mirrored buildkit image so the kubernetes driver doesn't pull
+    # from Docker Hub. mirror_images_to_ecr already copied this image above.
+    ECR_HOST="${MIGRATIONS_ECR_REGISTRY%%/*}"
+    export BUILDKIT_IMAGE="${ECR_HOST}/mirrored/docker.io/moby/buildkit:buildx-stable-1"
+  else
+    unset BUILDKIT_IMAGE
+  fi
+  # Reconcile the release on every build, even when an existing buildx builder is healthy. The
+  # BuildKit NodePool must use the same resolved NodeClass as the MA NodePools.
+  set_buildkit_node_class_helm_arg
+  ensure_eks_buildkit_release
+
   if builder_status=$(docker buildx inspect "$BUILDER_NAME" 2>/dev/null) \
       && buildx_nodes_are_ready <<< "$builder_status"; then
-    echo "Buildkit already configured and healthy, skipping setup"
+    echo "Buildkit release reconciled and existing builder is healthy"
   else
-    echo "Setting up buildkit for local builds..."
+    echo "Setting up the buildx builder for local builds..."
     # Remove stale builder if it exists but failed health check above (e.g. orphaned
     # from a previous interrupted run). This is safe — the builder is recreated below.
     docker buildx rm "$BUILDER_NAME" 2>/dev/null || true
-    if [[ "$push_images_to_ecr" == "true" ]]; then
-      # Use the ECR-mirrored buildkit image so the kubernetes driver doesn't pull
-      # from Docker Hub. mirror_images_to_ecr already copied this image above.
-      ECR_HOST="${MIGRATIONS_ECR_REGISTRY%%/*}"
-      export BUILDKIT_IMAGE="${ECR_HOST}/mirrored/docker.io/moby/buildkit:buildx-stable-1"
-    else
-      unset BUILDKIT_IMAGE
-    fi
-    # buildkit gets its own NodePool; point it at the same NodeClass as everything else so its
-    # (large, short-lived) build instances are tagged too, and so it doesn't reference the
-    # built-in "default" NodeClass after --tags has disabled the built-in NodePools.
-    if [[ "$auto_mode_node_class" != "default" ]]; then
-      export BUILDKIT_HELM_ARGS="${BUILDKIT_HELM_ARGS:+$BUILDKIT_HELM_ARGS }--set nodeClassName=${auto_mode_node_class}"
-    fi
-    setup_build_backend
+    ensure_eks_buildx_builder
   fi
 
   echo "Building images to MIGRATIONS_ECR_REGISTRY=$MIGRATIONS_ECR_REGISTRY"

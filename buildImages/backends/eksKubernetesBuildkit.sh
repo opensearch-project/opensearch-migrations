@@ -62,15 +62,18 @@ ensure_eks_buildkit_release() {
   set_k8s_context_args
   require_eks_context
 
-  echo "Installing buildImages helm chart for nodepool..."
-  if helm ${HELM_CONTEXT_ARGS[@]+"${HELM_CONTEXT_ARGS[@]}"} list -n buildkit 2>/dev/null | grep -q buildkit; then
-    echo "buildkit helm release already exists, skipping install"
-    return 0
+  local -a reuse_values_args=()
+  if helm ${HELM_CONTEXT_ARGS[@]+"${HELM_CONTEXT_ARGS[@]}"} status buildkit -n buildkit >/dev/null 2>&1; then
+    echo "Reconciling existing buildImages helm release while preserving its values..."
+    reuse_values_args=(--reuse-values)
+  else
+    echo "Installing buildImages helm chart for nodepool..."
   fi
 
   # shellcheck disable=SC2086
-  helm install buildkit "${MIGRATIONS_REPO_ROOT_DIR}/deployment/k8s/charts/components/buildImages" \
+  helm upgrade --install buildkit "${MIGRATIONS_REPO_ROOT_DIR}/deployment/k8s/charts/components/buildImages" \
     ${HELM_CONTEXT_ARGS[@]+"${HELM_CONTEXT_ARGS[@]}"} \
+    ${reuse_values_args[@]+"${reuse_values_args[@]}"} \
     --create-namespace \
     -n buildkit \
     --set skipBuildJob=true \
