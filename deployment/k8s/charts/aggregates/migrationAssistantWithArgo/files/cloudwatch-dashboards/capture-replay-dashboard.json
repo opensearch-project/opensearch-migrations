@@ -270,7 +270,7 @@
                     ],
                     [
                         {
-                            "expression": "IF(e2 <= CATCHUP_FLOOR_SECONDS, 0, IF(e3 > 0.01, ((e2 - CATCHUP_FLOOR_SECONDS) / 3600) / e3, 0/0))",
+                            "expression": "IF(e2 <= CATCHUP_FLOOR_SECONDS, 0, IF(e3 > 0.01, ((e2 - CATCHUP_FLOOR_SECONDS) / 3600) / e3))",
                             "id": "e4",
                             "visible": true,
                             "label": "Hours to floor (0 = caught up)"
@@ -4766,7 +4766,7 @@
                     ],
                     [
                         {
-                            "expression": "IF(e2 <= CATCHUP_FLOOR_SECONDS, 0, IF(e3 > 0.01, ((e2 - CATCHUP_FLOOR_SECONDS) / 3600) / e3, 0/0))",
+                            "expression": "IF(e2 <= CATCHUP_FLOOR_SECONDS, 0, IF(e3 > 0.01, ((e2 - CATCHUP_FLOOR_SECONDS) / 3600) / e3))",
                             "id": "e4",
                             "visible": true,
                             "label": "Hours to floor at current reduction rate (0 = caught up)"
