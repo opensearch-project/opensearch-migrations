@@ -2882,7 +2882,7 @@
                 "metrics": [
                     [
                         {
-                            "expression": "SEARCH('{OpenSearchMigrations,OTelLib,errorType,retryable,qualifier} MetricName=\"bulkItemErrors\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" retryable=\"true\"', 'Sum', 60) / 60",
+                            "expression": "(SUM(SEARCH('{OpenSearchMigrations,OTelLib,errorType,retryable,qualifier} MetricName=\"bulkItemErrors\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" retryable=\"true\"', 'Sum', 60)) + 0 * SUM(SEARCH('{OpenSearchMigrations,OTelLib,attempt,outcome,qualifier} MetricName=\"bulkAttempts\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60))) / 60",
                             "label": "Retried",
                             "id": "e1",
                             "visible": true,
@@ -2891,7 +2891,7 @@
                     ],
                     [
                         {
-                            "expression": "SEARCH('{OpenSearchMigrations,OTelLib,errorType,retryable,qualifier} MetricName=\"bulkItemErrors\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" retryable=\"false\"', 'Sum', 60) / 60",
+                            "expression": "(SUM(SEARCH('{OpenSearchMigrations,OTelLib,errorType,retryable,qualifier} MetricName=\"bulkItemErrors\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" retryable=\"false\"', 'Sum', 60)) + 0 * SUM(SEARCH('{OpenSearchMigrations,OTelLib,attempt,outcome,qualifier} MetricName=\"bulkAttempts\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60))) / 60",
                             "label": "Terminal",
                             "id": "e2",
                             "visible": true,

@@ -227,6 +227,25 @@ class Rate:
         return [w.e(f"FILL({s}, 0) / PERIOD({s}){scale}", self.label)]
 
 
+class TrafficBackedAggregateRate(Rate):
+    """Keep grouped detail in Grafana, but render one zero-filled aggregate in CloudWatch.
+
+    CloudWatch SEARCH expressions return no series when a counter with dimensions has never been emitted. Adding
+    a zero-valued series derived from an active traffic counter distinguishes a healthy zero from absent telemetry.
+    """
+
+    def __init__(self, *args, traffic_metric, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.traffic_metric = traffic_metric
+
+    def cw(self, w):
+        q = w.search(self.name, "Sum", self.where)
+        traffic = w.search(self.traffic_metric, "Sum")
+        f = self._factor()
+        scale = "" if f == 1 else f" * {f:g}"
+        return [w.e(f"(SUM({q}) + 0 * SUM({traffic})) / 60{scale}", self.cw_label or self.label)]
+
+
 class HistogramSumRate:
     """The fleet total per second of values recorded in a histogram."""
 
@@ -919,12 +938,16 @@ SECTIONS = [
               PER_MINUTE_UNIT, [Rate("bulkDocsGaveUp", "", by="reason", per_min=True)]),
         Panel("Item errors per second",
               "Per-document errors returned inside otherwise successful bulk HTTP responses. Retried errors may "
-              "reflect target state; terminal errors were attributed to the document and recorded for manual action.",
+              "reflect target state; terminal errors were attributed to the document and recorded for manual action. "
+              "CloudWatch aggregates error types into retried and terminal totals and shows zero while healthy bulk "
+              "traffic is present; Grafana retains the per-error-type breakdown.",
               "errors/s", [
-                  Rate("bulkItemErrors", "{by} (retried)", by="errorType", where={"retryable": "true"},
-                       cw_label="Retried"),
-                  Rate("bulkItemErrors", "{by} (terminal)", by="errorType", where={"retryable": "false"},
-                       cw_label="Terminal"),
+                  TrafficBackedAggregateRate(
+                      "bulkItemErrors", "{by} (retried)", by="errorType", where={"retryable": "true"},
+                      cw_label="Retried", traffic_metric="bulkAttempts"),
+                  TrafficBackedAggregateRate(
+                      "bulkItemErrors", "{by} (terminal)", by="errorType", where={"retryable": "false"},
+                      cw_label="Terminal", traffic_metric="bulkAttempts"),
               ],
               stacked=True),
     ]),

@@ -626,15 +626,19 @@ class GeneratedDashboardTest(unittest.TestCase):
         self.assertIn("/ AVG(SEARCH(", expression)
         self.assertNotIn("/ SUM(SEARCH(", expression)
 
-    def test_cloudwatch_search_array_labels_do_not_use_unsupported_prop_expansion(self):
+    def test_cloudwatch_item_errors_use_static_labels_and_a_traffic_backed_zero(self):
         item_errors = self.cloudwatch_widget("Item errors per second")
-        labels = [
-            row[0]["label"]
+        expressions = [
+            row[0]
             for row in item_errors["properties"]["metrics"]
             if len(row) == 1 and isinstance(row[0], dict)
         ]
-        self.assertEqual(["Retried", "Terminal"], labels)
+        self.assertEqual(["Retried", "Terminal"], [expression["label"] for expression in expressions])
         self.assertNotIn("${PROP(", str(item_errors))
+        for expression in expressions:
+            self.assertIn('SUM(SEARCH(\'{OpenSearchMigrations,OTelLib,errorType,retryable,qualifier}', expression["expression"])
+            self.assertIn('0 * SUM(SEARCH(\'{OpenSearchMigrations,OTelLib,attempt,outcome,qualifier}', expression["expression"])
+            self.assertIn('MetricName="bulkAttempts"', expression["expression"])
 
     def test_cloudwatch_memory_utilization_avoids_dividing_by_an_empty_limit_series(self):
         memory = self.cloudwatch_widget("RFS memory utilization (%)")
