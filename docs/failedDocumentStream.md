@@ -139,40 +139,43 @@ console backfill reset --include-failed-document-stream
 
 ## Configuration
 
-Every backfill must choose: set `failedDocumentStreamS3Bucket` to record documents that can't be written, or
-set `disableFailedDocumentStream: true` to run without a stream. A `documentBackfillConfig` with neither (or
-both) fails validation. There is no default bucket — a migration only writes failures to a bucket its own
-config names. Without a stream, a failed migration leaves no inventory of which documents did not land.
+Every backfill must select a `failedDocumentStream` destination. Set its `type` to `s3` to record documents
+that can't be written, or to `disabled` to run without a stream. There is no default bucket — a migration
+only writes failures to a bucket its own config names. Without a stream, a failed migration leaves no
+inventory of which documents did not land.
 
-> **Upgrading:** configs written before this requirement have neither field and are now rejected. Add one of
-> them to every `documentBackfillConfig`. To keep the previous behavior, add
-> `disableFailedDocumentStream: true`.
+> **Upgrading:** the failed-document configuration under `documentBackfillConfig` has changed. Replace the
+> flat `failedDocumentStreamS3*` fields with a `failedDocumentStream` object. Replace
+> `disableFailedDocumentStream: true` with `failedDocumentStream: {type: disabled}`.
 
 The destination is set under a migration's `documentBackfillConfig`:
 
 ```yaml
 documentBackfillConfig:
-  failedDocumentStreamS3Bucket: my-failed-documents-bucket
+  failedDocumentStream:
+    type: s3
+    bucket: my-failed-documents-bucket
 ```
 
 or, to opt out:
 
 ```yaml
 documentBackfillConfig:
-  disableFailedDocumentStream: true
+  failedDocumentStream:
+    type: disabled
 ```
 
-Both are gated: changing either on a running migration needs `workflow approve change`, because switching
+The destination is gated: changing it on a running migration needs `workflow approve change`, because switching
 the stream mid-run leaves an inconsistent failure record.
 
-| Option                              | Default                        | Description                                                    |
-|-------------------------------------|--------------------------------|----------------------------------------------------------------|
-| `failedDocumentStreamS3Bucket`      | none                           | Bucket for records. This or `disableFailedDocumentStream` is required. |
-| `disableFailedDocumentStream`       | none                           | `true` runs without a stream. This or the bucket is required.  |
-| `failedDocumentStreamS3Prefix`      | `rfs-failed-document-stream/`  | Key prefix. Each run writes under `<prefix>/session=<uid>/`.   |
-| `failedDocumentStreamS3Region`      | resolved by config processor   | Region for the bucket. Ignored without a bucket.               |
-| `failedDocumentStreamS3Endpoint`    | resolved by config processor   | Endpoint override (e.g. LocalStack). Ignored without a bucket. |
-| `failedDocumentStreamMaxBufferBytes`| `67108864` (64 MiB)            | Max in-memory bytes per index before rotating to a new object. |
+| Option                                       | Default                       | Description                                                    |
+|----------------------------------------------|-------------------------------|----------------------------------------------------------------|
+| `failedDocumentStream.type`                  | none                          | Required: `s3` or `disabled`.                                  |
+| `failedDocumentStream.bucket`                | none                          | Required when `type` is `s3`; bucket for failure records.      |
+| `failedDocumentStream.prefix`                | `rfs-failed-document-stream/` | Key prefix. Each run writes under `<prefix>/session=<uid>/`.   |
+| `failedDocumentStream.region`                | resolved by config processor  | Region for the bucket.                                         |
+| `failedDocumentStream.endpoint`              | resolved by config processor  | Endpoint override (for example, LocalStack).                   |
+| `failedDocumentStream.maxBufferBytes`        | `67108864` (64 MiB)           | Max in-memory bytes per index before rotating to a new object. |
 
 Running RFS directly, pass `--failed-document-stream-s3-bucket <bucket>` or `--disable-failed-document-stream`;
 it refuses to start with neither or both.

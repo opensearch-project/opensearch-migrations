@@ -252,8 +252,31 @@ export const ARGO_METADATA_WORKFLOW_OPTION_KEYS = [
 export const ARGO_RFS_OPTIONS = makeOptionalDefaultedFieldsRequired(
     dropRefinements(USER_RFS_OPTIONS.in).omit({
         documentTransforms: true,
+        failedDocumentStream: true,
         ...OTEL_EXPORT_CONTROL_FIELD_MASK,
     }).extend({
+        // The user-facing failedDocumentStream union is lowered to the flat arguments consumed by RFS.
+        failedDocumentStreamS3Prefix: z.string().default("rfs-failed-document-stream/").optional()
+            .describe("Resolved S3 key prefix passed to RFS."),
+        failedDocumentStreamS3Bucket: z.string().optional()
+            .describe("S3 bucket for the failed document stream, where documents that can't be written are recorded. " +
+                "Either this or disableFailedDocumentStream is required; there is no default bucket.")
+            .changeRestriction('gated'),
+        disableFailedDocumentStream: z.boolean().optional()
+            .describe("Set to true to run without a failed document stream. Documents that can't be written are then " +
+                "logged and counted but not recorded anywhere, and a batch that exhausts its retries fails its work item. " +
+                "Either this or failedDocumentStreamS3Bucket is required.")
+            .changeRestriction('gated'),
+        failedDocumentStreamS3Region: z.string().optional()
+            .describe("AWS region for the failed document stream S3 bucket. Resolved by the config processor before " +
+                "submission (user value, else the snapshot repo's region, else the deployment default). Ignored " +
+                "without a bucket."),
+        failedDocumentStreamS3Endpoint: z.string().optional()
+            .describe("Optional S3 endpoint override for failed document stream uploads (e.g. LocalStack). Resolved by " +
+                "the config processor (user value, else the snapshot repo's endpoint, else the deployment default). " +
+                "Ignored without a bucket."),
+        failedDocumentStreamMaxBufferBytes: z.number().default(67108864).optional()
+            .describe("Resolved maximum uncompressed bytes buffered per target index."),
         ...FILE_SOURCE_RESOLVED_FIELDS,
         ...COLLECTION_ROUTING_RESOLVED_FIELDS,
         skipApproval: z.boolean(),

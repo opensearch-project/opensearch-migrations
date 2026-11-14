@@ -2,30 +2,38 @@ import {USER_RFS_OPTIONS} from "../src/userSchemas";
 
 describe("failed document stream choice", () => {
     test.each([
-        ["a bucket", {failedDocumentStreamS3Bucket: "bucket"}],
-        ["the opt-out", {disableFailedDocumentStream: true}],
-        ["a bucket with the opt-out set false", {failedDocumentStreamS3Bucket: "bucket", disableFailedDocumentStream: false}],
+        ["an S3 destination", {failedDocumentStream: {type: "s3", bucket: "bucket"}}],
+        ["the explicit opt-out", {failedDocumentStream: {type: "disabled"}}],
     ])("accepts %s", (_name, data) => {
         expect(USER_RFS_OPTIONS.safeParse({maxShardSizeBytes: 1024, ...data}).success).toBe(true);
     });
 
     test.each([
-        ["neither", {}, "failedDocumentStreamS3Bucket", "disableFailedDocumentStream: true"],
-        ["a blank bucket", {failedDocumentStreamS3Bucket: "  "}, "failedDocumentStreamS3Bucket", "disableFailedDocumentStream: true"],
-        ["both", {failedDocumentStreamS3Bucket: "bucket", disableFailedDocumentStream: true}, "disableFailedDocumentStream", "can't both be set"],
-    ])("rejects %s", (_name, data, path, message) => {
+        ["no choice", {}],
+        ["a blank S3 bucket", {failedDocumentStream: {type: "s3", bucket: "  "}}],
+        ["an unsupported destination", {failedDocumentStream: {type: "other"}}],
+        ["S3 fields on the disabled choice", {failedDocumentStream: {type: "disabled", bucket: "bucket"}}],
+    ])("rejects %s", (_name, data) => {
         const result = USER_RFS_OPTIONS.safeParse({maxShardSizeBytes: 1024, ...data});
         expect(result.success).toBe(false);
-        if (!result.success) {
-            expect(result.error.issues).toEqual(expect.arrayContaining([
-                expect.objectContaining({path: [path], message: expect.stringContaining(message)})
-            ]));
-        }
+    });
+
+    it("applies S3 defaults inside the selected destination", () => {
+        const parsed = USER_RFS_OPTIONS.parse({
+            maxShardSizeBytes: 1024,
+            failedDocumentStream: {type: "s3", bucket: "bucket"},
+        });
+        expect(parsed.failedDocumentStream).toEqual({
+            type: "s3",
+            bucket: "bucket",
+            prefix: "rfs-failed-document-stream/",
+            maxBufferBytes: 67108864,
+        });
     });
 });
 
 describe("maxDocumentSizeBytes", () => {
-    const base = {maxShardSizeBytes: 1024, disableFailedDocumentStream: true};
+    const base = {maxShardSizeBytes: 1024, failedDocumentStream: {type: "disabled" as const}};
 
     test("is optional and has no default", () => {
         expect(USER_RFS_OPTIONS.parse(base).maxDocumentSizeBytes).toBeUndefined();
