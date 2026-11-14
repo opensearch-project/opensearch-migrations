@@ -6,6 +6,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 
 import org.opensearch.migrations.bulkload.common.AzureRepo.CannotFindSnapshotRepoRoot;
@@ -37,11 +38,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.nullable;
-import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
@@ -59,7 +60,8 @@ public class AzureRepoTest {
     @Mock
     private SnapshotFileFinder mockFileFinder;
     private TestableAzureRepo testRepo;
-    private Path testDir = Paths.get("/fake/path");
+    @TempDir
+    private Path testDir;
     private AzureUri testRepoUri = new AzureUri("azure://myaccount/container-name/directory");
     private String testRepoFileName = "index-2";
 
@@ -109,7 +111,6 @@ public class AzureRepoTest {
         Path expectedPath = testDir.resolve(testRepoFileName);
         when(mockFileFinder.getSnapshotRepoDataFilePath(eq(testDir), any())).thenReturn(expectedPath);
         doReturn(List.of(testRepoFileName)).when(testRepo).listFilesInRoot();
-        doNothing().when(testRepo).ensureLocalDirectoryExists(any(Path.class));
 
         Path result = testRepo.getSnapshotRepoDataFilePath();
 
@@ -122,7 +123,6 @@ public class AzureRepoTest {
         String snapshotId = "snap1";
         Path expectedPath = testDir.resolve("meta-" + snapshotId + ".dat");
         when(mockFileFinder.getGlobalMetadataFilePath(testDir, snapshotId)).thenReturn(expectedPath);
-        doNothing().when(testRepo).ensureLocalDirectoryExists(any(Path.class));
 
         Path result = testRepo.getGlobalMetadataFilePath(snapshotId);
 
@@ -135,7 +135,6 @@ public class AzureRepoTest {
         String snapshotId = "snap1";
         Path expectedPath = testDir.resolve("snap-" + snapshotId + ".dat");
         when(mockFileFinder.getSnapshotMetadataFilePath(testDir, snapshotId)).thenReturn(expectedPath);
-        doNothing().when(testRepo).ensureLocalDirectoryExists(any(Path.class));
 
         Path result = testRepo.getSnapshotMetadataFilePath(snapshotId);
 
@@ -148,7 +147,6 @@ public class AzureRepoTest {
         String indexFileId = "file1";
         Path expectedPath = testDir.resolve("indices/" + indexId + "/" + indexFileId);
         when(mockFileFinder.getIndexMetadataFilePath(testDir, indexId, indexFileId)).thenReturn(expectedPath);
-        doNothing().when(testRepo).ensureLocalDirectoryExists(any(Path.class));
 
         Path result = testRepo.getIndexMetadataFilePath(indexId, indexFileId);
 
@@ -261,7 +259,6 @@ public class AzureRepoTest {
         String snapshotId = "snap1";
         Path expectedPath = testDir.resolve("snap-" + snapshotId + ".dat");
         when(mockFileFinder.getSnapshotMetadataFilePath(testDir, snapshotId)).thenReturn(expectedPath);
-        doNothing().when(testRepo).ensureLocalDirectoryExists(any(Path.class));
         HttpResponse response = mock(HttpResponse.class);
         lenient().when(response.getStatusCode()).thenReturn(statusCode);
         BlobStorageException azureFailure = new BlobStorageException("service failure", response, null);
@@ -286,13 +283,19 @@ public class AzureRepoTest {
         HttpResponse response = mock(HttpResponse.class);
         lenient().when(response.getStatusCode()).thenReturn(statusCode);
         var azureFailure = new BlobStorageException("service failure", response, null);
+        var failedDownloads = new ArrayList<Path>();
         when(mockBlobClient.downloadToFile(anyString(), eq(true)))
             .thenAnswer(invocation -> {
-                Files.writeString(Path.of(invocation.getArgument(0, String.class)), "partial");
+                var downloadPath = Path.of(invocation.getArgument(0, String.class));
+                failedDownloads.add(downloadPath);
+                Files.writeString(downloadPath, "partial");
                 throw azureFailure;
             })
             .thenAnswer(invocation -> {
                 Files.writeString(Path.of(invocation.getArgument(0, String.class)), "complete");
+                // Azure's doFinally cleanup may run after an error reaches the caller,
+                // including after a retry has already opened its download file.
+                Files.deleteIfExists(failedDownloads.get(0));
                 return null;
             });
 
@@ -303,14 +306,15 @@ public class AzureRepoTest {
 
         assertThat(thrown.getCause(), sameInstance(azureFailure));
         assertFalse(Files.exists(expectedPath), "A failed download must not populate the local cache");
+        assertFalse(Files.exists(failedDownloads.get(0)), "Failed attempts must remove their temporary files");
         assertEquals(expectedPath, repo.getIndexMetadataFilePath("idx1", "snap1"));
         assertEquals("complete", Files.readString(expectedPath));
         assertEquals(expectedPath, repo.getIndexMetadataFilePath("idx1", "snap1"));
-        verify(mockBlobClient, times(2)).downloadToFile(expectedPath.toString(), true);
+        verify(mockBlobClient, times(2)).downloadToFile(anyString(), eq(true));
     }
 
     @Test
-    void EnsureFileExistsLocally_LeavesLocalFilesystemFailuresUnclassified(@TempDir Path tempDir) {
+    void EnsureFileExistsLocally_LeavesLocalFilesystemFailuresUnclassified(@TempDir Path tempDir) throws IOException {
         // A failure writing the downloaded file is a local problem, not a problem reading the
         // snapshot, so it must not be reported as a snapshot read failure.
         var repo = new AzureRepo(tempDir, testRepoUri, mockContainerClient, new BaseSnapshotFileFinder());
@@ -329,6 +333,9 @@ public class AzureRepoTest {
         assertThat(thrown, sameInstance(localFailure));
         assertNull(SnapshotReadFailures.find(thrown));
         assertFalse(Files.exists(expectedPath), "A failed write must not populate the local cache");
+        try (var files = Files.list(tempDir)) {
+            assertEquals(0, files.count(), "Failed writes must remove their temporary files");
+        }
     }
 
     @Test
@@ -336,14 +343,14 @@ public class AzureRepoTest {
         String snapshotId = "snap1";
         Path expectedPath = testDir.resolve("snap-" + snapshotId + ".dat");
         when(mockFileFinder.getSnapshotMetadataFilePath(testDir, snapshotId)).thenReturn(expectedPath);
-        doNothing().when(testRepo).ensureLocalDirectoryExists(any(Path.class));
 
         testRepo.getSnapshotMetadataFilePath(snapshotId);
 
-        // The blob key is the repo prefix joined with the path relative to the local dir, and the
-        // download overwrites any partial local file.
+        // The blob key is the repo prefix joined with the path relative to the local dir.
+        // Only the completed download is published at the requested cache path.
         verify(mockContainerClient).getBlobClient("directory/snap-snap1.dat");
-        verify(mockBlobClient).downloadToFile("/fake/path/snap-snap1.dat", true);
+        verify(mockBlobClient).downloadToFile(anyString(), eq(true));
+        assertTrue(Files.exists(expectedPath));
     }
 
     @Test

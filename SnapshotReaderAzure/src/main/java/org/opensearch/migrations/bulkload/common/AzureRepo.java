@@ -2,8 +2,10 @@ package org.opensearch.migrations.bulkload.common;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -168,24 +170,31 @@ public class AzureRepo implements SourceRepo {
             .addArgument(localPath)
             .log();
 
+        // SDK cleanup can run after the download call returns. Isolate each attempt so a
+        // failed request cannot remove a retry's file or publish an incomplete cache entry.
+        Path downloadPath = null;
         try {
-            containerClient.getBlobClient(azureUri.key).downloadToFile(localPath.toString(), true);
+            downloadPath = Files.createTempFile(localPath.toAbsolutePath().getParent(), ".azure-download-", ".tmp");
+            containerClient.getBlobClient(azureUri.key).downloadToFile(downloadPath.toString(), true);
+            Files.move(downloadPath, localPath, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
         } catch (BlobStorageException e) {
-            deletePartialDownload(localPath);
             // Local filesystem errors are not BlobStorageException, so they keep their own classification.
             throw new CouldNotReadFromAzure(azureUri.containerName, azureUri.key, e);
-        } catch (RuntimeException e) {
-            deletePartialDownload(localPath);
-            throw e;
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to write the Azure local download file: " + localPath, e);
+        } finally {
+            if (downloadPath != null) {
+                deletePartialDownload(downloadPath);
+            }
         }
     }
 
-    // A file left behind would be treated as already downloaded on the next read.
-    private static void deletePartialDownload(Path localPath) {
+    // Preserve the download's original error if cleanup fails.
+    private static void deletePartialDownload(Path downloadPath) {
         try {
-            Files.deleteIfExists(localPath);
+            Files.deleteIfExists(downloadPath);
         } catch (IOException e) {
-            log.atWarn().setCause(e).setMessage("Failed to delete partial download: {}").addArgument(localPath).log();
+            log.atWarn().setCause(e).setMessage("Failed to delete partial download: {}").addArgument(downloadPath).log();
         }
     }
 
