@@ -46,7 +46,7 @@ OpenSearch Migration Assistant is a comprehensive set of tools designed to facil
 
 - **Migration Rollback**: Keep your source cluster synchronized during the migration, allowing you to monitor the target cluster's performance before fully committing to the switch. You can safely revert if needed.
 
-- **User-Friendly Interface via [Migration Console](https://github.com/opensearch-project/opensearch-migrations/blob/main/docs/migration-console.md)**: Command Line Interface (CLI) that guides you through each migration step.
+- **Guided migrations through the [Workflow CLI](migrationConsole/lib/console_link/README.md#workflow-cli)**: Configure, submit, monitor, approve, inspect, and reset workflow-based migrations.
 
 - **Flexible Deployment Options**:
   - **[AWS Deployment](deployment/terraform/aws/README.md)**: Provision EKS Auto Mode infrastructure with Terraform, or use the existing [AWS Solution CloudFormation deployment](https://aws.amazon.com/solutions/implementations/migration-assistant-for-amazon-opensearch-service/).

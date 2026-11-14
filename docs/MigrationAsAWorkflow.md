@@ -195,6 +195,10 @@ transform to resend failed documents from the backfill stage.
 
 ## CLI
 
+> This section records the design rationale for the workflow interface. For
+> current commands and usage, see the
+> [Workflow CLI guide](../migrationConsole/lib/console_link/README.md#workflow-cli).
+
 ### Interface Options
 
 The migration console container currently provides the primary access to
