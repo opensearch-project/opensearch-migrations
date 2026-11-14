@@ -37,6 +37,15 @@
             "label": "Migration Qualifier",
             "defaultValue": "placeholder-qualifier",
             "visible": false
+        },
+        {
+            "type": "pattern",
+            "pattern": "RFS_SESSION",
+            "inputType": "input",
+            "id": "RFS_SESSION",
+            "label": "RFS Session Name",
+            "defaultValue": "placeholder-rfs-session",
+            "visible": true
         }
     ],
     "widgets": [
@@ -874,7 +883,7 @@
                     ],
                     [
                         {
-                            "expression": "100 * (m1 / PERIOD(m1)) / (SUM(SEARCH('{OpenSearchMigrations,container,namespace,pod} MetricName=\"container_spec_cpu_quota\" container=\"bulk-loader\" namespace=\"ma\"', 'Average', 60)) / AVG(SEARCH('{OpenSearchMigrations,container,namespace,pod} MetricName=\"container_spec_cpu_period\" container=\"bulk-loader\" namespace=\"ma\"', 'Average', 60)))",
+                            "expression": "100 * (m1 / PERIOD(m1)) / (SUM(SEARCH('{OpenSearchMigrations,container,namespace,pod} MetricName=\"container_spec_cpu_quota\" container=\"bulk-loader\" namespace=\"ma\" RFS_SESSION', 'Average', 60)) / AVG(SEARCH('{OpenSearchMigrations,container,namespace,pod} MetricName=\"container_spec_cpu_period\" container=\"bulk-loader\" namespace=\"ma\" RFS_SESSION', 'Average', 60)))",
                             "label": "% (fleet capacity)",
                             "id": "e2",
                             "visible": true,
@@ -1088,47 +1097,19 @@
                 "stat": "Sum",
                 "metrics": [
                     [
-                        "OpenSearchMigrations",
-                        "container_memory_working_set_bytes",
-                        "container",
-                        "bulk-loader",
-                        "namespace",
-                        "ma",
                         {
-                            "id": "m1",
-                            "stat": "Sum",
-                            "visible": false,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "100 * (m1 / (PERIOD(m1) / 5)) / (SUM(SEARCH('{OpenSearchMigrations,container,namespace,pod} MetricName=\"container_spec_memory_limit_bytes\" container=\"bulk-loader\" namespace=\"ma\"', 'Average', 60)))",
+                            "expression": "IF((SUM(SEARCH('{OpenSearchMigrations,container,namespace,pod} MetricName=\"container_spec_memory_limit_bytes\" container=\"bulk-loader\" namespace=\"ma\" RFS_SESSION', 'Average', 60))) > 0, 100 * (SUM(SEARCH('{OpenSearchMigrations,container,namespace,pod} MetricName=\"container_memory_working_set_bytes\" container=\"bulk-loader\" namespace=\"ma\" RFS_SESSION', 'Average', 60))) / (SUM(SEARCH('{OpenSearchMigrations,container,namespace,pod} MetricName=\"container_spec_memory_limit_bytes\" container=\"bulk-loader\" namespace=\"ma\" RFS_SESSION', 'Average', 60))))",
                             "label": "% (fleet capacity)",
-                            "id": "e2",
+                            "id": "e1",
                             "visible": true,
                             "region": "REGION"
                         }
                     ],
                     [
-                        "OpenSearchMigrations",
-                        "container_memory_working_set_bytes",
-                        "container",
-                        "bulk-loader",
-                        "namespace",
-                        "ma",
                         {
-                            "id": "m3",
-                            "stat": "Maximum",
-                            "visible": false,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "100 * (m3) / (MAX(SEARCH('{OpenSearchMigrations,container,namespace,pod} MetricName=\"container_spec_memory_limit_bytes\" container=\"bulk-loader\" namespace=\"ma\"', 'Average', 60)))",
+                            "expression": "IF((MAX(SEARCH('{OpenSearchMigrations,container,namespace,pod} MetricName=\"container_spec_memory_limit_bytes\" container=\"bulk-loader\" namespace=\"ma\" RFS_SESSION', 'Average', 60))) > 0, 100 * (MAX(SEARCH('{OpenSearchMigrations,container,namespace,pod} MetricName=\"container_memory_working_set_bytes\" container=\"bulk-loader\" namespace=\"ma\" RFS_SESSION', 'Maximum', 60))) / (MAX(SEARCH('{OpenSearchMigrations,container,namespace,pod} MetricName=\"container_spec_memory_limit_bytes\" container=\"bulk-loader\" namespace=\"ma\" RFS_SESSION', 'Average', 60))))",
                             "label": "% (hottest pod)",
-                            "id": "e4",
+                            "id": "e2",
                             "visible": true,
                             "region": "REGION"
                         }
@@ -2059,7 +2040,7 @@
                 "metrics": [
                     [
                         {
-                            "expression": "100 * (SUM(SEARCH('{OpenSearchMigrations,container,namespace,pod} MetricName=\"container_cpu_cfs_throttled_periods_total\" container=\"bulk-loader\" namespace=\"ma\"', 'Sum', 60))) / (SUM(SEARCH('{OpenSearchMigrations,container,namespace,pod} MetricName=\"container_cpu_cfs_periods_total\" container=\"bulk-loader\" namespace=\"ma\"', 'Sum', 60)))",
+                            "expression": "100 * (SUM(SEARCH('{OpenSearchMigrations,container,namespace,pod} MetricName=\"container_cpu_cfs_throttled_periods_total\" container=\"bulk-loader\" namespace=\"ma\" RFS_SESSION', 'Sum', 60))) / (SUM(SEARCH('{OpenSearchMigrations,container,namespace,pod} MetricName=\"container_cpu_cfs_periods_total\" container=\"bulk-loader\" namespace=\"ma\" RFS_SESSION', 'Sum', 60)))",
                             "label": "% throttled periods",
                             "id": "e1",
                             "visible": true,
@@ -2609,7 +2590,7 @@
                     [
                         {
                             "expression": "SEARCH('{OpenSearchMigrations,OTelLib,reason,qualifier} MetricName=\"bulkDocsTargetUnavailable\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60) / 60 * 60",
-                            "label": "${PROP('Dim.reason')}",
+                            "label": "",
                             "id": "e1",
                             "visible": true,
                             "region": "REGION"
@@ -2869,7 +2850,7 @@
                     [
                         {
                             "expression": "SEARCH('{OpenSearchMigrations,OTelLib,reason,qualifier} MetricName=\"bulkDocsGaveUp\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60) / 60 * 60",
-                            "label": "${PROP('Dim.reason')}",
+                            "label": "",
                             "id": "e1",
                             "visible": true,
                             "region": "REGION"
@@ -2902,7 +2883,7 @@
                     [
                         {
                             "expression": "SEARCH('{OpenSearchMigrations,OTelLib,errorType,retryable,qualifier} MetricName=\"bulkItemErrors\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" retryable=\"true\"', 'Sum', 60) / 60",
-                            "label": "${PROP('Dim.errorType')} (retried)",
+                            "label": "Retried",
                             "id": "e1",
                             "visible": true,
                             "region": "REGION"
@@ -2911,7 +2892,7 @@
                     [
                         {
                             "expression": "SEARCH('{OpenSearchMigrations,OTelLib,errorType,retryable,qualifier} MetricName=\"bulkItemErrors\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" retryable=\"false\"', 'Sum', 60) / 60",
-                            "label": "${PROP('Dim.errorType')} (terminal)",
+                            "label": "Terminal",
                             "id": "e2",
                             "visible": true,
                             "region": "REGION"
@@ -2955,7 +2936,7 @@
                     [
                         {
                             "expression": "SEARCH('{OpenSearchMigrations,OTelLib,attempt,outcome,qualifier} MetricName=\"bulkAttempts\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60) / 60",
-                            "label": "${PROP('Dim.attempt')} ${PROP('Dim.outcome')}",
+                            "label": "",
                             "id": "e1",
                             "visible": true,
                             "region": "REGION"
@@ -3301,7 +3282,7 @@
                     [
                         {
                             "expression": "SEARCH('{OpenSearchMigrations,OTelLib,reason,qualifier} MetricName=\"bulkBatchSplits\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60) / 60 * 60",
-                            "label": "${PROP('Dim.reason')}",
+                            "label": "",
                             "id": "e1",
                             "visible": true,
                             "region": "REGION"

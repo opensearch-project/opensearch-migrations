@@ -1,6 +1,7 @@
 import importlib.util
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -559,6 +560,37 @@ class GeneratedDashboardTest(unittest.TestCase):
         self.assertIn("container_spec_cpu_period", cloudwatch_expressions)
         self.assertIn("container_spec_memory_limit_bytes", cloudwatch_expressions)
 
+    def test_cloudwatch_rfs_container_searches_are_scoped_to_the_selected_session(self):
+        session_variable = next(
+            variable
+            for variable in self.cloudwatch["variables"]
+            if variable["id"] == dashboard_generator.RFS_SESSION
+        )
+        self.assertEqual("RFS Session Name", session_variable["label"])
+        self.assertTrue(session_variable["visible"])
+
+        for title in (
+            "RFS CPU utilization (%)",
+            "RFS memory utilization (%)",
+            "RFS CPU throttled periods (%)",
+        ):
+            widget = self.cloudwatch_widget(title)
+            expressions = "\n".join(
+                row[0].get("expression", "")
+                for row in widget["properties"]["metrics"]
+                if len(row) == 1 and isinstance(row[0], dict)
+            )
+            searches = re.findall(r"SEARCH\('([^']+)'", expressions)
+            self.assertTrue(searches, title)
+            self.assertTrue(
+                all(dashboard_generator.RFS_SESSION in search for search in searches),
+                f"{title} has an unscoped container search: {searches}",
+            )
+            self.assertTrue(
+                all(dashboard_generator.Q not in search for search in searches),
+                f"{title} incorrectly uses the application-metric qualifier for container metrics: {searches}",
+            )
+
         values_eks = Path(__file__).resolve().parents[2].joinpath(
             "charts/aggregates/migrationAssistantWithArgo/valuesEks.yaml"
         ).read_text()
@@ -568,13 +600,52 @@ class GeneratedDashboardTest(unittest.TestCase):
 
     def test_cloudwatch_cpu_capacity_sums_all_pod_limits(self):
         cpu = self.cloudwatch_widget("RFS CPU utilization (%)")
+        usage = next(
+            row
+            for row in cpu["properties"]["metrics"]
+            if len(row) > 1 and row[1] == "container_cpu_usage_seconds_total"
+        )
         expression = next(
             row[0]["expression"]
             for row in cpu["properties"]["metrics"]
             if len(row) == 1 and isinstance(row[0], dict) and "expression" in row[0]
         )
+        self.assertEqual(
+            [
+                dashboard_generator.NS,
+                "container_cpu_usage_seconds_total",
+                "container",
+                dashboard_generator.CONTAINER,
+                "namespace",
+                "ma",
+            ],
+            usage[:-1],
+        )
+        self.assertIn(f"{usage[-1]['id']} / PERIOD({usage[-1]['id']})", expression)
+        self.assertNotIn('MetricName="container_cpu_usage_seconds_total"', expression)
         self.assertIn("/ AVG(SEARCH(", expression)
         self.assertNotIn("/ SUM(SEARCH(", expression)
+
+    def test_cloudwatch_search_array_labels_do_not_use_unsupported_prop_expansion(self):
+        item_errors = self.cloudwatch_widget("Item errors per second")
+        labels = [
+            row[0]["label"]
+            for row in item_errors["properties"]["metrics"]
+            if len(row) == 1 and isinstance(row[0], dict)
+        ]
+        self.assertEqual(["Retried", "Terminal"], labels)
+        self.assertNotIn("${PROP(", str(item_errors))
+
+    def test_cloudwatch_memory_utilization_avoids_dividing_by_an_empty_limit_series(self):
+        memory = self.cloudwatch_widget("RFS memory utilization (%)")
+        expressions = [
+            row[0]["expression"]
+            for row in memory["properties"]["metrics"]
+            if len(row) == 1 and isinstance(row[0], dict)
+        ]
+        self.assertEqual(2, len(expressions))
+        self.assertTrue(all(expression.startswith("IF(") for expression in expressions))
+        self.assertTrue(all("container_spec_memory_limit_bytes" in expression for expression in expressions))
 
     def test_documents_sent_panel_uses_request_document_totals(self):
         title = "Documents sent vs migrated per second"

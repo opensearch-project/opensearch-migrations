@@ -23,6 +23,7 @@ import sys
 
 NS = "OpenSearchMigrations"
 Q = "MA_QUALIFIER"
+RFS_SESSION = "RFS_SESSION"
 R = "REGION"
 RI = "$__rate_interval"
 MIB = 1048576
@@ -182,8 +183,9 @@ class Rate:
     """A counter's fleet total per second (per minute with per_min), optionally split by one or more attributes.
     With one by attribute, a label containing "{by}" is a legend template: "{by}" becomes its value."""
 
-    def __init__(self, name, label, by=None, where=None, scale=1, per_min=False):
-        self.name, self.label, self.by, self.where, self.scale, self.per_min = name, label, by, where, scale, per_min
+    def __init__(self, name, label, by=None, where=None, scale=1, per_min=False, cw_label=None):
+        self.name, self.label, self.by, self.where = name, label, by, where
+        self.scale, self.per_min, self.cw_label = scale, per_min, cw_label
 
     def _factor(self):
         return (60 if self.per_min else 1) / self.scale
@@ -216,11 +218,10 @@ class Rate:
             q = w.search(self.name, "Sum", self.where)
             by_fields = self._by_fields()
             if by_fields:
-                if len(by_fields) == 1 and "{by}" in self.label:
-                    label = self.label.replace("{by}", f"${{PROP('Dim.{by_fields[0]}')}}")
-                else:
-                    label = " ".join(f"${{PROP('Dim.{field}')}}" for field in by_fields)
-                return [w.e(f"{q} / 60{scale}", label)]
+                # CloudWatch does not expand PROP dynamic labels after a SEARCH array is used in metric math.
+                # Leave the expression label empty so it retains each result's native dimension label, or add a
+                # short static prefix when two searches need to distinguish otherwise similar result sets.
+                return [w.e(f"{q} / 60{scale}", self.cw_label or "")]
             return [w.e(f"SUM({q}) / 60{scale}", self.label)]
         s = w.m(self.name, "SampleCount" if METRICS[self.name][1] == "histogram" else "Sum")
         return [w.e(f"FILL({s}, 0) / PERIOD({s}){scale}", self.label)]
@@ -490,7 +491,7 @@ class ContainerUtilization:
     @staticmethod
     def _cw_search(name, stat):
         return (f"SEARCH('{{{NS},container,namespace,pod}} MetricName=\"{name}\" "
-                f"container=\"{CONTAINER}\" namespace=\"ma\"', '{stat}', 60)")
+                f"container=\"{CONTAINER}\" namespace=\"ma\" {RFS_SESSION}', '{stat}', 60)")
 
     def cw(self, w):
         if self.what == "cpu" and self.agg == "max":
@@ -500,30 +501,34 @@ class ContainerUtilization:
 
         name = ("container_cpu_usage_seconds_total"
                 if self.what == "cpu" else "container_memory_working_set_bytes")
-        stat = "Sum" if self.agg == "sum" else "Maximum"
-        i = w._id("m")
-        w.rows.append([NS, name, "container", CONTAINER, "namespace", "ma",
-                       {"id": i, "stat": stat, "visible": False, "region": R}])
         if self.what == "cpu":
+            # The collector intentionally aggregates this counter to [container, namespace] before EMF export.
+            # Keep it as an exact metric row: unlike the per-pod capacity metrics below, it has neither a pod
+            # dimension nor a run qualifier to use in a SEARCH expression.
+            usage = w._id("m")
+            w.rows.append([
+                NS, name, "container", CONTAINER, "namespace", "ma",
+                {"id": usage, "stat": "Sum", "visible": False, "region": R},
+            ])
             quota = self._cw_search("container_spec_cpu_quota", "Average")
             period = self._cw_search("container_spec_cpu_period", "Average")
-            usage = f"{i} / PERIOD({i})"
             # CPU quota is per pod while the CFS period is a common divisor. Summing both would cancel the pod
             # count and leave one pod's limit; sum all quotas and divide by the average period for fleet capacity.
             limit = f"SUM({quota}) / AVG({period})"
-            return [w.e(f"100 * ({usage}) / ({limit})", FLEET_CAPACITY_LABEL)]
+            return [w.e(f"100 * ({usage} / PERIOD({usage})) / ({limit})", FLEET_CAPACITY_LABEL)]
 
+        stat = "Average" if self.agg == "sum" else "Maximum"
+        usage_search = self._cw_search(name, stat)
         memory_limit = self._cw_search("container_spec_memory_limit_bytes", "Average")
         if self.agg == "sum":
-            # Scraped every 5 s: Sum / (PERIOD / 5) is the fleet's mean working set in the period.
-            usage = f"{i} / (PERIOD({i}) / 5)"
+            usage = f"SUM({usage_search})"
             limit = f"SUM({memory_limit})"
             label = FLEET_CAPACITY_LABEL
         else:
-            usage = i
+            usage = f"MAX({usage_search})"
             limit = f"MAX({memory_limit})"
             label = "% (hottest pod)"
-        return [w.e(f"100 * ({usage}) / ({limit})", label)]
+        return [w.e(f"IF(({limit}) > 0, 100 * ({usage}) / ({limit}))", label)]
 
 
 class ContainerCpuThrottling:
@@ -538,7 +543,7 @@ class ContainerCpuThrottling:
 
     def cw(self, w):
         dimensions = f"{{{NS},container,namespace,pod}}"
-        common = f'container="{CONTAINER}" namespace="ma"'
+        common = f'container="{CONTAINER}" namespace="ma" {RFS_SESSION}'
         throttled = (
             f"SUM(SEARCH('{dimensions} MetricName=\"container_cpu_cfs_throttled_periods_total\" "
             f"{common}', 'Sum', 60))"
@@ -915,8 +920,12 @@ SECTIONS = [
         Panel("Item errors per second",
               "Per-document errors returned inside otherwise successful bulk HTTP responses. Retried errors may "
               "reflect target state; terminal errors were attributed to the document and recorded for manual action.",
-              "errors/s", [Rate("bulkItemErrors", "{by} (retried)", by="errorType", where={"retryable": "true"}),
-                           Rate("bulkItemErrors", "{by} (terminal)", by="errorType", where={"retryable": "false"})],
+              "errors/s", [
+                  Rate("bulkItemErrors", "{by} (retried)", by="errorType", where={"retryable": "true"},
+                       cw_label="Retried"),
+                  Rate("bulkItemErrors", "{by} (terminal)", by="errorType", where={"retryable": "false"},
+                       cw_label="Terminal"),
+              ],
               stacked=True),
     ]),
     ("Flow-control internals (expert)", True, [
@@ -1013,6 +1022,8 @@ CW_VARIABLES = [
      "defaultValue": "placeholder-account-id", "visible": False},
     {"type": "pattern", "pattern": "MA_QUALIFIER", "inputType": "input", "id": "MA_QUALIFIER",
      "label": "Migration Qualifier", "defaultValue": "placeholder-qualifier", "visible": False},
+    {"type": "pattern", "pattern": "RFS_SESSION", "inputType": "input", "id": "RFS_SESSION",
+     "label": "RFS Session Name", "defaultValue": "placeholder-rfs-session", "visible": True},
 ]
 
 
