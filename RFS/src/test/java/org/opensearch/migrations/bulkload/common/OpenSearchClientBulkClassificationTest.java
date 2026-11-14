@@ -432,17 +432,30 @@ class OpenSearchClientBulkClassificationTest {
     }
 
     @Test
-    void aSingleDocumentWithAnUnknownStatusIsGivenUpAfterItsRetries() {
+    void anItemsShapedRequestFailureIsRetriedAndRecordedAsAWholeRequestFailure() throws Exception {
         withStream();
-        serve(ids -> ids.contains("bad") ? status(500, "Internal Server Error") : allCreated(ids));
+        serve(ids -> ids.contains("bad")
+            ? status(500, BulkRequestGenerator.bulkItemResponse(false,
+                ids.stream().map(BulkRequestGenerator::itemEntry).toList()))
+            : allCreated(ids));
 
         send("a", "bad").block();
 
-        // Two failures split the batch; "a" goes through alone and "bad" fails 4 times (3 retries) by itself.
+        // The items-shaped 500 body acknowledges nothing: both documents remain pending until the batch splits.
+        assertEquals(List.of("a", "bad"), requests.get(0));
+        assertEquals(List.of("a", "bad"), requests.get(1));
+        assertArrayEquals(requestBodies.get(0), requestBodies.get(1));
+        // After the split, "a" succeeds and "bad" fails 4 times (3 retries) by itself.
         var bad = requests.stream().filter(r -> r.equals(List.of("bad"))).count();
         assertEquals(OpenSearchClient.MAX_UNKNOWN_FAILURE_RETRIES + 1, bad);
         assertThat(recordIds(), contains("bad"));
-        assertEquals(FailureClass.RETRYABLE_EXHAUSTED, stream.getRecords().get(0).getFailureClass());
+        var record = stream.getRecords().get(0);
+        assertEquals(FailureClass.RETRYABLE_EXHAUSTED, record.getFailureClass());
+        assertEquals("http_500", record.getFailureType());
+        assertEquals(500, record.getResponseItem().path("status").asInt());
+        var requestFailureBody = MAPPER.readTree(record.getResponseItem().path("body").asText());
+        assertEquals(false, requestFailureBody.path("errors").asBoolean());
+        assertEquals("bad", requestFailureBody.path("items").path(0).path("index").path("_id").asText());
     }
 
     @Test
