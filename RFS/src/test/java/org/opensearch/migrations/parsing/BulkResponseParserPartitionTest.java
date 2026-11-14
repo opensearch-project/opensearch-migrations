@@ -5,6 +5,8 @@ import java.util.Set;
 import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.contains;
@@ -39,8 +41,9 @@ class BulkResponseParserPartitionTest {
         return "{\"took\":1,\"errors\":true,\"items\":[" + String.join(",", itemJsons) + "]}";
     }
 
-    @Test
-    void partitionsAllThreeBuckets() {
+    @ParameterizedTest
+    @ValueSource(ints = {200, 201})
+    void partitionsAllThreeBuckets(int statusCode) {
         var body = response(
             String.format(SUCCESS_ITEM, "a"),
             String.format(NON_RETRYABLE_ITEM, "b"),
@@ -48,7 +51,7 @@ class BulkResponseParserPartitionTest {
             String.format(NON_RETRYABLE_ITEM, "d")
         );
 
-        var partition = BulkResponseParser.partitionItems(body, DocumentExceptionAllowlist.empty());
+        var partition = BulkResponseParser.partitionItems(statusCode, body, DocumentExceptionAllowlist.empty());
 
         assertThat(partition.getSuccessPositions(), contains(0));
         assertThat(partition.getNonRetryableFailures(), hasSize(2));
@@ -69,7 +72,7 @@ class BulkResponseParserPartitionTest {
             String.format(RETRYABLE_ITEM, "b")
         );
 
-        var partition = BulkResponseParser.partitionItems(body, allowlist);
+        var partition = BulkResponseParser.partitionItems(200, body, allowlist);
 
         assertThat(partition.getSuccessPositions(), contains(0));
         assertThat(partition.getNonRetryableFailures(), empty());
@@ -79,7 +82,7 @@ class BulkResponseParserPartitionTest {
     @Test
     void responseItemIsPreservedVerbatim() {
         var body = response(String.format(NON_RETRYABLE_ITEM, "doc-1"));
-        var partition = BulkResponseParser.partitionItems(body, DocumentExceptionAllowlist.empty());
+        var partition = BulkResponseParser.partitionItems(200, body, DocumentExceptionAllowlist.empty());
 
         var item = partition.getNonRetryableFailures().get(0);
         assertThat(item.getResponseItemJson(), containsString("\"_id\":\"doc-1\""));
@@ -87,15 +90,35 @@ class BulkResponseParserPartitionTest {
         assertThat(item.getResponseItemJson(), containsString("\"reason\":\"bad doc\""));
     }
 
+    @ParameterizedTest
+    @ValueSource(ints = {400, 429, 500, 503})
+    void requestLevelFailureWithItemsShapedBodyReturnsNull(int statusCode) {
+        var body = response(String.format(SUCCESS_ITEM, "doc-1"));
+
+        var partition = BulkResponseParser.partitionItems(statusCode, body, DocumentExceptionAllowlist.empty());
+
+        assertThat(partition, equalTo(null));
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {200, 201, 429})
+    void missingBodyReturnsNull(int statusCode) {
+        assertThat(
+            BulkResponseParser.partitionItems(statusCode, null, DocumentExceptionAllowlist.empty()),
+            equalTo(null)
+        );
+    }
+
     @Test
     void unparseableResponseReturnsNullSoCallerRetriesAll() {
-        var partition = BulkResponseParser.partitionItems("not json at all", DocumentExceptionAllowlist.empty());
+        var partition = BulkResponseParser.partitionItems(200, "not json at all", DocumentExceptionAllowlist.empty());
         assertThat(partition, equalTo(null));
     }
 
     @Test
     void responseWithoutItemsReturnsNull() {
-        var partition = BulkResponseParser.partitionItems("{\"took\":1}", DocumentExceptionAllowlist.empty());
+        var partition = BulkResponseParser.partitionItems(
+            200, "{\"took\":1}", DocumentExceptionAllowlist.empty());
         assertThat(partition, equalTo(null));
     }
 
@@ -115,7 +138,7 @@ class BulkResponseParserPartitionTest {
         var body = response(String.format(OVER_LIMIT_THROUGH_INGEST_PIPELINE, "a"),
             String.format(OVER_LIMIT_WITHOUT_PIPELINE, "b"));
 
-        var partition = BulkResponseParser.partitionItems(body, DocumentExceptionAllowlist.empty());
+        var partition = BulkResponseParser.partitionItems(200, body, DocumentExceptionAllowlist.empty());
 
         assertThat(partition.getRetryableFailures(), empty());
         assertThat(partition.getNonRetryableFailures(), hasSize(2));
@@ -130,7 +153,8 @@ class BulkResponseParserPartitionTest {
             + "\"caused_by\":{\"type\":\"illegal_argument_exception\"},\"type\":\"some_wrapper_exception\"},"
             + "\"type\":\"some_outer_exception\"}}}";
 
-        var partition = BulkResponseParser.partitionItems(response(item), DocumentExceptionAllowlist.empty());
+        var partition = BulkResponseParser.partitionItems(
+            200, response(item), DocumentExceptionAllowlist.empty());
 
         assertThat(partition.getNonRetryableFailures(), hasSize(1));
         assertThat(partition.getNonRetryableFailures().get(0).getErrorType(), equalTo("some_outer_exception"));
@@ -141,7 +165,8 @@ class BulkResponseParserPartitionTest {
         var item = "{\"index\":{\"_id\":\"a\",\"status\":429,\"error\":{\"type\":\"es_rejected_execution_exception\","
             + "\"caused_by\":{\"type\":\"some_brand_new_exception\"}}}}";
 
-        var partition = BulkResponseParser.partitionItems(response(item), DocumentExceptionAllowlist.empty());
+        var partition = BulkResponseParser.partitionItems(
+            200, response(item), DocumentExceptionAllowlist.empty());
 
         assertThat(partition.getNonRetryableFailures(), empty());
         assertThat(partition.getRetryableFailures().get(0).getErrorType(), equalTo("es_rejected_execution_exception"));
@@ -152,7 +177,8 @@ class BulkResponseParserPartitionTest {
         // A type not in BulkDocErrorTypes.NON_RETRYABLE is treated as retryable (transient).
         var weird = "{\"index\":{\"_index\":\"movies\",\"_id\":\"x\",\"status\":503,"
             + "\"error\":{\"type\":\"some_brand_new_exception\",\"reason\":\"who knows\"}}}";
-        var partition = BulkResponseParser.partitionItems(response(weird), DocumentExceptionAllowlist.empty());
+        var partition = BulkResponseParser.partitionItems(
+            200, response(weird), DocumentExceptionAllowlist.empty());
 
         assertThat(partition.getNonRetryableFailures(), empty());
         assertThat(partition.getRetryableFailures(), hasSize(1));
@@ -168,7 +194,7 @@ class BulkResponseParserPartitionTest {
         // an empty object — falls into the malformed_response_item bucket. We
         // mark it retryable so we don't silently drop it.
         var body = "{\"took\":1,\"errors\":true,\"items\":[{}]}";
-        var partition = BulkResponseParser.partitionItems(body, DocumentExceptionAllowlist.empty());
+        var partition = BulkResponseParser.partitionItems(200, body, DocumentExceptionAllowlist.empty());
 
         assertThat(partition.getSuccessPositions(), empty());
         assertThat(partition.getNonRetryableFailures(), empty());
@@ -187,7 +213,8 @@ class BulkResponseParserPartitionTest {
         // for partial responses. classifyItemFromRaw should NOT count it as
         // success and should default to retryable.
         var weird = "{\"index\":{\"_index\":\"movies\",\"_id\":\"y\",\"status\":200}}";
-        var partition = BulkResponseParser.partitionItems(response(weird), DocumentExceptionAllowlist.empty());
+        var partition = BulkResponseParser.partitionItems(
+            200, response(weird), DocumentExceptionAllowlist.empty());
 
         assertThat(partition.getSuccessPositions(), empty());
         assertThat(partition.getNonRetryableFailures(), empty());
@@ -204,7 +231,7 @@ class BulkResponseParserPartitionTest {
             String.format(NON_RETRYABLE_ITEM, "a"),    // mapper_parsing_exception — NOT allowlisted
             String.format(RETRYABLE_ITEM, "b")         // es_rejected — NOT allowlisted
         );
-        var partition = BulkResponseParser.partitionItems(body, allowlist);
+        var partition = BulkResponseParser.partitionItems(200, body, allowlist);
 
         assertThat(partition.getSuccessPositions(), empty());
         assertThat(partition.getNonRetryableFailures(), hasSize(1));
