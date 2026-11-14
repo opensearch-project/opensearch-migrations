@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 #
-# Build all Docker images into the local Docker daemon.
-# Used by ECS/CDK paths that need images locally for DockerImageAsset.
+# Build the Migration Assistant Docker images into the local Docker daemon.
 #
 # Usage: run from the repo root or any directory with git access.
-#   ./deployment/cdk/opensearch-service-migration/buildDockerImages.sh
+#   ./buildImages/buildDockerImages.sh
 #
 
 set -euo pipefail
@@ -35,11 +34,9 @@ run_with_retries() {
 }
 
 # Resolve the repo root from this script's own location so the script works
-# regardless of caller cwd (e.g. test/awsE2ESolutionSetup.sh cd's into
-# test/opensearch-cluster-cdk/ before invoking this script, which would make
-# `git rev-parse --show-toplevel` return the nested sub-repo).
+# regardless of the caller's working directory.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-MIGRATIONS_REPO_ROOT_DIR="${MIGRATIONS_REPO_ROOT_DIR:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
+MIGRATIONS_REPO_ROOT_DIR="${MIGRATIONS_REPO_ROOT_DIR:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 export MIGRATIONS_REPO_ROOT_DIR
 cd "$MIGRATIONS_REPO_ROOT_DIR"
 
@@ -71,10 +68,3 @@ for image in capture_proxy migration_console traffic_replayer elasticsearch_sear
   docker pull "localhost:${EXTERNAL_REGISTRY_PORT}/migrations/${image}:latest" || true
   docker tag "localhost:${EXTERNAL_REGISTRY_PORT}/migrations/${image}:latest" "migrations/${image}:latest" || true
 done
-
-# otel_collector is not in buildImages — only needed for ECS/CDK path.
-# Set BUILD_OTEL_COLLECTOR=false to skip it (e.g. the docker compose E2E test doesn't use it).
-if [[ "${BUILD_OTEL_COLLECTOR:-true}" != "false" ]]; then
-  run_with_retries "$DOCKER_BUILD_RETRIES" docker build -t "migrations/otel_collector:latest" \
-    "$MIGRATIONS_REPO_ROOT_DIR/TrafficCapture/dockerSolution/src/main/docker/otelCollector"
-fi

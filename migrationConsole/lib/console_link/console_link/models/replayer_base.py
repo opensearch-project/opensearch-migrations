@@ -15,15 +15,6 @@ DOCKER_REPLAY_SCHEMA = {
     }
 }
 
-ECS_REPLAY_SCHEMA = {
-    "type": "dict",
-    "schema": {
-        "cluster_name": {"type": "string", "required": True},
-        "service_name": {"type": "string", "required": True},
-        "aws_region": {"type": "string", "required": False}
-    }
-}
-
 K8S_REPLAY_SCHEMA = {
     "type": "dict",
     "schema": {
@@ -37,11 +28,10 @@ SCHEMA = {
         "type": "dict",
         "schema": {
             "docker": DOCKER_REPLAY_SCHEMA,
-            "ecs": ECS_REPLAY_SCHEMA,
             "k8s": K8S_REPLAY_SCHEMA,
             "scale": {"type": "integer", "required": False, "min": 1}
         },
-        "check_with": contains_one_of({"docker", "ecs", "k8s"})
+        "check_with": contains_one_of({"docker", "k8s"})
     }
 }
 

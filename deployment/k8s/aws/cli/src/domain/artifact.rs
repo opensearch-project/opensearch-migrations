@@ -97,8 +97,8 @@ pub fn build_images_script(
     image_tag: &str,
     kube_context: &str,
 ) -> String {
-    // Test-only images (the SearchGuard Elasticsearch used by the Docker Compose and ECS
-    // solutions) are never needed on EKS, where the testClusters source is elasticsearch-oss.
+    // Test-only images used by Docker Compose are never needed on EKS, where the
+    // testClusters source is elasticsearch-oss.
     let skip_arg = "-PskipTestImages=true";
     // `set -euo pipefail` so any sub-step failure propagates a non-zero rc.
     // The builder is reused if healthy, else (re)created via the repo's

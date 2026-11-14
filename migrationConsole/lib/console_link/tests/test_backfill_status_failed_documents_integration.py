@@ -7,7 +7,7 @@ nothing stubbed in between: real gzipped NDJSON failure records in a moto-backed
 ``.migrations_working_state`` index in a live OpenSearch container, and the real
 ``console backfill status`` command.
 
-Only the two lookups that would need a live control plane are replaced: the ECS deployment
+Only the two lookups that would need a live control plane are replaced: the Kubernetes deployment
 status, and the Kubernetes SnapshotMigration listing that ``load_config`` resolves the
 bucket/prefix/session from.
 """
@@ -30,7 +30,7 @@ from moto import mock_aws
 import console_link.cli as cli_module
 from console_link.cli import cli
 from console_link.environment import Environment
-from console_link.models.ecs_service import ECSService
+from console_link.models.kubectl_runner import KubectlRunner
 from console_link.models.utils import DeploymentStatus
 from tests.search_containers import SearchContainer, Version
 from tests.test_backfill_rfs_queries import (
@@ -119,7 +119,7 @@ def completed_backfill_config():
             "target_cluster": {"endpoint": endpoint, "allow_insecure": True, "no_auth": {}},
             "backfill": {
                 "reindex_from_snapshot": {
-                    "ecs": {"cluster_name": "migration-cluster", "service_name": "rfs-service"}
+                    "k8s": {"namespace": "ma", "deployment_name": "ma-reindex-from-snapshot"}
                 }
             },
         }
@@ -152,7 +152,7 @@ def failed_document_stream(aws_credentials, mocker):
     """An empty failed document stream the console will actually read from. Yields the S3
     client so a test can seed failures into it."""
     # No workers left running, as on a finished backfill.
-    mocker.patch.object(ECSService, "get_instance_statuses", autospec=True,
+    mocker.patch.object(KubectlRunner, "retrieve_deployment_status", autospec=True,
                         return_value=DeploymentStatus(desired=0, running=0, pending=0))
     with mock_aws():
         s3 = boto3.client("s3", region_name=REGION)

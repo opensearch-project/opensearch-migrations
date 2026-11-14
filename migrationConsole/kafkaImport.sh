@@ -17,13 +17,6 @@ batch_size=500
 endpoint_url=""
 auth_type=""
 
-# MSK / EKS detection mirrors kafkaExport.sh so the script behaves the same
-# in either deployment.
-if [ -n "${ECS_AGENT_URI:-}" ]; then
-    kafka_property_file="aws/msk-iam-auth.properties"
-    auth_type="msk-iam"
-fi
-
 usage() {
   echo ""
   echo "Imports a kafkaExport.sh-produced archive into a Kafka topic."

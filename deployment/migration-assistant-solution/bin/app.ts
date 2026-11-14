@@ -1,6 +1,5 @@
 import 'source-map-support/register';
 import { App, DefaultStackSynthesizer } from 'aws-cdk-lib';
-import { SolutionsInfrastructureStack } from '../lib/solutions-stack';
 import {SolutionsInfrastructureEKSStack} from "../lib/solutions-stack-eks";
 
 const getProps = () => {
@@ -35,20 +34,6 @@ const getProps = () => {
 
 const app = new App();
 const infraProps = getProps()
-new SolutionsInfrastructureStack(app, "Migration-Assistant-Infra-Import-VPC", {
-  synthesizer: new DefaultStackSynthesizer({
-    generateBootstrapVersionRule: false
-  }),
-  createVPC: false,
-  ...infraProps
-});
-new SolutionsInfrastructureStack(app, "Migration-Assistant-Infra-Create-VPC", {
-  synthesizer: new DefaultStackSynthesizer({
-    generateBootstrapVersionRule: false
-  }),
-  createVPC: true,
-  ...infraProps
-});
 new SolutionsInfrastructureEKSStack(app, "Migration-Assistant-Infra-Import-VPC-eks", {
   synthesizer: new DefaultStackSynthesizer({
     generateBootstrapVersionRule: false

@@ -5,10 +5,6 @@ The replayer and capture proxy emit telemetry through OTLP collector endpoints w
 Migrations Assistant tasks as a sidecar container. The otel-collectors can publish metrics to Amazon CloudWatch and
 traces to AWS X-Ray.
 
-For CDK/ECS deployments, the default sidecar config is `/etc/otel-config-aws-metrics.yaml`, which exports metrics to
-CloudWatch only. Enable trace collection explicitly to use `/etc/otel-config-aws.yaml`, which adds the AWS X-Ray trace
-pipeline.
-
 Some of these metrics will show simple progress, such as bytes or records transmitted.  Other records can show higher
 level information, such the number of responses with status codes that match vs those that don't.  To observe those,
 search for `statusCodesMatch` in the CloudWatch Console.  That's emitted as an attribute along with the method and

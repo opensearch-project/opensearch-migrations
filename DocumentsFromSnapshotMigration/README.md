@@ -183,7 +183,7 @@ Common RFS worker outcomes:
 | `4` | Work exists but every item is leased to another worker (`NO_WORK_AVAILABLE_EXIT_CODE`). Keeps Kubernetes from restarting the pod in a tight loop. |
 | `5` | The snapshot couldn't be read: its repository, index or shard metadata, or a blob (`SNAPSHOT_READ_FAILED_EXIT_CODE`). Not retriable; the reason, path and context are logged at ERROR first. |
 
-In orchestrated runs (Argo/ECS/K8s), treat `2` as a recoverable handoff signal rather than terminal data-loss failure.
+In orchestrated runs, treat `2` as a recoverable handoff signal rather than terminal data-loss failure.
 
 ### Example: Handling Target Conflicts
 
