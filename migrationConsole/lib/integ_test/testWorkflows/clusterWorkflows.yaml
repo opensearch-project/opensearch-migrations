@@ -1264,6 +1264,14 @@ spec:
         parameters:
           - name: cluster-name
           - name: namespace
+          - name: opensearch-config-extra
+            default: ""
+          - name: cpu
+            default: "2"
+          - name: memory
+            default: "4Gi"
+          - name: heap
+            default: "2g"
       container:
         image: mirror.gcr.io/dtzar/helm-kubectl:3.18.6
         command: [sh, -c]
@@ -1279,6 +1287,7 @@ spec:
             network.host: 0.0.0.0
             discovery.type: single-node
             plugins.security.disabled: true
+            {{inputs.parameters.opensearch-config-extra}}
             EOF
             
             # Create OpenSearch values file
@@ -1294,14 +1303,14 @@ spec:
               enabled: false
             resources:
               requests:
-                cpu: "2"
-                memory: "4Gi"
+                cpu: "{{inputs.parameters.cpu}}"
+                memory: "{{inputs.parameters.memory}}"
               limits:
-                cpu: "2"
-                memory: "4Gi"
+                cpu: "{{inputs.parameters.cpu}}"
+                memory: "{{inputs.parameters.memory}}"
             persistence:
               enabled: false
-            opensearchJavaOpts: "-Xms2g -Xmx2g"
+            opensearchJavaOpts: "-Xms{{inputs.parameters.heap}} -Xmx{{inputs.parameters.heap}}"
             plugins:
               enabled: true
               installList:
@@ -1351,87 +1360,30 @@ spec:
         parameters:
           - name: cluster-name
           - name: namespace
-      container:
-        image: mirror.gcr.io/dtzar/helm-kubectl:3.18.6
-        command: [sh, -c]
-        args:
-          - |
-            # Add OpenSearch Helm repository
-            helm repo add opensearch https://opensearch-project.github.io/helm-charts/
-            helm repo update
-
-            # Create OpenSearch configuration
-            cat > /tmp/opensearch.yml << EOF
-            cluster.name: {{inputs.parameters.cluster-name}}
-            network.host: 0.0.0.0
-            discovery.type: single-node
-            plugins.security.disabled: true
-            thread_pool.write.size: 1
-            thread_pool.write.queue_size: 10
-            EOF
-
-            # Create OpenSearch values file
-            cat > /tmp/opensearch-values.yaml << 'EOF'
-            fullnameOverride: {{inputs.parameters.cluster-name}}
-            nodeGroup: ""
-            image:
-              repository: "opensearchproject/opensearch"
-              tag: "2.19.1"
-            singleNode: true
-            replicas: 1
-            securityConfig:
-              enabled: false
-            resources:
-              requests:
-                cpu: "1"
-                memory: "2Gi"
-              limits:
-                cpu: "1"
-                memory: "2Gi"
-            persistence:
-              enabled: false
-            opensearchJavaOpts: "-Xms1g -Xmx1g"
-            plugins:
-              enabled: true
-              installList:
-                - "repository-s3"
-            EOF
-
-            # Install OpenSearch 2.19.1
-            helm install {{inputs.parameters.cluster-name}} opensearch/opensearch --set rbac.create=false --set rbac.serviceAccountName=migration-console-access-role \
-              --namespace {{inputs.parameters.namespace}} \
-              --values /tmp/opensearch-values.yaml \
-              --set-file config."opensearch\.yml"=/tmp/opensearch.yml
-
-            # Create cluster credentials secret for compatibility with older test helpers.
-            kubectl create secret generic "{{inputs.parameters.cluster-name}}-creds" \
-              --from-literal=username=admin \
-              --from-literal=password="myStrongPassword123!" \
-              -n "{{inputs.parameters.namespace}}" \
-              --dry-run=client -o yaml | \
-              kubectl label --local -f - migration-test=true cluster-name={{inputs.parameters.cluster-name}} use-case=http-basic-credentials -o yaml | \
-              kubectl apply -f -
-
-            # Generate cluster configuration output
-            cat > /tmp/cluster-config.json << EOF
-            {
-              "endpoint": "http://{{inputs.parameters.cluster-name}}:9200",
-              "allowInsecure": true
-            }
-            EOF
-
-            kubectl create configmap {{inputs.parameters.cluster-name}}-migration-config \
-              --from-file=cluster-config=/tmp/cluster-config.json \
-              --namespace {{inputs.parameters.namespace}}
-
-            echo "Starved OpenSearch 2.19.1 cluster created successfully"
-            echo "Cluster config:"
-            cat /tmp/cluster-config.json
+      steps:
+        - - name: deploy-starved-cluster
+            template: opensearch-2-19-single-node
+            arguments:
+              parameters:
+                - name: cluster-name
+                  value: "{{inputs.parameters.cluster-name}}"
+                - name: namespace
+                  value: "{{inputs.parameters.namespace}}"
+                - name: opensearch-config-extra
+                  value: |
+                    thread_pool.write.size: 1
+                    thread_pool.write.queue_size: 10
+                - name: cpu
+                  value: "1"
+                - name: memory
+                  value: "2Gi"
+                - name: heap
+                  value: "1g"
       outputs:
         parameters:
           - name: cluster-config
             valueFrom:
-              path: /tmp/cluster-config.json
+              parameter: "{{steps.deploy-starved-cluster.outputs.parameters.cluster-config}}"
 
     # OpenSearch 3.1 Single Node Template
     # - Uses Argo "resource" templates (no image / no kubectl container)

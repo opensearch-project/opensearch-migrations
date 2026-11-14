@@ -170,13 +170,18 @@ class Test0011RfsBackpressure(MATestBase):
 
         total_docs = sum(INDEX_DOCS.values())
         throttled = increase("bulkAttempts_count_total", ',outcome=~"throttled_429|admission_rejected|timeout"')
+        limit_after_cut = self._query(
+            f"max_over_time((max(bulkLimit_count{{{scope}}}) "
+            f"and on() (sum(bulkLimitCuts_count_total{{{scope}}}) > 0))[$window:15s])")
+        budget_empty = self._query(
+            f"sum(max_over_time(retryBudgetEmpty_count_total{{{scope}}}[$window]))")
         checks = {
             "the target pushed back (throttled attempts)": throttled > 0,
             "workers cut their in-flight limits": increase("bulkLimitCuts_count_total") > 0,
             "no document was given up": increase("bulkDocsGaveUp_count_total") == 0,
-            "a worker's limit reached --max-connections (10)": over_window("max", "bulkLimit_count") >= 10,
+            "a worker's limit recovered to --max-connections (10) after a cut": limit_after_cut >= 10,
             "a worker reset its threshold after a quiet period": increase("bulkLimitQuietResets_count_total") >= 1,
-            "the retry budget never ran out": increase("retryBudgetEmpty_count_total") == 0,
+            "the retry budget never ran out": budget_empty == 0,
             "bulk size histograms were recorded": increase("bulkRequestDocuments_count_count") > 0,
             "every document was counted as migrated": increase("pipelineDocsMigrated_count_total") >= total_docs * 0.99,
         }

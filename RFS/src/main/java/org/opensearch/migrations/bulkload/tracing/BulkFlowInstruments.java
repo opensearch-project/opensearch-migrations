@@ -181,6 +181,8 @@ public class BulkFlowInstruments implements BulkFlowMetrics {
         budgetSpent = meter.counterBuilder(RETRY_BUDGET_SPENT).setUnit(COUNT).build();
         budgetRefunded = meter.counterBuilder(RETRY_BUDGET_REFUNDED).setUnit(COUNT).build();
         budgetEmpty = meter.counterBuilder(RETRY_BUDGET_EMPTY).setUnit(COUNT).build();
+        // Preserve the first exhaustion in Prometheus rate()/increase() queries.
+        budgetEmpty.add(0);
         budgetWait = meter.histogramBuilder(RETRY_BUDGET_WAIT).setUnit(MS)
             .setExplicitBucketBoundariesAdvice(CommonScopedMetricInstruments.LONG_DURATION_BUCKETS_MS).build();
         slotWait = meter.histogramBuilder(BULK_SLOT_WAIT).setUnit(MS)
