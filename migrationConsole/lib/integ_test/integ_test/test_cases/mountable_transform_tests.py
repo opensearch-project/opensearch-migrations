@@ -87,7 +87,7 @@ class Test0042CdcFullE2eMountableTransforms(MATestBase):
                     },
                 },
                 "documentBackfillConfig": {
-                    "disableFailedDocumentStream": True,
+                    "failedDocumentStream": {"type": "disabled"},
                     "maxShardSizeBytes": 16000000,
                     "resources": {
                         "requests": {"cpu": "25m", "memory": "1Gi", "ephemeral-storage": "5Gi"},

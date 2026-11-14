@@ -63,7 +63,7 @@ snapshotMigrationConfigs:
     toTarget: targetY
     perSnapshotConfig:
       snapB:
-        - documentBackfillConfig: { disableFailedDocumentStream: true }
+        - documentBackfillConfig: { failedDocumentStream: { type: disabled } }
 traffic:
   proxies:
     proxy-a:

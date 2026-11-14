@@ -53,5 +53,7 @@ traffic:
         speedupFactor: 5
         # Source/target comparison tuples. BUCKET_NAME from:
         #   kubectl -n ma get cm migrations-default-s3-config -o jsonpath='{.data.BUCKET_NAME}'
-        tupleS3Bucket: "<BUCKET>"
-        tupleS3Region: "<REGION>"
+        tupleOutput:
+          type: s3
+          bucket: "<BUCKET>"
+          region: "<REGION>"
