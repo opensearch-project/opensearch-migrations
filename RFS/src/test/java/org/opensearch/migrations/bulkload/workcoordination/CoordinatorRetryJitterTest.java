@@ -41,6 +41,16 @@ class CoordinatorRetryJitterTest {
     }
 
     @Test
+    void upwardJitterPreservesTheDelayAndConfiguredCap() {
+        Assertions.assertEquals(1000, RetryJitter.upwardJitterMillis(1000, 10_000, 0.0));
+        Assertions.assertEquals(1999, RetryJitter.upwardJitterMillis(1000, 10_000, 0.9999));
+        Assertions.assertEquals(750, RetryJitter.upwardJitterMillis(750, 1000, 0.0));
+        Assertions.assertEquals(999, RetryJitter.upwardJitterMillis(750, 1000, 0.9999));
+        Assertions.assertEquals(1000, RetryJitter.upwardJitterMillis(1000, 1000, 0.5));
+        Assertions.assertEquals(1000, RetryJitter.upwardJitterMillis(2000, 1000, 0.5));
+    }
+
+    @Test
     void retryWithExponentialBackoffJittersEachWait() throws Exception {
         var factory = new WorkCoordinatorFactory(VERSION, "",
             new OpenSearchWorkCoordinator.CompletionRetryConfig(3, 40, 1000));
@@ -48,7 +58,7 @@ class CoordinatorRetryJitterTest {
              var logs = new CloseableLogSetup(coordinator.getLoggerName())) {
             Assertions.assertThrows(RuntimeException.class,
                 () -> coordinator.completeWorkItem("item__0__0", () -> null));
-            assertJittered(List.of(40L, 80L, 160L), waits(logs, BACKING_OFF));
+            assertUpwardJittered(List.of(40L, 80L, 160L), 1000, scanForWaitDurations(logs, BACKING_OFF));
         }
     }
 
@@ -63,7 +73,7 @@ class CoordinatorRetryJitterTest {
             for (int i = 0; i < OpenSearchWorkCoordinator.MAX_COORDINATOR_UPDATE_RETRIES; i++) {
                 nominal.add(OpenSearchWorkCoordinator.COORDINATOR_UPDATE_RETRY_BASE_MS << i);
             }
-            assertJittered(nominal, waits(logs, BACKING_OFF));
+            assertJittered(nominal, scanForWaitDurations(logs, BACKING_OFF));
         }
     }
 
@@ -76,7 +86,7 @@ class CoordinatorRetryJitterTest {
             Assertions.assertThrows(OpenSearchWorkCoordinator.RetriesExceededException.class,
                 () -> coordinator.acquireNextWorkItem(Duration.ofMillis(500),
                     WorkCoordinationTestContext.factory().noOtelTracking()::createAcquireNextItemContext));
-            var waits = waits(logs, BACKING_OFF);
+            var waits = scanForWaitDurations(logs, BACKING_OFF);
             var nominal = new ArrayList<Long>();
             for (int i = 0; i < waits.size(); i++) {
                 nominal.add(OpenSearchWorkCoordinator.ACQUIRE_WORK_RETRY_BASE_MS << i);
@@ -93,11 +103,11 @@ class CoordinatorRetryJitterTest {
             Assertions.assertThrows(Exception.class,
                 () -> OpenSearchWorkCoordinator.doUntil("test", 20, 4,
                     context::createCoordinationInitializationStateContext, () -> "value", v -> v, (v, t) -> false));
-            assertJittered(List.of(20L, 40L, 80L), waits(logs, RETRYING_IN));
+            assertJittered(List.of(20L, 40L, 80L), scanForWaitDurations(logs, RETRYING_IN));
         }
     }
 
-    static List<Long> waits(CloseableLogSetup logs, Pattern pattern) {
+    static List<Long> scanForWaitDurations(CloseableLogSetup logs, Pattern pattern) {
         var waits = new ArrayList<Long>();
         for (var event : logs.getLogEvents()) {
             var matcher = pattern.matcher(event);
@@ -116,6 +126,17 @@ class CoordinatorRetryJitterTest {
             long w = waits.get(i);
             Assertions.assertTrue(w >= n / 2 && w < n,
                 "wait " + i + " was " + w + " ms; expected [" + (n / 2) + ", " + n + ") for a nominal " + n + " ms");
+        }
+    }
+
+    static void assertUpwardJittered(List<Long> nominal, long maxDelay, List<Long> waits) {
+        Assertions.assertEquals(nominal.size(), waits.size(), "waits: " + waits);
+        for (int i = 0; i < nominal.size(); i++) {
+            long floor = Math.min(nominal.get(i), maxDelay);
+            long ceiling = Math.min(floor * 2, maxDelay);
+            long wait = waits.get(i);
+            Assertions.assertTrue(wait >= floor && wait <= ceiling,
+                "wait " + i + " was " + wait + " ms; expected [" + floor + ", " + ceiling + "]");
         }
     }
 }

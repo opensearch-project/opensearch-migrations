@@ -969,11 +969,10 @@ public class RfsMigrateDocuments {
     private record CoordinatorInfo(ConnectionContext connectionContext, Version version) {}
 
     /**
-     * Calculates the approximate total retry window in seconds based on exponential backoff with a max delay cap.
+     * Calculates the minimum total retry window in seconds based on exponential backoff with a max delay cap.
      * This sums the backoff delays (initial * 2^n, capped at maxDelay) across all retry attempts.
      * Does not include request execution time or network latency.
-     * Logic matches the runtime retry implementation in OpenSearchWorkCoordinator.retryWithExponentialBackoff(),
-     * which jitters each wait down by up to half ({@link RetryJitter}), so this is an upper bound.
+     * Completion retries jitter each wait upward ({@link RetryJitter}), so the actual window can be longer.
      */
     static long calculateTotalRetryWindowSeconds(OpenSearchWorkCoordinator.CompletionRetryConfig config) {
         long totalMs = 0;
@@ -1000,7 +999,7 @@ public class RfsMigrateDocuments {
             arguments.coordinatorRetryMaxRetries,
             arguments.coordinatorRetryInitialDelayMs,
             arguments.coordinatorRetryMaxDelayMs);
-        log.atInfo().setMessage("Coordinator completion retry config: maxRetries={}, initialDelay={}ms, maxDelay={}ms, totalWindow=~{}s")
+        log.atInfo().setMessage("Coordinator completion retry config: maxRetries={}, initialDelay={}ms, maxDelay={}ms, minimumTotalBackoff=~{}s")
             .addArgument(completionRetryConfig.maxRetries())
             .addArgument(completionRetryConfig.initialDelayMs())
             .addArgument(completionRetryConfig.maxDelayMs())

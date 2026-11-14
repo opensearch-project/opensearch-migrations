@@ -29,6 +29,7 @@ public class ClusterVersionDetector {
             .setCause(retrySignal.failure())
             .setMessage("Cluster version detection failed ({}); retrying attempt {} of {}")
             .addArgument(HttpRetryClassifier.describe(retrySignal.failure()))
+            // totalRetries is zero-based and counts retries already completed; the next execution is attempt 2 first.
             .addArgument(retrySignal.totalRetries() + 2)
             .addArgument(MAX_VERSION_DETECTION_RETRIES + 1)
             .log());

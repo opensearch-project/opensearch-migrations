@@ -364,7 +364,7 @@ class OpenSearchClientFactoryTest {
         when(restClient.getAsync("solr/admin/info/system?wt=json", null))
             .thenReturn(Mono.just(new HttpResponse(404, "", Map.of(), "")));
 
-        org.junit.jupiter.api.Assertions.assertThrows(RuntimeException.class,
+        org.junit.jupiter.api.Assertions.assertThrows(ClusterVersionDetector.UnexpectedStatusCode.class,
             () -> openSearchClientFactory.getClusterVersion());
         assertEquals(1, attempts.get());
     }
@@ -375,7 +375,7 @@ class OpenSearchClientFactoryTest {
         when(restClient.getAsync("solr/admin/info/system?wt=json", null))
             .thenReturn(Mono.just(new HttpResponse(404, "", Map.of(), "")));
 
-        org.junit.jupiter.api.Assertions.assertThrows(RuntimeException.class,
+        org.junit.jupiter.api.Assertions.assertThrows(ClusterVersionDetector.UnexpectedStatusCode.class,
             () -> openSearchClientFactory.getClusterVersion());
         assertEquals(3, attempts.get());
     }

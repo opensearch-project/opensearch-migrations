@@ -1,16 +1,14 @@
 package org.opensearch.migrations.bulkload.workcoordination;
 
-import java.time.Duration;
 import java.util.concurrent.ThreadLocalRandom;
 
 /**
  * Randomizes the waits between work-coordination retries so that workers that failed together (a coordinator
  * restart, a throttling burst, every worker contending for the same lease) don't retry together.
  *
- * <p>This is "equal jitter": a wait somewhere between half the computed backoff and all of it. Each wait keeps at
- * least half its length because these retries are budgeted in attempts against waits that matter on their own
- * (letting clock drift settle, staying inside a lease). Waits never get longer, so totals computed from the
- * unjittered backoff remain upper bounds.
+ * <p>Most coordination retries use "equal jitter": a wait somewhere between half the computed backoff and all of
+ * it. Completion retries use upward jitter so their configured retry window is not shortened: a wait between the
+ * computed backoff and the next doubling step, without exceeding the configured maximum delay.
  */
 public final class RetryJitter {
     private RetryJitter() {}
@@ -20,10 +18,6 @@ public final class RetryJitter {
         return equalJitterMillis(delayMillis, ThreadLocalRandom.current().nextDouble());
     }
 
-    public static Duration equalJitter(Duration delay) {
-        return Duration.ofMillis(equalJitterMillis(delay.toMillis()));
-    }
-
     /** @param unitRandom a number in {@code [0, 1)} picking where in the range the wait falls */
     static long equalJitterMillis(long delayMillis, double unitRandom) {
         if (delayMillis < 2) {
@@ -31,5 +25,20 @@ public final class RetryJitter {
         }
         long half = delayMillis / 2;
         return half + (long) ((delayMillis - half) * unitRandom);
+    }
+
+    /**
+     * A wait in {@code [min(delayMillis, maxDelayMillis), maxDelayMillis]}, with an exclusive upper bound when
+     * there is room below the cap. Before the cap, the random range extends at most one doubling step upward.
+     */
+    public static long upwardJitterMillis(long delayMillis, long maxDelayMillis) {
+        return upwardJitterMillis(delayMillis, maxDelayMillis, ThreadLocalRandom.current().nextDouble());
+    }
+
+    /** @param unitRandom a number in {@code [0, 1)} picking where in the range the wait falls */
+    static long upwardJitterMillis(long delayMillis, long maxDelayMillis, double unitRandom) {
+        long floor = Math.min(delayMillis, maxDelayMillis);
+        long width = Math.min(floor, maxDelayMillis - floor);
+        return floor + (long) (width * unitRandom);
     }
 }

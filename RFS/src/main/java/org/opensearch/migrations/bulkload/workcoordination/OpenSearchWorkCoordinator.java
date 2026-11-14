@@ -246,7 +246,7 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
                     exceptionConsumer.accept(e);
                     throw new RetriesExceededException(e, attempt);
                 }
-                long cappedDelay = RetryJitter.equalJitterMillis(Math.min(delay, maxDelayMs));
+                long cappedDelay = RetryJitter.upwardJitterMillis(delay, maxDelayMs);
                 if (deadline != null) {
                     long remainingMs = Duration.between(Instant.now(), deadline).toMillis();
                     if (remainingMs <= 0 || cappedDelay > remainingMs) {

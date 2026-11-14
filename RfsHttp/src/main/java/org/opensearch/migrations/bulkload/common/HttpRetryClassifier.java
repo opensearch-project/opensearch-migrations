@@ -1,7 +1,5 @@
 package org.opensearch.migrations.bulkload.common;
 
-import java.net.HttpURLConnection;
-
 /**
  * Which failed requests are worth retrying, shared by the checks RFS makes against a cluster before it starts.
  *
@@ -10,6 +8,11 @@ import java.net.HttpURLConnection;
  * ...) means the request or the credentials are wrong, and repeating it only delays the error.
  */
 public final class HttpRetryClassifier {
+    private static final int FIRST_CLIENT_ERROR_STATUS = 400;
+    private static final int REQUEST_TIMEOUT_STATUS = 408;
+    private static final int TOO_MANY_REQUESTS_STATUS = 429;
+    private static final int FIRST_SERVER_ERROR_STATUS = 500;
+
     private HttpRetryClassifier() {}
 
     /** A failure caused by the HTTP status a request was answered with. */
@@ -18,10 +21,11 @@ public final class HttpRetryClassifier {
     }
 
     public static boolean isRetryableStatus(int statusCode) {
-        boolean clientError = statusCode >= 400 && statusCode < 500;
+        boolean clientError =
+            statusCode >= FIRST_CLIENT_ERROR_STATUS && statusCode < FIRST_SERVER_ERROR_STATUS;
         return !clientError
-            || statusCode == HttpURLConnection.HTTP_CLIENT_TIMEOUT
-            || statusCode == 429;
+            || statusCode == REQUEST_TIMEOUT_STATUS
+            || statusCode == TOO_MANY_REQUESTS_STATUS;
     }
 
     /** For a {@code Retry} filter: everything is retried except a {@link StatusCodeFailure} with a non-retryable status. */
