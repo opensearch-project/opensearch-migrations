@@ -1,5 +1,6 @@
 package org.opensearch.migrations.commands;
 
+import org.opensearch.migrations.arguments.ArgNameConstants;
 import org.opensearch.migrations.cli.OutputFormat;
 
 import com.beust.jcommander.Parameter;
@@ -29,12 +30,13 @@ public class RepositoryCheckArgs {
     @Parameter(
         names = {"--repo-uri", "--s3-repo-uri", "--file-system-repo-path"},
         required = true,
-        description = "Repository URI. Schemes: file:///path, s3://bucket/path, gs://bucket/path"
+        description = "Repository URI. Schemes: file:///path, s3://bucket/path, gs://bucket/path, "
+            + "azure://account/container/path"
     )
     public String repoUri;
 
     @Parameter(
-        names = {"--local-dir", "--s3-local-dir", "--gcs-local-dir"},
+        names = {"--local-dir", "--s3-local-dir", "--gcs-local-dir", "--azure-local-dir"},
         description = "Local directory for provider clients; a temporary directory is used when omitted"
     )
     public String localDir;
@@ -47,7 +49,27 @@ public class RepositoryCheckArgs {
 
     @Parameter(
         names = {"--endpoint", "--s3-endpoint", "--s3Endpoint"},
-        description = "Custom repository endpoint, such as LocalStack or a GCS emulator"
+        description = "Custom repository endpoint, such as LocalStack, a GCS emulator, or Azurite"
     )
     public String endpoint;
+
+    @Parameter(
+        names = {
+            ArgNameConstants.AZURE_STORAGE_ACCOUNT_KEY_ARG_KEBAB_CASE,
+            ArgNameConstants.AZURE_STORAGE_ACCOUNT_KEY_ARG_CAMEL_CASE
+        },
+        description = "Storage account key for an azure:// repository. Mutually exclusive with "
+            + "--azure-storage-sas-token; ambient Azure identity is used when neither is set"
+    )
+    public String azureStorageAccountKey;
+
+    @Parameter(
+        names = {
+            ArgNameConstants.AZURE_STORAGE_SAS_TOKEN_ARG_KEBAB_CASE,
+            ArgNameConstants.AZURE_STORAGE_SAS_TOKEN_ARG_CAMEL_CASE
+        },
+        description = "SAS token for an azure:// repository. Mutually exclusive with "
+            + "--azure-storage-account-key"
+    )
+    public String azureStorageSasToken;
 }

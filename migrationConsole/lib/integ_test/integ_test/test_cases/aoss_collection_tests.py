@@ -168,7 +168,10 @@ def build_aoss_migration_config(
             "fromSnapshot": snapshot_name,
             "slice": f"slice-{slice_number}",
             "metadataMigrationConfig": {"indexAllowlist": indices},
-            "documentBackfillConfig": {"indexAllowlist": indices},
+            "documentBackfillConfig": {
+                "failedDocumentStream": {"type": "disabled"},
+                "indexAllowlist": indices,
+            },
         })
 
     return {

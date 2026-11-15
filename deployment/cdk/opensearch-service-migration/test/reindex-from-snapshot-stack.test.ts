@@ -127,7 +127,7 @@ describe('ReindexFromSnapshotStack Tests', () => {
               {
                 "Ref": "SsmParameterValuemigrationunittestdefaultosClusterEndpointC96584B6F00A464EAD1953AFF4B05118Parameter",
               },
-              " --max-shard-size-bytes 94489280512 --max-connections 20 --initial-lease-duration PT60M --source-version \"ES_7.10\""
+              " --max-shard-size-bytes 94489280512 --max-connections 20 --initial-lease-duration PT60M --disable-failed-document-stream --source-version \"ES_7.10\""
             ],
           ],
         }
@@ -187,7 +187,7 @@ describe('ReindexFromSnapshotStack Tests', () => {
               {
                 "Ref": "SsmParameterValuemigrationunittestdefaultosClusterEndpointC96584B6F00A464EAD1953AFF4B05118Parameter",
               },
-              " --max-shard-size-bytes 94489280512 --max-connections 20 --initial-lease-duration PT60M --target-aws-service-signing-name aoss --target-aws-region eu-west-1 --source-version \"ES_7.10\"",
+              " --max-shard-size-bytes 94489280512 --max-connections 20 --initial-lease-duration PT60M --disable-failed-document-stream --target-aws-service-signing-name aoss --target-aws-region eu-west-1 --source-version \"ES_7.10\"",
             ],
           ],
         }
@@ -251,7 +251,7 @@ describe('ReindexFromSnapshotStack Tests', () => {
               {
                 "Ref": "SsmParameterValuemigrationunittestdefaultosClusterEndpointC96584B6F00A464EAD1953AFF4B05118Parameter",
               },
-              " --max-shard-size-bytes 94489280512 --max-connections 20 --initial-lease-duration PT60M --source-version \"ES_7.10\""
+              " --max-shard-size-bytes 94489280512 --max-connections 20 --initial-lease-duration PT60M --disable-failed-document-stream --source-version \"ES_7.10\""
             ],
           ],
         }
@@ -330,7 +330,7 @@ describe('ReindexFromSnapshotStack Tests', () => {
               {
                 "Ref": "SsmParameterValuemigrationunittestdefaultosClusterEndpointC96584B6F00A464EAD1953AFF4B05118Parameter",
               },
-              " --max-shard-size-bytes 94489280512 --max-connections 20 --initial-lease-duration PT60M --source-version \"ES_7.10\" --custom-arg value --flag --snapshot-name \"custom-snapshot\""
+              " --max-shard-size-bytes 94489280512 --max-connections 20 --initial-lease-duration PT60M --disable-failed-document-stream --source-version \"ES_7.10\" --custom-arg value --flag --snapshot-name \"custom-snapshot\""
             ]
           ]
         }
@@ -340,6 +340,34 @@ describe('ReindexFromSnapshotStack Tests', () => {
         Value: '/shared-logs-output/reindex-from-snapshot-default'
       }
     ]);
+  });
+
+  test('ReindexFromSnapshotStack only opts out of the failed document stream when extraArgs names no bucket', () => {
+    const rfsCommand = (extraArgs?: string) => {
+      const stacks = createStackComposer({
+        vpcEnabled: true,
+        reindexFromSnapshotServiceEnabled: true,
+        stage: 'unit-test',
+        sourceCluster: {
+          "endpoint": "https://test-cluster",
+          "auth": {"type": "none"},
+          "version": "ES_7.10"
+        },
+        reindexFromSnapshotExtraArgs: extraArgs,
+        migrationAssistanceEnabled: true,
+        otelMetricsCollectorEnabled: false,
+        otelTraceCollectorEnabled: false,
+      });
+      const reindexStack = stacks.stacks.find(s => s instanceof ReindexFromSnapshotStack) as ReindexFromSnapshotStack;
+      const taskDefinitions = Template.fromStack(reindexStack).findResources('AWS::ECS::TaskDefinition');
+      const env = taskDefinitions[Object.keys(taskDefinitions)[0]].Properties.ContainerDefinitions[0].Environment;
+      return JSON.stringify(env.find((e: { Name: string }) => e.Name === 'RFS_COMMAND').Value);
+    };
+
+    expect(rfsCommand()).toContain('--disable-failed-document-stream');
+    const withBucket = rfsCommand('--failed-document-stream-s3-bucket my-bucket');
+    expect(withBucket).not.toContain('--disable-failed-document-stream');
+    expect(withBucket).toContain('--failed-document-stream-s3-bucket my-bucket');
   });
 
   test('ReindexFromSnapshotStack with maximum worker size', () => {
@@ -386,7 +414,7 @@ describe('ReindexFromSnapshotStack Tests', () => {
               {
                 "Ref": "SsmParameterValuemigrationunittestdefaultosClusterEndpointC96584B6F00A464EAD1953AFF4B05118Parameter",
               },
-              " --max-shard-size-bytes 94489280512 --max-connections 100 --initial-lease-duration PT60M --source-version \"ES_7.10\"",
+              " --max-shard-size-bytes 94489280512 --max-connections 100 --initial-lease-duration PT60M --disable-failed-document-stream --source-version \"ES_7.10\"",
             ],
           ],
         }
@@ -519,7 +547,7 @@ describe('ReindexFromSnapshotStack Tests', () => {
               {
                 "Ref": "SsmParameterValuemigrationunittestdefaultosClusterEndpointC96584B6F00A464EAD1953AFF4B05118Parameter",
               },
-              " --max-shard-size-bytes 1181117188 --max-connections 20 --initial-lease-duration PT60M --target-aws-service-signing-name aoss --target-aws-region eu-west-1 --source-version \"ES_7.10\"",
+              " --max-shard-size-bytes 1181117188 --max-connections 20 --initial-lease-duration PT60M --disable-failed-document-stream --target-aws-service-signing-name aoss --target-aws-region eu-west-1 --source-version \"ES_7.10\"",
             ],
           ],
         }
@@ -598,7 +626,7 @@ describe('ReindexFromSnapshotStack Tests', () => {
               {
                 "Ref": "SsmParameterValuemigrationunittestdefaultosClusterEndpointC96584B6F00A464EAD1953AFF4B05118Parameter",
               },
-              " --max-shard-size-bytes 94489280512 --max-connections 20 --initial-lease-duration PT60M --source-version \"ES_7.9\""
+              " --max-shard-size-bytes 94489280512 --max-connections 20 --initial-lease-duration PT60M --disable-failed-document-stream --source-version \"ES_7.9\""
             ],
           ],
         }

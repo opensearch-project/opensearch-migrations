@@ -22,6 +22,8 @@ textual = ">=8.2.7"
 ijson = "*"
 psutil = "*"
 textual-serve = "*"
+azure-storage-blob = "*"
+azure-identity = "*"
 
 [dev-packages]
 pytest = "*"

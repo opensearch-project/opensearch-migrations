@@ -54,6 +54,7 @@ function applyMetaExtensions(jsonSchema: Record<string, unknown>, zodSchema: z.Z
     const meta = fieldMeta(zodSchema);
     if (meta?.checksumFor?.length) jsonSchema['x-checksum-for'] = meta.checksumFor;
     if (meta?.changeRestriction) jsonSchema['x-change-restriction'] = meta.changeRestriction;
+    if (meta?.gatedOnIncreaseOnly) jsonSchema['x-gated-on-increase-only'] = true;
     if (meta?.essential) jsonSchema['x-essential'] = true;
     if (meta?.uiHint) jsonSchema['x-ui-hint'] = meta.uiHint;
     if (meta?.externalRef) jsonSchema['x-external-ref'] = meta.externalRef;

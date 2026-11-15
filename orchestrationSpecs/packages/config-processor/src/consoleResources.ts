@@ -50,7 +50,7 @@ export interface ConsoleSnapshotReference {
 
 export interface ConsoleRepositoryResource {
     refName: string;
-    provider: "s3" | "gcs";
+    provider: "s3" | "gcs" | "azure";
     editPath: string[];
     clientConfig: Record<string, unknown>;
     snapshots: ConsoleSnapshotReference[];
@@ -156,6 +156,7 @@ function repositoryClientConfig(repoConfig: {
     awsRegion?: string;
     endpoint?: string;
     useLocalStack?: boolean;
+    azureCredentialsSecretName?: string;
 }): Record<string, unknown> {
     return withDefinedValues({
         repo_uri: repoConfig.repoPathUri,
@@ -164,6 +165,9 @@ function repositoryClientConfig(repoConfig: {
             : undefined,
         endpoint: repoConfig.endpoint || undefined,
         use_local_stack: repoConfig.useLocalStack || undefined,
+        azure_credentials_secret_name: repoConfig.repoPathUri.startsWith("azure://")
+            ? repoConfig.azureCredentialsSecretName || undefined
+            : undefined,
     });
 }
 
@@ -202,7 +206,11 @@ function repositoriesFromSourceConfig(
     return Object.entries(snapshotInfo.repos)
         .map(([repoName, repoConfig]) => ({
             refName: repoName,
-            provider: repoConfig.repoPathUri.startsWith("gs://") ? "gcs" as const : "s3" as const,
+            provider: repoConfig.repoPathUri.startsWith("gs://")
+                ? "gcs" as const
+                : repoConfig.repoPathUri.startsWith("azure://")
+                    ? "azure" as const
+                    : "s3" as const,
             editPath: ["sourceClusters", sourceName, "snapshotInfo", "repos", repoName],
             clientConfig: repositoryClientConfig(repoConfig),
             snapshots: (snapshotsByRepo.get(repoName) ?? [])

@@ -11,6 +11,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
+import org.opensearch.migrations.bulkload.common.AzureRepo;
 import org.opensearch.migrations.bulkload.common.GcsRepo;
 import org.opensearch.migrations.bulkload.common.GcsUri;
 import org.opensearch.migrations.bulkload.common.RepoUri;
@@ -45,6 +46,14 @@ public class RepositoryCheck {
                     null
                 ).checkAccess();
                 case RepoUri.S3RepoUri s3Repo -> checkS3Repository(localDir, s3Repo);
+                case RepoUri.AzureRepoUri azureRepo -> AzureRepo.create(
+                    localDir,
+                    azureRepo.azureUri(),
+                    arguments.endpoint,
+                    arguments.azureStorageAccountKey,
+                    arguments.azureStorageSasToken,
+                    null
+                ).checkAccess();
             };
             return new RepositoryCheckResult(check);
         } catch (RuntimeException e) {
@@ -184,6 +193,7 @@ public class RepositoryCheck {
             case RepoUri.FileRepoUri ignored -> "file";
             case RepoUri.GcsRepoUri ignored -> "gcs";
             case RepoUri.S3RepoUri ignored -> "s3";
+            case RepoUri.AzureRepoUri ignored -> "azure";
         };
         String message = failureMessage(failure);
         return new RepositoryAccessCheckResult(

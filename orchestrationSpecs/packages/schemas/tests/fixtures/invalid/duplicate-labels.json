@@ -28,7 +28,11 @@
       "slices": [
         {
           "label": "dup",
-          "documentBackfillConfig": {}
+          "documentBackfillConfig": {
+            "failedDocumentStream": {
+              "type": "disabled"
+            }
+          }
         },
         {
           "label": "dup",

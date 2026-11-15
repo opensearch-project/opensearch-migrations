@@ -290,12 +290,24 @@ public class ClusterOperations {
 
     @SneakyThrows
     public void takeSnapshot(final String repoName, final String snapshotName, final String indexPattern) {
+        takeSnapshot(repoName, snapshotName, indexPattern, true);
+    }
+
+    /**
+     * On ES 7.12+, including global state also includes every feature state and its system indices
+     * (for example {@code .geoip_databases}, which ES 7.14+ fills in the background), regardless of
+     * {@code indexPattern}. Exclude global state when the snapshot must contain only the matched indices.
+     */
+    @SneakyThrows
+    public void takeSnapshot(
+        final String repoName, final String snapshotName, final String indexPattern, final boolean includeGlobalState
+    ) {
         final var snapshotJson = "{\n"
             + "  \"indices\": \""
             + indexPattern
             + "\",\n"
             + "  \"ignore_unavailable\": true,\n"
-            + "  \"include_global_state\": true\n"
+            + "  \"include_global_state\": " + includeGlobalState + "\n"
             + "}";
         var response = put("/_snapshot/" + repoName + "/" + snapshotName + "?wait_for_completion=true", snapshotJson);
         assertThat(response.getKey(), equalTo(200));

@@ -13,7 +13,8 @@ export const WORKLOAD_NODE_POOL_LABEL = "migrations.opensearch.org/workload-pool
 type WorkloadNodePoolConfigKey =
     "kafkaNodePoolName"
     | "proxyNodePoolName"
-    | "replayerNodePoolName";
+    | "replayerNodePoolName"
+    | "rfsNodePoolName";
 
 /**
  * Resolve deployment-level workload placement at the template where a pod is created.
@@ -33,7 +34,7 @@ export function workloadNodePoolResolvedInput(
     };
 }
 
-/** How Kafka brokers, capture proxies and replayers spread across availability zones. */
+/** How RFS workers, Kafka brokers, capture proxies and replayers spread across availability zones. */
 export const WORKLOAD_ZONE_SPREAD_CONFIG_KEY = "workloadZoneSpread";
 export const ZONE_TOPOLOGY_KEY = "topology.kubernetes.io/zone";
 

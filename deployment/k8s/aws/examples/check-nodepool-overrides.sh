@@ -24,7 +24,12 @@ for f in "$@"; do
   values_flags+=(-f "$f")
 done
 # Placeholders for values the bootstrap normally supplies; they do not affect the NodePool.
-set_flags=(--set stageName=dev --set aws.region=us-east-2 --set-string aws.account=123456789012)
+set_flags=(
+  --set stageName=dev
+  --set aws.region=us-east-2
+  --set-string aws.account=123456789012
+  --set-string aws.eksClusterName=verify-cluster
+)
 
 echo "=== helm lint ==="
 helm lint "$chart_dir" --kube-version 1.35.0 "${values_flags[@]}" "${set_flags[@]}"

@@ -353,7 +353,8 @@ public class WorkCoordinatorTest {
                 Assertions.assertInstanceOf(IWorkCoordinator.NoAvailableWorkToBeDone.class, blockedOutcome);
             }
 
-            workerA.releaseWorkItem(workItemId, testContext::createReleaseWorkItemContext);
+            workerA.releaseWorkItem(workItemId, IWorkCoordinator.LeaseReleaseReason.EARLY_EXIT,
+                testContext::createReleaseWorkItemContext);
         }
 
         // workerB should now be able to immediately re-acquire the same work item.
@@ -361,6 +362,189 @@ public class WorkCoordinatorTest {
             var outcome = workerB.acquireNextWorkItem(longLease, testContext::createAcquireNextItemContext);
             var acquired = Assertions.assertInstanceOf(IWorkCoordinator.WorkItemAndDuration.class, outcome);
             Assertions.assertEquals(workItemId, acquired.getWorkItem().toString());
+        }
+    }
+
+    @ParameterizedTest
+    @MethodSource("containerVersions")
+    public void testEarlyReleasePreservesTheAcquisitionExponent(
+        SearchClusterContainer.ContainerVersion version
+    ) throws Exception {
+        setupOpenSearchContainer(version);
+        var context = WorkCoordinationTestContext.factory().noOtelTracking();
+        var workItemId = workId("early-release", 0, 0L);
+        var client = httpClientSupplier.get();
+
+        try (var worker = factory.get(client, 15, "worker")) {
+            worker.createUnassignedWorkItem(workItemId, context::createUnassignedWorkContext);
+            Assertions.assertEquals(200, client.makeJsonRequest(
+                "POST",
+                worker.getPathForUpdates(workItemId),
+                null,
+                "{\"doc\":{\"nextAcquisitionLeaseExponent\":4}}"
+            ).getStatusCode());
+
+            for (int acquisition = 0; acquisition < 3; acquisition++) {
+                var outcome = acquisition % 2 == 0
+                    ? worker.acquireNextWorkItem(Duration.ofSeconds(1), context::createAcquireNextItemContext)
+                    : worker.createOrUpdateLeaseForWorkItem(
+                        workItemId,
+                        Duration.ofSeconds(1),
+                        context::createAcquireSpecificItemContext
+                    );
+                Assertions.assertInstanceOf(IWorkCoordinator.WorkItemAndDuration.class, outcome);
+                var acquired = workItemSource(workItemId);
+                Assertions.assertEquals(4, acquired.path("acquisitionLeaseExponent").asInt());
+                Assertions.assertEquals(5, acquired.path("nextAcquisitionLeaseExponent").asInt());
+
+                worker.releaseWorkItem(workItemId, IWorkCoordinator.LeaseReleaseReason.EARLY_EXIT,
+                    context::createReleaseWorkItemContext);
+                var released = workItemSource(workItemId);
+                Assertions.assertEquals(4, released.path("nextAcquisitionLeaseExponent").asInt());
+                Assertions.assertEquals(0, released.path("expiration").asLong());
+                Assertions.assertTrue(released.path("leaseHolderId").isNull());
+
+                // A retry after losing the successful release response must be idempotent.
+                worker.releaseWorkItem(workItemId, IWorkCoordinator.LeaseReleaseReason.EARLY_EXIT,
+                    context::createReleaseWorkItemContext);
+                Assertions.assertEquals(released, workItemSource(workItemId));
+            }
+
+            // If an early-shutdown callback arrives after expiration, keep the timeout increase.
+            worker.acquireNextWorkItem(Duration.ofSeconds(1), context::createAcquireNextItemContext);
+            Assertions.assertEquals(200, client.makeJsonRequest(
+                "POST",
+                worker.getPathForUpdates(workItemId),
+                null,
+                "{\"doc\":{\"expiration\":1}}"
+            ).getStatusCode());
+            worker.releaseWorkItem(workItemId, IWorkCoordinator.LeaseReleaseReason.EARLY_EXIT,
+                context::createReleaseWorkItemContext);
+            Assertions.assertEquals(5, workItemSource(workItemId).path("nextAcquisitionLeaseExponent").asInt());
+        }
+    }
+
+    @SneakyThrows
+    private JsonNode workItemSource(String workItemId) {
+        var response = httpClientSupplier.get().makeJsonRequest(
+            AbstractedHttpClient.POST_METHOD,
+            OpenSearchWorkCoordinator.INDEX_BASENAME + "/_search",
+            null,
+            "{\"query\":{\"ids\":{\"values\":[\"" + workItemId + "\"]}}}");
+        return new ObjectMapper().readTree(response.getPayloadBytes()).path("hits").path("hits").path(0).path("_source");
+    }
+
+    @ParameterizedTest
+    @MethodSource("containerVersions")
+    public void testTimeoutGrowthStopsAtTheConfiguredMaxLeaseDuration(
+        SearchClusterContainer.ContainerVersion version
+    ) throws Exception {
+        // Each genuine timeout retains the acquisition's increase. The configured maximum stops
+        // both further duration growth and further exponent growth.
+        setupOpenSearchContainer(version);
+        var testContext = WorkCoordinationTestContext.factory().withAllTracking();
+        var capped = workId("capped", 0, 0L);
+        var uncapped = workId("uncapped", 0, 0L);
+        var initialLease = Duration.ofSeconds(2);
+        var cappedFactory = new WorkCoordinatorFactory(container.getContainerVersion().getVersion(), "",
+            OpenSearchWorkCoordinator.CompletionRetryConfig.DEFAULT, Duration.ofSeconds(5));
+
+        for (var item : List.of(capped, uncapped)) {
+            try (var creator = factory.get(httpClientSupplier.get(), 3600, "creator")) {
+                creator.createUnassignedWorkItem(item, testContext::createUnassignedWorkContext);
+            }
+            var itemFactory = item.equals(capped) ? cappedFactory : factory;
+            var leases = new ArrayList<Long>();
+            for (int attempt = 0; attempt < 5; attempt++) {
+                try (var worker = itemFactory.get(httpClientSupplier.get(), 3600, "worker-" + attempt)) {
+                    var outcome = worker.acquireNextWorkItem(initialLease, testContext::createAcquireNextItemContext);
+                    var acquired = Assertions.assertInstanceOf(IWorkCoordinator.WorkItemAndDuration.class, outcome);
+                    Assertions.assertEquals(item, acquired.getWorkItem().toString());
+                    var source = workItemSource(item);
+                    leases.add(source.path("expiration").asLong() - Instant.now().getEpochSecond());
+                    if (attempt < 4) {
+                        worker.releaseWorkItem(item, IWorkCoordinator.LeaseReleaseReason.LEASE_TIMEOUT,
+                            testContext::createReleaseWorkItemContext);
+                    } else {
+                        // Complete it so the next item's workers can't pick this one up.
+                        worker.completeWorkItem(item, testContext::createCompleteWorkContext);
+                    }
+                }
+            }
+            var exponent = workItemSource(item).path("nextAcquisitionLeaseExponent").asInt();
+            if (item.equals(capped)) {
+                // 2, 4, then capped at 5 from the third acquisition on; the exponent stops at 2.
+                for (int i = 2; i < leases.size(); i++) {
+                    Assertions.assertTrue(leases.get(i) <= 5, "lease " + i + " was " + leases.get(i) + "s");
+                }
+                Assertions.assertEquals(2, exponent);
+            } else {
+                // 2, 4, 8, 16, 32: the fifth lease is far past the cap the other item honors.
+                Assertions.assertTrue(leases.get(4) > 20, "uncapped fifth lease was " + leases.get(4) + "s");
+                Assertions.assertEquals(5, exponent);
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @MethodSource("containerVersions")
+    public void testConfiguredMaximumRepairsLegacyExponentsBeforeMultiplication(
+        SearchClusterContainer.ContainerVersion version
+    ) throws Exception {
+        setupOpenSearchContainer(version);
+        var context = WorkCoordinationTestContext.factory().noOtelTracking();
+        var boundedFactory = new WorkCoordinatorFactory(
+            version.getVersion(),
+            "",
+            OpenSearchWorkCoordinator.CompletionRetryConfig.DEFAULT,
+            Duration.ofDays(1)
+        );
+        var client = httpClientSupplier.get();
+        var legacyExponents = new long[] { 54, Integer.MAX_VALUE, Long.MAX_VALUE, Long.MIN_VALUE };
+
+        try (var worker = boundedFactory.get(client, 15, "worker")) {
+            for (int i = 0; i < legacyExponents.length; i++) {
+                long legacyExponent = legacyExponents[i];
+                var workItemId = workId("legacy-overflow-" + i, 0, 0L);
+                worker.createUnassignedWorkItem(workItemId, context::createUnassignedWorkContext);
+                var update = new ObjectMapper().createObjectNode();
+                update.putObject("doc").put("nextAcquisitionLeaseExponent", legacyExponent);
+                Assertions.assertEquals(200, client.makeJsonRequest(
+                    "POST",
+                    worker.getPathForUpdates(workItemId),
+                    null,
+                    update.toString()
+                ).getStatusCode());
+
+                var first = Assertions.assertInstanceOf(
+                    IWorkCoordinator.WorkItemAndDuration.class,
+                    worker.acquireNextWorkItem(Duration.ofMinutes(10), context::createAcquireNextItemContext)
+                );
+                Assertions.assertEquals(workItemId, first.getWorkItem().toString());
+                // Ten minutes reaches the one-day cap at exponent 8.
+                long normalizedExponent = legacyExponent < 0 ? 0 : 8;
+                var repaired = workItemSource(workItemId);
+                Assertions.assertEquals(normalizedExponent, repaired.path("acquisitionLeaseExponent").asLong());
+                Assertions.assertTrue(repaired.path("nextAcquisitionLeaseExponent").asLong() <= 8);
+
+                worker.releaseWorkItem(workItemId, IWorkCoordinator.LeaseReleaseReason.EARLY_EXIT,
+                    context::createReleaseWorkItemContext);
+                Assertions.assertEquals(
+                    normalizedExponent,
+                    workItemSource(workItemId).path("nextAcquisitionLeaseExponent").asLong()
+                );
+
+                var reclaimed = Assertions.assertInstanceOf(
+                    IWorkCoordinator.WorkItemAndDuration.class,
+                    worker.createOrUpdateLeaseForWorkItem(
+                        workItemId,
+                        Duration.ofMinutes(10),
+                        context::createAcquireSpecificItemContext
+                    )
+                );
+                Assertions.assertEquals(workItemId, reclaimed.getWorkItem().toString());
+                worker.completeWorkItem(workItemId, context::createCompleteWorkContext);
+            }
         }
     }
 

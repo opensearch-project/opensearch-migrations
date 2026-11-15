@@ -31,6 +31,7 @@ snapshotMigrationConfigs:
     slice: default
     metadataMigrationConfig: {}
     documentBackfillConfig:
+      failedDocumentStream: { type: disabled }
       maxConnections: 4
       documentsPerBulkRequest: 1000
       maxShardSizeBytes: 1000000000

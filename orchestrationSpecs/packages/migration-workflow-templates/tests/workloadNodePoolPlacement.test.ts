@@ -2,6 +2,7 @@ import {renderWorkflowTemplate} from "@opensearch-migrations/argo-workflow-build
 import {Replayer} from "../src/workflowTemplates/replayer";
 import {SetupCapture} from "../src/workflowTemplates/setupCapture";
 import {SetupKafka} from "../src/workflowTemplates/setupKafka";
+import {DocumentBulkLoad} from "../src/workflowTemplates/documentBulkLoad";
 
 const POOL_LABEL = "migrations.opensearch.org/workload-pool";
 
@@ -41,7 +42,15 @@ function expectPoolPlacement(
     expect(manifest).toContain("NoSchedule");
 }
 
-describe("capture/replay workloads resolve Helm-selected NodePools", () => {
+describe("migration workloads resolve Helm-selected NodePools", () => {
+    it("places RFS workers from the RFS pool setting", () => {
+        expectPoolPlacement(
+            renderWorkflowTemplate(DocumentBulkLoad),
+            "createrfsdeployment",
+            "rfsNodePoolName",
+        );
+    });
+
     it.each(["deployproxydeployment", "deployproxydeploymentwithtls"])(
         "places %s from the proxy pool setting",
         templateName => {

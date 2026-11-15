@@ -310,3 +310,33 @@ def test_repository_runner_uses_workflow_service_account_and_cleans_up():
     assert pod_spec.containers[0].image == "migration-console:test"
     assert pod_spec.containers[0].env[0].name == "AWS_SHARED_CREDENTIALS_FILE"
     assert batch_api.deleted[1:] == ("ma", "Background")
+
+
+def test_repository_runner_projects_azure_workload_credentials():
+    runner = RepositoryCheckJobRunner(
+        namespace="ma",
+        core_api=_JobCoreApi(),
+        batch_api=_BatchApi(),
+        image="migration-console:test",
+    )
+
+    job = runner._job(
+        "repository-check-azure",
+        "migration-console:test",
+        {
+            "repo_uri": "azure://storageaccount/snapshots/repository",
+            "endpoint": "http://azurite:10000",
+            "azure_credentials_secret_name": "azure-snapshot-creds",
+        },
+    )
+
+    environment = {
+        env.name: env.value_from.secret_key_ref
+        for env in job.spec.template.spec.containers[0].env
+    }
+    assert environment["AZURE_STORAGE_ACCOUNT_KEY"].name == "azure-snapshot-creds"
+    assert environment["AZURE_STORAGE_ACCOUNT_KEY"].key == "accountKey"
+    assert environment["AZURE_STORAGE_ACCOUNT_KEY"].optional is True
+    assert environment["AZURE_STORAGE_SAS_TOKEN"].name == "azure-snapshot-creds"
+    assert environment["AZURE_STORAGE_SAS_TOKEN"].key == "sasToken"
+    assert environment["AZURE_STORAGE_SAS_TOKEN"].optional is True

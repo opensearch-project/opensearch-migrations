@@ -27,7 +27,9 @@ import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.CoreMatchers.not;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -294,6 +296,28 @@ class IndexCreator_OS_2_11Test {
     }
 
     @Test
+    void testForCollection_usesTheCollectionClientInBothModes() throws Exception {
+        var client = mock(OpenSearchClient.class);
+        var collectionClient = mock(OpenSearchClient.class);
+        when(client.forCollection("tenant-a")).thenReturn(collectionClient);
+        when(collectionClient.createIndex(any(), any(), any())).thenReturn(INDEX_CREATE_SUCCESS);
+        when(collectionClient.hasIndex("indexName")).thenReturn(true);
+        var indexData = new IndexMetadataData_OS_2_11((ObjectNode) OBJECT_MAPPER.readTree(MIN_INDEX_JSON), "indexId", "indexName");
+        var indexCreator = new IndexCreator_OS_2_11(client).forCollection("tenant-a");
+        var awareness = new AwarenessAttributeSettings(false, 0);
+
+        var performed = indexCreator.create(indexData, MigrationMode.PERFORM, awareness, mock(ICreateIndexContext.class));
+        var simulated = indexCreator.create(indexData, MigrationMode.SIMULATE, awareness, mock(ICreateIndexContext.class));
+
+        assertThat(performed.wasSuccessful(), equalTo(true));
+        verify(collectionClient).createIndex(eq("indexName"), any(), any());
+        assertThat(simulated.getFailureType(), equalTo(CreationResult.CreationFailureType.INDEX_ALREADY_EXISTS));
+        verify(collectionClient).hasIndex("indexName");
+        verify(client, never()).createIndex(any(), any(), any());
+        verify(client, never()).hasIndex(any());
+    }
+
+    @Test
     void testCreate_retriesWithoutRoutingShardsWhenTargetRejectsThem() throws Exception {
         // opensearch-migrations#3440: the snapshot's top-level "routing_num_shards" is copied into
         // settings.number_of_routing_shards. If the target rejects it (here with the error
@@ -346,6 +370,81 @@ class IndexCreator_OS_2_11Test {
         var settings = requestBodyCapture.getValue().get("settings");
         assertThat(settings.toString(),
             equalTo("{\"number_of_replicas\":\"1\",\"number_of_shards\":\"1\",\"number_of_routing_shards\":1}"));
+    }
+
+    private static final String KNN_ENGINE_INDEX_JSON = "{\n" +
+        "  \"aliases\" : { },\n" +
+        "  \"mappings\" : {\n" +
+        "    \"dynamic_templates\": [ { \"vectors\": { \"match\": \"*_vec\", \"mapping\": {\n" +
+        "      \"type\": \"knn_vector\", \"dimension\": 4,\n" +
+        "      \"method\": { \"name\": \"hnsw\", \"engine\": \"faiss\", \"space_type\": \"l2\" } } } } ],\n" +
+        "    \"properties\": {\n" +
+        "      \"embedding\": { \"type\": \"knn_vector\", \"dimension\": 4,\n" +
+        "        \"method\": { \"name\": \"hnsw\", \"engine\": \"faiss\", \"space_type\": \"l2\", \"parameters\": { \"m\": 16 } } },\n" +
+        "      \"doc\": { \"properties\": { \"inner\": { \"type\": \"knn_vector\", \"dimension\": 4,\n" +
+        "        \"method\": { \"name\": \"hnsw\", \"engine\": \"faiss\" } } } },\n" +
+        "      \"engine\": { \"type\": \"keyword\" }\n" +
+        "    }\n" +
+        "  },\n" +
+        "  \"settings\" : { }\n" +
+        "}";
+
+    private static final String NEXTGEN_KNN_ENGINE_ERROR = "{\"error\":{\"root_cause\":[{\"type\":\"illegal_argument_exception\","
+        + "\"reason\":\"OpenSearch exception [type=illegal_argument_exception, reason=Field parameter 'engine' is not supported]"
+        + "- server : [envoy]\"}],\"type\":\"illegal_argument_exception\",\"reason\":\"OpenSearch exception "
+        + "[type=illegal_argument_exception, reason=Field parameter 'engine' is not supported]- server : [envoy]\"},\"status\":400}";
+
+    @Test
+    void testCreate_retriesWithoutKnnVectorEnginesWhenTargetRejectsThem() throws Exception {
+        var client = mock(OpenSearchClient.class);
+        when(client.createIndex(any(), any(), any())).thenAnswer(invocation -> {
+            ObjectNode body = invocation.getArgument(1);
+            if (body.get("mappings").toString().contains("\"engine\":\"faiss\"")) {
+                throw new InvalidResponse("Create index failed", new HttpResponse(400, "Bad Request", Map.of(), NEXTGEN_KNN_ENGINE_ERROR));
+            }
+            return INDEX_CREATE_SUCCESS;
+        });
+
+        var result = create(client, KNN_ENGINE_INDEX_JSON, "vectors_faiss");
+
+        assertThat(String.valueOf(result.getException()), result.wasSuccessful(), equalTo(true));
+        var requestBodyCapture = ArgumentCaptor.forClass(ObjectNode.class);
+        verify(client, times(2)).createIndex(any(), requestBodyCapture.capture(), any());
+        var mappings = requestBodyCapture.getValue().get("mappings");
+        assertThat(mappings.toString(), not(containsString("faiss")));
+        assertThat(mappings.at("/properties/embedding/method").toString(),
+            equalTo("{\"name\":\"hnsw\",\"space_type\":\"l2\",\"parameters\":{\"m\":16}}"));
+        assertThat(mappings.at("/properties/doc/properties/inner/method").toString(), equalTo("{\"name\":\"hnsw\"}"));
+        assertThat(mappings.at("/dynamic_templates/0/vectors/mapping/method").has("engine"), equalTo(false));
+        assertThat("a field named engine is not a knn method parameter",
+            mappings.at("/properties/engine/type").asText(), equalTo("keyword"));
+    }
+
+    @Test
+    void testCreate_keepsKnnVectorEnginesWhenTargetAcceptsThem() throws Exception {
+        var client = mock(OpenSearchClient.class);
+        when(client.createIndex(any(), any(), any())).thenReturn(INDEX_CREATE_SUCCESS);
+
+        var result = create(client, KNN_ENGINE_INDEX_JSON, "vectors_faiss");
+
+        assertThat(result.wasSuccessful(), equalTo(true));
+        var requestBodyCapture = ArgumentCaptor.forClass(ObjectNode.class);
+        verify(client).createIndex(any(), requestBodyCapture.capture(), any());
+        var mappings = requestBodyCapture.getValue().get("mappings");
+        assertThat(mappings.at("/properties/embedding/method/engine").asText(), equalTo("faiss"));
+        assertThat(mappings.at("/dynamic_templates/0/vectors/mapping/method/engine").asText(), equalTo("faiss"));
+    }
+
+    @Test
+    void testCreate_knnEngineRejectedWithNoEngineToRemove_fails() throws Exception {
+        var client = mock(OpenSearchClient.class);
+        when(client.createIndex(any(), any(), any()))
+            .thenThrow(new InvalidResponse("Create index failed", new HttpResponse(400, "Bad Request", Map.of(), NEXTGEN_KNN_ENGINE_ERROR)));
+
+        var result = create(client, MIN_INDEX_JSON, "indexName");
+
+        assertThat(result.wasSuccessful(), equalTo(false));
+        verify(client, times(1)).createIndex(any(), any(), any());
     }
 
     @SneakyThrows

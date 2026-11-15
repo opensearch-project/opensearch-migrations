@@ -29,6 +29,24 @@
         },
         {
             "type": "pattern",
+            "pattern": "EKS_CLUSTER_NAME",
+            "inputType": "input",
+            "id": "EKS_CLUSTER_NAME",
+            "label": "EKS cluster",
+            "defaultValue": "placeholder-cluster",
+            "visible": false
+        },
+        {
+            "type": "pattern",
+            "pattern": "MA_NAMESPACE",
+            "inputType": "input",
+            "id": "MA_NAMESPACE",
+            "label": "Kubernetes namespace",
+            "defaultValue": "placeholder-namespace",
+            "visible": false
+        },
+        {
+            "type": "pattern",
             "pattern": "CATCHUP_FLOOR_SECONDS",
             "inputType": "select",
             "id": "CATCHUP_FLOOR_SECONDS",
@@ -114,9 +132,9 @@
                     [
                         {
                             "expression": "FILL(m1, 0) / PERIOD(m1)",
-                            "label": "Captured req/s",
                             "id": "e2",
-                            "visible": true
+                            "visible": true,
+                            "label": "Captured req/s"
                         }
                     ]
                 ],
@@ -138,10 +156,10 @@
                 "metrics": [
                     [
                         {
-                            "expression": "(SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,sourceStatusCode,statusCodesMatch,targetStatusCode} MetricName=\"tupleComparison\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)) + FILL(SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,statusCodesMatch,targetStatusCode} MetricName=\"tupleComparison\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)), 0)) / 60",
-                            "label": "Replayed tuples/s",
+                            "expression": "SUM(SEARCH('Namespace=\"OpenSearchMigrations\" MetricName=\"tupleComparison\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)) / 60",
                             "id": "e1",
-                            "visible": true
+                            "visible": true,
+                            "label": "Replayed tuples/s"
                         }
                     ]
                 ],
@@ -190,17 +208,17 @@
                     [
                         {
                             "expression": "m1 / m2",
-                            "label": "lagBetweenSourceAndTargetRequests mean",
                             "id": "e3",
-                            "visible": false
+                            "visible": false,
+                            "label": "lagBetweenSourceAndTargetRequests mean"
                         }
                     ],
                     [
                         {
                             "expression": "e3 / 1000",
-                            "label": "Mean lag (s)",
                             "id": "e4",
-                            "visible": true
+                            "visible": true,
+                            "label": "Mean lag (s)"
                         }
                     ]
                 ],
@@ -237,25 +255,25 @@
                     [
                         {
                             "expression": "m1 / 1000",
-                            "label": "lag s",
                             "id": "e2",
-                            "visible": false
+                            "visible": false,
+                            "label": "lag s"
                         }
                     ],
                     [
                         {
                             "expression": "-1 * RATE(e2)",
-                            "label": "lag reduction s/s",
                             "id": "e3",
-                            "visible": false
+                            "visible": false,
+                            "label": "lag reduction s/s"
                         }
                     ],
                     [
                         {
                             "expression": "IF(e2 <= CATCHUP_FLOOR_SECONDS, 0, IF(e3 > 0.01, ((e2 - CATCHUP_FLOOR_SECONDS) / 3600) / e3, 0/0))",
-                            "label": "Hours to floor (0 = caught up)",
                             "id": "e4",
-                            "visible": true
+                            "visible": true,
+                            "label": "Hours to floor (0 = caught up)"
                         }
                     ]
                 ],
@@ -306,25 +324,25 @@
                     [
                         {
                             "expression": "m1 / m2",
-                            "label": "lagBetweenSourceAndTargetRequests mean",
                             "id": "e3",
-                            "visible": false
+                            "visible": false,
+                            "label": "lagBetweenSourceAndTargetRequests mean"
                         }
                     ],
                     [
                         {
                             "expression": "e3 / 1000",
-                            "label": "lag s",
                             "id": "e4",
-                            "visible": false
+                            "visible": false,
+                            "label": "lag s"
                         }
                     ],
                     [
                         {
                             "expression": "IF(DIFF_TIME(e4) > PERIOD(e4), 0/0, 1 - RATE(e4))",
-                            "label": "Speedup",
                             "id": "e5",
-                            "visible": true
+                            "visible": true,
+                            "label": "Speedup"
                         }
                     ]
                 ],
@@ -346,10 +364,10 @@
                 "metrics": [
                     [
                         {
-                            "expression": "100 * SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,sourceStatusCode,statusCodesMatch,targetStatusCode} MetricName=\"tupleComparison\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\" statusCodesMatch=\"true\"', 'Sum', 60)) / (SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,sourceStatusCode,statusCodesMatch,targetStatusCode} MetricName=\"tupleComparison\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)) + FILL(SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,statusCodesMatch,targetStatusCode} MetricName=\"tupleComparison\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)), 0))",
-                            "label": "Match %",
+                            "expression": "IF(SUM(SEARCH('Namespace=\"OpenSearchMigrations\" MetricName=\"tupleComparison\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)) > 0, 100 * SUM(SEARCH('Namespace=\"OpenSearchMigrations\" MetricName=\"tupleComparison\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\" statusCodesMatch=\"true\"', 'Sum', 60)) / SUM(SEARCH('Namespace=\"OpenSearchMigrations\" MetricName=\"tupleComparison\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)))",
                             "id": "e1",
-                            "visible": true
+                            "visible": true,
+                            "label": "Match %"
                         }
                     ]
                 ],
@@ -372,17 +390,17 @@
                     [
                         {
                             "expression": "MAX(SEARCH('{AWS/ES,ClientId,DomainName} MetricName=\"CPUUtilization\" DomainName=\"TARGET_DOMAIN\"', 'Maximum', 60))",
-                            "label": "CPU %",
                             "id": "e1",
-                            "visible": true
+                            "visible": true,
+                            "label": "CPU %"
                         }
                     ],
                     [
                         {
                             "expression": "MAX(SEARCH('{AWS/ES,ClientId,DomainName} MetricName=\"JVMMemoryPressure\" DomainName=\"TARGET_DOMAIN\"', 'Maximum', 60))",
-                            "label": "JVM %",
                             "id": "e2",
-                            "visible": true
+                            "visible": true,
+                            "label": "JVM %"
                         }
                     ]
                 ],
@@ -427,10 +445,10 @@
                 "metrics": [
                     [
                         {
-                            "expression": "100 * SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,sourceStatusCode,statusCodesMatch,targetStatusCode} MetricName=\"tupleComparison\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\" statusCodesMatch=\"true\"', 'Sum', 60)) / (SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,sourceStatusCode,statusCodesMatch,targetStatusCode} MetricName=\"tupleComparison\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)) + FILL(SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,statusCodesMatch,targetStatusCode} MetricName=\"tupleComparison\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)), 0))",
-                            "label": "Match %",
+                            "expression": "IF(SUM(SEARCH('Namespace=\"OpenSearchMigrations\" MetricName=\"tupleComparison\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)) > 0, 100 * SUM(SEARCH('Namespace=\"OpenSearchMigrations\" MetricName=\"tupleComparison\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\" statusCodesMatch=\"true\"', 'Sum', 60)) / SUM(SEARCH('Namespace=\"OpenSearchMigrations\" MetricName=\"tupleComparison\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)))",
                             "id": "e1",
-                            "visible": true
+                            "visible": true,
+                            "label": "Match %"
                         }
                     ]
                 ],
@@ -459,17 +477,17 @@
                     [
                         {
                             "expression": "SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,sourceStatusCode,statusCodesMatch,targetStatusCode} MetricName=\"tupleComparison\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\" statusCodesMatch=\"false\"', 'Sum')",
-                            "label": "${PROP('Dim.method')} ${PROP('Dim.sourceStatusCode')} → ${PROP('Dim.targetStatusCode')}",
                             "id": "e1",
-                            "visible": true
+                            "visible": true,
+                            "label": "${PROP('Dim.method')} ${PROP('Dim.sourceStatusCode')} → ${PROP('Dim.targetStatusCode')}"
                         }
                     ],
                     [
                         {
                             "expression": "SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,statusCodesMatch,targetStatusCode} MetricName=\"tupleComparison\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\" statusCodesMatch=\"false\"', 'Sum')",
-                            "label": "${PROP('Dim.method')} no source response → ${PROP('Dim.targetStatusCode')}",
                             "id": "e2",
-                            "visible": true
+                            "visible": true,
+                            "label": "${PROP('Dim.method')} no source response → ${PROP('Dim.targetStatusCode')}"
                         }
                     ]
                 ],
@@ -498,9 +516,9 @@
                     [
                         {
                             "expression": "SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,sourceStatusCode,statusCodesMatch,targetStatusCode} MetricName=\"tupleComparison\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\" statusCodesMatch=\"true\"', 'Sum', 60) / 60",
-                            "label": "${PROP('Dim.method')} ${PROP('Dim.targetStatusCode')}",
                             "id": "e1",
-                            "visible": true
+                            "visible": true,
+                            "label": "${PROP('Dim.method')} ${PROP('Dim.targetStatusCode')}"
                         }
                     ]
                 ]
@@ -523,33 +541,33 @@
                     [
                         {
                             "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier} MetricName=\"tupleSourceFirstByteDuration\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)) / SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier} MetricName=\"tupleSourceFirstByteDuration\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'SampleCount', 60))",
-                            "label": "Source: request → first byte",
                             "id": "e1",
-                            "visible": true
+                            "visible": true,
+                            "label": "Source: request → first byte"
                         }
                     ],
                     [
                         {
                             "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier} MetricName=\"tupleTargetFirstByteDuration\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)) / SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier} MetricName=\"tupleTargetFirstByteDuration\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'SampleCount', 60))",
-                            "label": "Target: request → first byte",
                             "id": "e2",
-                            "visible": true
+                            "visible": true,
+                            "label": "Target: request → first byte"
                         }
                     ],
                     [
                         {
                             "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier} MetricName=\"tupleSourceResponseDuration\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)) / SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier} MetricName=\"tupleSourceResponseDuration\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'SampleCount', 60))",
-                            "label": "Source: request → response complete",
                             "id": "e3",
-                            "visible": true
+                            "visible": true,
+                            "label": "Source: request → response complete"
                         }
                     ],
                     [
                         {
                             "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier} MetricName=\"tupleTargetResponseDuration\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)) / SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier} MetricName=\"tupleTargetResponseDuration\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'SampleCount', 60))",
-                            "label": "Target: request → response complete",
                             "id": "e4",
-                            "visible": true
+                            "visible": true,
+                            "label": "Target: request → response complete"
                         }
                     ]
                 ],
@@ -577,18 +595,18 @@
                 "metrics": [
                     [
                         {
-                            "expression": "(FILL(SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,span,targetSlower} MetricName=\"tupleResponseDurationDifference\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\" span=\"firstByte\" targetSlower=\"true\"', 'Sum', 60)), 0) - FILL(SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,span,targetSlower} MetricName=\"tupleResponseDurationDifference\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\" span=\"firstByte\" targetSlower=\"false\"', 'Sum', 60)), 0)) / SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,span,targetSlower} MetricName=\"tupleResponseDurationDifference\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\" span=\"firstByte\"', 'SampleCount', 60))",
-                            "label": "To first byte",
+                            "expression": "IF(SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,span,targetSlower} MetricName=\"tupleResponseDurationDifference\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\" span=\"firstByte\"', 'SampleCount', 60)) > 0, (FILL(SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,span,targetSlower} MetricName=\"tupleResponseDurationDifference\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\" span=\"firstByte\" targetSlower=\"true\"', 'Sum', 60)), 0) - FILL(SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,span,targetSlower} MetricName=\"tupleResponseDurationDifference\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\" span=\"firstByte\" targetSlower=\"false\"', 'Sum', 60)), 0)) / SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,span,targetSlower} MetricName=\"tupleResponseDurationDifference\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\" span=\"firstByte\"', 'SampleCount', 60)))",
                             "id": "e1",
-                            "visible": true
+                            "visible": true,
+                            "label": "To first byte"
                         }
                     ],
                     [
                         {
-                            "expression": "(FILL(SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,span,targetSlower} MetricName=\"tupleResponseDurationDifference\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\" span=\"total\" targetSlower=\"true\"', 'Sum', 60)), 0) - FILL(SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,span,targetSlower} MetricName=\"tupleResponseDurationDifference\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\" span=\"total\" targetSlower=\"false\"', 'Sum', 60)), 0)) / SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,span,targetSlower} MetricName=\"tupleResponseDurationDifference\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\" span=\"total\"', 'SampleCount', 60))",
-                            "label": "To response complete",
+                            "expression": "IF(SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,span,targetSlower} MetricName=\"tupleResponseDurationDifference\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\" span=\"total\"', 'SampleCount', 60)) > 0, (FILL(SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,span,targetSlower} MetricName=\"tupleResponseDurationDifference\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\" span=\"total\" targetSlower=\"true\"', 'Sum', 60)), 0) - FILL(SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,span,targetSlower} MetricName=\"tupleResponseDurationDifference\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\" span=\"total\" targetSlower=\"false\"', 'Sum', 60)), 0)) / SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,span,targetSlower} MetricName=\"tupleResponseDurationDifference\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\" span=\"total\"', 'SampleCount', 60)))",
                             "id": "e2",
-                            "visible": true
+                            "visible": true,
+                            "label": "To response complete"
                         }
                     ]
                 ],
@@ -617,17 +635,17 @@
                     [
                         {
                             "expression": "100 * (SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier} MetricName=\"tupleTargetFirstByteDuration\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)) / SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier} MetricName=\"tupleSourceFirstByteDuration\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)) - 1)",
-                            "label": "To first byte (Σ target / Σ source − 1, duration-weighted)",
                             "id": "e1",
-                            "visible": true
+                            "visible": true,
+                            "label": "To first byte (Σ target / Σ source − 1, duration-weighted)"
                         }
                     ],
                     [
                         {
                             "expression": "100 * (SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier} MetricName=\"tupleTargetResponseDuration\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)) / SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier} MetricName=\"tupleSourceResponseDuration\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)) - 1)",
-                            "label": "To response complete (Σ target / Σ source − 1, duration-weighted)",
                             "id": "e2",
-                            "visible": true
+                            "visible": true,
+                            "label": "To response complete (Σ target / Σ source − 1, duration-weighted)"
                         }
                     ]
                 ],
@@ -680,17 +698,17 @@
                     [
                         {
                             "expression": "FILL(m1, 0) / PERIOD(m1)",
-                            "label": "Proxy requests captured/s",
                             "id": "e2",
-                            "visible": true
+                            "visible": true,
+                            "label": "Proxy requests captured/s"
                         }
                     ],
                     [
                         {
                             "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,qualifier,recordKind} MetricName=\"capturePublishingRecordsAccepted\" OTelLib=\"captureProxy\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)) / 60",
-                            "label": "Proxy Kafka records published/s",
                             "id": "e3",
-                            "visible": true
+                            "visible": true,
+                            "label": "Proxy Kafka records published/s"
                         }
                     ],
                     [
@@ -709,9 +727,9 @@
                     [
                         {
                             "expression": "FILL(m4, 0) / PERIOD(m4)",
-                            "label": "Replayer Kafka records read/s",
                             "id": "e5",
-                            "visible": true
+                            "visible": true,
+                            "label": "Replayer Kafka records read/s"
                         }
                     ],
                     [
@@ -730,17 +748,17 @@
                     [
                         {
                             "expression": "FILL(m6, 0) / PERIOD(m6)",
-                            "label": "Replayer target transactions/s",
                             "id": "e7",
-                            "visible": true
+                            "visible": true,
+                            "label": "Replayer target transactions/s"
                         }
                     ],
                     [
                         {
-                            "expression": "(SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,sourceStatusCode,statusCodesMatch,targetStatusCode} MetricName=\"tupleComparison\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)) + FILL(SUM(SEARCH('{OpenSearchMigrations,OTelLib,method,qualifier,statusCodesMatch,targetStatusCode} MetricName=\"tupleComparison\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)), 0)) / 60",
-                            "label": "Tuples compared/s",
+                            "expression": "SUM(SEARCH('Namespace=\"OpenSearchMigrations\" MetricName=\"tupleComparison\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)) / 60",
                             "id": "e8",
-                            "visible": true
+                            "visible": true,
+                            "label": "Tuples compared/s"
                         }
                     ]
                 ]
@@ -763,9 +781,9 @@
                     [
                         {
                             "expression": "SUM(SEARCH('{AWS/NetworkELB,LoadBalancer} MetricName=\"ProcessedBytes\" capturep', 'Sum', 60)) / 60 / 1048576",
-                            "label": "Capture NLB processed (both directions)",
                             "id": "e1",
-                            "visible": true
+                            "visible": true,
+                            "label": "Capture NLB processed (both directions)"
                         }
                     ],
                     [
@@ -784,9 +802,9 @@
                     [
                         {
                             "expression": "FILL(m2, 0) / PERIOD(m2) / 1048576",
-                            "label": "Proxy request bytes (client → proxy)",
                             "id": "e3",
-                            "visible": true
+                            "visible": true,
+                            "label": "Proxy request bytes (client → proxy)"
                         }
                     ],
                     [
@@ -805,17 +823,17 @@
                     [
                         {
                             "expression": "FILL(m4, 0) / PERIOD(m4) / 1048576",
-                            "label": "Proxy response bytes (proxy → client)",
                             "id": "e5",
-                            "visible": true
+                            "visible": true,
+                            "label": "Proxy response bytes (proxy → client)"
                         }
                     ],
                     [
                         {
                             "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,qualifier,recordKind} MetricName=\"capturePublishingBytesAccepted\" OTelLib=\"captureProxy\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)) / 60 / 1048576",
-                            "label": "Proxy → Kafka published",
                             "id": "e6",
-                            "visible": true
+                            "visible": true,
+                            "label": "Proxy → Kafka published"
                         }
                     ],
                     [
@@ -834,9 +852,9 @@
                     [
                         {
                             "expression": "FILL(m7, 0) / PERIOD(m7) / 1048576",
-                            "label": "Kafka → replayer read",
                             "id": "e8",
-                            "visible": true
+                            "visible": true,
+                            "label": "Kafka → replayer read"
                         }
                     ],
                     [
@@ -855,9 +873,9 @@
                     [
                         {
                             "expression": "FILL(m9, 0) / PERIOD(m9) / 1048576",
-                            "label": "Replayer → target requests",
                             "id": "e10",
-                            "visible": true
+                            "visible": true,
+                            "label": "Replayer → target requests"
                         }
                     ],
                     [
@@ -876,9 +894,9 @@
                     [
                         {
                             "expression": "FILL(m11, 0) / PERIOD(m11) / 1048576",
-                            "label": "Target → replayer responses",
                             "id": "e12",
-                            "visible": true
+                            "visible": true,
+                            "label": "Target → replayer responses"
                         }
                     ]
                 ]
@@ -914,9 +932,9 @@
                     [
                         {
                             "expression": "m1 / 1000",
-                            "label": "Mean replay lag (s)",
                             "id": "e2",
-                            "visible": true
+                            "visible": true,
+                            "label": "Mean replay lag (s)"
                         }
                     ],
                     [
@@ -935,17 +953,17 @@
                     [
                         {
                             "expression": "m3 / 1000",
-                            "label": "Mean schedule slip (s)",
                             "id": "e4",
-                            "visible": true
+                            "visible": true,
+                            "label": "Mean schedule slip (s)"
                         }
                     ],
                     [
                         {
                             "expression": "TIME_SERIES(CATCHUP_FLOOR_SECONDS)",
-                            "label": "Catch-up floor (s)",
                             "id": "e5",
                             "visible": true,
+                            "label": "Catch-up floor (s)",
                             "color": "#7f7f7f"
                         }
                     ],
@@ -966,17 +984,17 @@
                     [
                         {
                             "expression": "m6 / 1000",
-                            "label": "lag 5m",
                             "id": "e7",
-                            "visible": false
+                            "visible": false,
+                            "label": "lag 5m"
                         }
                     ],
                     [
                         {
                             "expression": "IF(DIFF_TIME(e7) > PERIOD(e7), 0/0, 1 - RATE(e7))",
-                            "label": "Actual speedup (5 min)",
                             "id": "e8",
                             "visible": true,
+                            "label": "Actual speedup (5 min)",
                             "yAxis": "right"
                         }
                     ]
@@ -1054,34 +1072,34 @@
                     [
                         {
                             "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,qualifier,recordKind} MetricName=\"capturePublishingRecordsAccepted\" OTelLib=\"captureProxy\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)) / 60",
-                            "label": "Records accepted/s",
                             "id": "e1",
-                            "visible": true
+                            "visible": true,
+                            "label": "Records accepted/s"
                         }
                     ],
                     [
                         {
                             "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,outcome,qualifier,recordKind} MetricName=\"capturePublishingCompletions\" OTelLib=\"captureProxy\" qualifier=\"MA_QUALIFIER\" outcome=\"acknowledged\"', 'Sum', 60)) / 60",
-                            "label": "Acknowledged/s",
                             "id": "e2",
-                            "visible": true
+                            "visible": true,
+                            "label": "Acknowledged/s"
                         }
                     ],
                     [
                         {
                             "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,qualifier,recordKind} MetricName=\"capturePublishingRecordsAwaitingAcknowledgement\" OTelLib=\"captureProxy\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)) / 60",
-                            "label": "Records awaiting ack (fleet)",
                             "id": "e3",
                             "visible": true,
+                            "label": "Records awaiting ack (fleet)",
                             "yAxis": "right"
                         }
                     ],
                     [
                         {
                             "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,qualifier,recordKind} MetricName=\"capturePublishingRecordsAwaitingAcknowledgement\" OTelLib=\"captureProxy\" qualifier=\"MA_QUALIFIER\"', 'Maximum', 60))",
-                            "label": "Records awaiting ack (hottest pod)",
                             "id": "e4",
                             "visible": true,
+                            "label": "Records awaiting ack (hottest pod)",
                             "yAxis": "right"
                         }
                     ]
@@ -1124,9 +1142,9 @@
                     [
                         {
                             "expression": "FILL(m1, 0) / PERIOD(m1)",
-                            "label": "Read/s",
                             "id": "e2",
-                            "visible": true
+                            "visible": true,
+                            "label": "Read/s"
                         }
                     ],
                     [
@@ -1145,17 +1163,17 @@
                     [
                         {
                             "expression": "FILL(m3, 0) / PERIOD(m3)",
-                            "label": "Committed/s",
                             "id": "e4",
-                            "visible": true
+                            "visible": true,
+                            "label": "Committed/s"
                         }
                     ],
                     [
                         {
                             "expression": "SEARCH('{OpenSearchMigrations,OTelLib,qualifier,outcome} MetricName=\"kafkaSourceCommitResolutions\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60) / 60",
-                            "label": "Commit resolutions/s ${PROP('Dim.outcome')}",
                             "id": "e5",
-                            "visible": true
+                            "visible": true,
+                            "label": "Commit resolutions/s ${PROP('Dim.outcome')}"
                         }
                     ]
                 ]
@@ -1191,9 +1209,9 @@
                     [
                         {
                             "expression": "FILL(m1, 0) / PERIOD(m1)",
-                            "label": "Requests reconstituted",
                             "id": "e2",
-                            "visible": true
+                            "visible": true,
+                            "label": "Requests reconstituted"
                         }
                     ],
                     [
@@ -1212,9 +1230,9 @@
                     [
                         {
                             "expression": "FILL(m3, 0) / PERIOD(m3)",
-                            "label": "Responses proven complete",
                             "id": "e4",
-                            "visible": true
+                            "visible": true,
+                            "label": "Responses proven complete"
                         }
                     ],
                     [
@@ -1233,17 +1251,17 @@
                     [
                         {
                             "expression": "FILL(m5, 0) / PERIOD(m5)",
-                            "label": "Responses unproven complete",
                             "id": "e6",
-                            "visible": true
+                            "visible": true,
+                            "label": "Responses unproven complete"
                         }
                     ],
                     [
                         {
                             "expression": "SEARCH('{OpenSearchMigrations,OTelLib,qualifier,incompleteReason} MetricName=\"replayIntakeResponsesIncomplete\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60) / 60",
-                            "label": "Incomplete ${PROP('Dim.incompleteReason')}",
                             "id": "e7",
-                            "visible": true
+                            "visible": true,
+                            "label": "Incomplete ${PROP('Dim.incompleteReason')}"
                         }
                     ],
                     [
@@ -1262,9 +1280,9 @@
                     [
                         {
                             "expression": "FILL(m8, 0) / PERIOD(m8)",
-                            "label": "Source connections expired",
                             "id": "e9",
-                            "visible": true
+                            "visible": true,
+                            "label": "Source connections expired"
                         }
                     ]
                 ]
@@ -1300,9 +1318,9 @@
                     [
                         {
                             "expression": "m1 / PERIOD(m1)",
-                            "label": "Open target connections (fleet)",
                             "id": "e2",
-                            "visible": true
+                            "visible": true,
+                            "label": "Open target connections (fleet)"
                         }
                     ],
                     [
@@ -1321,9 +1339,9 @@
                     [
                         {
                             "expression": "FILL(m3, 0) / PERIOD(m3)",
-                            "label": "Opened/s",
                             "id": "e4",
                             "visible": true,
+                            "label": "Opened/s",
                             "yAxis": "right"
                         }
                     ],
@@ -1343,9 +1361,9 @@
                     [
                         {
                             "expression": "FILL(m5, 0) / PERIOD(m5)",
-                            "label": "Closed/s",
                             "id": "e6",
                             "visible": true,
+                            "label": "Closed/s",
                             "yAxis": "right"
                         }
                     ],
@@ -1365,9 +1383,9 @@
                     [
                         {
                             "expression": "FILL(m7, 0) / PERIOD(m7)",
-                            "label": "Connect exceptions/s",
                             "id": "e8",
                             "visible": true,
+                            "label": "Connect exceptions/s",
                             "yAxis": "right"
                         }
                     ],
@@ -1387,9 +1405,9 @@
                     [
                         {
                             "expression": "FILL(m9, 0) / PERIOD(m9)",
-                            "label": "Non-retryable failures/s",
                             "id": "e10",
                             "visible": true,
+                            "label": "Non-retryable failures/s",
                             "yAxis": "right"
                         }
                     ]
@@ -1432,9 +1450,9 @@
                     [
                         {
                             "expression": "m1 / PERIOD(m1)",
-                            "label": "Client connections (fleet)",
                             "id": "e2",
-                            "visible": true
+                            "visible": true,
+                            "label": "Client connections (fleet)"
                         }
                     ],
                     [
@@ -1453,9 +1471,9 @@
                     [
                         {
                             "expression": "m3",
-                            "label": "Client connections (hottest pod)",
                             "id": "e4",
-                            "visible": true
+                            "visible": true,
+                            "label": "Client connections (hottest pod)"
                         }
                     ],
                     [
@@ -1474,9 +1492,9 @@
                     [
                         {
                             "expression": "m5 / PERIOD(m5)",
-                            "label": "Active writers (fleet)",
                             "id": "e6",
-                            "visible": true
+                            "visible": true,
+                            "label": "Active writers (fleet)"
                         }
                     ],
                     [
@@ -1495,17 +1513,17 @@
                     [
                         {
                             "expression": "m7 / PERIOD(m7)",
-                            "label": "Draining writers (fleet)",
                             "id": "e8",
-                            "visible": true
+                            "visible": true,
+                            "label": "Draining writers (fleet)"
                         }
                     ],
                     [
                         {
                             "expression": "SEARCH('{OpenSearchMigrations,OTelLib,qualifier,reason} MetricName=\"captureConnectionCloses\" OTelLib=\"captureProxy\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60) / 60",
-                            "label": "Closes/s ${PROP('Dim.reason')}",
                             "id": "e9",
-                            "visible": true
+                            "visible": true,
+                            "label": "Closes/s ${PROP('Dim.reason')}"
                         }
                     ]
                 ]
@@ -1541,9 +1559,9 @@
                     [
                         {
                             "expression": "m1 / PERIOD(m1)",
-                            "label": "Unread lag (fleet)",
                             "id": "e2",
-                            "visible": true
+                            "visible": true,
+                            "label": "Unread lag (fleet)"
                         }
                     ],
                     [
@@ -1575,9 +1593,9 @@
                     [
                         {
                             "expression": "IF(m4 > 0, (m1 + m3) / PERIOD(m1))",
-                            "label": "Uncommitted backlog = unread + held (fleet)",
                             "id": "e5",
-                            "visible": true
+                            "visible": true,
+                            "label": "Uncommitted backlog = unread + held (fleet)"
                         }
                     ],
                     [
@@ -1596,9 +1614,9 @@
                     [
                         {
                             "expression": "m6",
-                            "label": "Largest single-partition lag",
                             "id": "e7",
-                            "visible": true
+                            "visible": true,
+                            "label": "Largest single-partition lag"
                         }
                     ],
                     [
@@ -1617,9 +1635,9 @@
                     [
                         {
                             "expression": "m8 / PERIOD(m8)",
-                            "label": "Partitions with unknown lag",
                             "id": "e9",
                             "visible": true,
+                            "label": "Partitions with unknown lag",
                             "yAxis": "right"
                         }
                     ]
@@ -1662,9 +1680,9 @@
                     [
                         {
                             "expression": "m1 / PERIOD(m1)",
-                            "label": "Active contexts (fleet)",
                             "id": "e2",
-                            "visible": true
+                            "visible": true,
+                            "label": "Active contexts (fleet)"
                         }
                     ],
                     [
@@ -1683,9 +1701,9 @@
                     [
                         {
                             "expression": "m3 / PERIOD(m3)",
-                            "label": "Owner operations (fleet)",
                             "id": "e4",
-                            "visible": true
+                            "visible": true,
+                            "label": "Owner operations (fleet)"
                         }
                     ],
                     [
@@ -1704,9 +1722,9 @@
                     [
                         {
                             "expression": "m5 / PERIOD(m5)",
-                            "label": "Long-running owner operations (fleet)",
                             "id": "e6",
-                            "visible": true
+                            "visible": true,
+                            "label": "Long-running owner operations (fleet)"
                         }
                     ],
                     [
@@ -1725,9 +1743,9 @@
                     [
                         {
                             "expression": "m7 / PERIOD(m7)",
-                            "label": "Record trackers (fleet)",
                             "id": "e8",
-                            "visible": true
+                            "visible": true,
+                            "label": "Record trackers (fleet)"
                         }
                     ],
                     [
@@ -1746,9 +1764,9 @@
                     [
                         {
                             "expression": "m9 / PERIOD(m9)",
-                            "label": "Retry-ready request supply (fleet)",
                             "id": "e10",
-                            "visible": true
+                            "visible": true,
+                            "label": "Retry-ready request supply (fleet)"
                         }
                     ]
                 ]
@@ -1784,9 +1802,9 @@
                     [
                         {
                             "expression": "m1 / PERIOD(m1)",
-                            "label": "Permits active (fleet)",
                             "id": "e2",
-                            "visible": true
+                            "visible": true,
+                            "label": "Permits active (fleet)"
                         }
                     ],
                     [
@@ -1805,9 +1823,9 @@
                     [
                         {
                             "expression": "m3 / PERIOD(m3)",
-                            "label": "Permits pending (fleet)",
                             "id": "e4",
-                            "visible": true
+                            "visible": true,
+                            "label": "Permits pending (fleet)"
                         }
                     ],
                     [
@@ -1826,9 +1844,9 @@
                     [
                         {
                             "expression": "FILL(m5, 0) / PERIOD(m5)",
-                            "label": "Retried requests/s",
                             "id": "e6",
                             "visible": true,
+                            "label": "Retried requests/s",
                             "yAxis": "right"
                         }
                     ],
@@ -1848,18 +1866,18 @@
                     [
                         {
                             "expression": "FILL(m7, 0) / PERIOD(m7)",
-                            "label": "Retries exhausted/s",
                             "id": "e8",
                             "visible": true,
+                            "label": "Retries exhausted/s",
                             "yAxis": "right"
                         }
                     ],
                     [
                         {
                             "expression": "SEARCH('{OpenSearchMigrations,OTelLib,qualifier,noResponseKind} MetricName=\"targetAttemptsWithoutResponse\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60) / 60",
-                            "label": "No response/s ${PROP('Dim.noResponseKind')}",
                             "id": "e9",
                             "visible": true,
+                            "label": "No response/s ${PROP('Dim.noResponseKind')}",
                             "yAxis": "right"
                         }
                     ]
@@ -1902,9 +1920,9 @@
                     [
                         {
                             "expression": "m1",
-                            "label": "Gather request",
                             "id": "e2",
-                            "visible": true
+                            "visible": true,
+                            "label": "Gather request"
                         }
                     ],
                     [
@@ -1923,9 +1941,9 @@
                     [
                         {
                             "expression": "m3",
-                            "label": "Wait for source's first byte",
                             "id": "e4",
-                            "visible": true
+                            "visible": true,
+                            "label": "Wait for source's first byte"
                         }
                     ],
                     [
@@ -1944,9 +1962,9 @@
                     [
                         {
                             "expression": "m5",
-                            "label": "Gather source response",
                             "id": "e6",
-                            "visible": true
+                            "visible": true,
+                            "label": "Gather source response"
                         }
                     ],
                     [
@@ -1965,9 +1983,9 @@
                     [
                         {
                             "expression": "m7",
-                            "label": "Kafka publish → ack",
                             "id": "e8",
-                            "visible": true
+                            "visible": true,
+                            "label": "Kafka publish → ack"
                         }
                     ],
                     [
@@ -1986,9 +2004,9 @@
                     [
                         {
                             "expression": "m9",
-                            "label": "Client connection lifetime",
                             "id": "e10",
-                            "visible": false
+                            "visible": false,
+                            "label": "Client connection lifetime"
                         }
                     ]
                 ]
@@ -2024,9 +2042,9 @@
                     [
                         {
                             "expression": "m1 / 1000",
-                            "label": "Oldest head (any pod)",
                             "id": "e2",
-                            "visible": true
+                            "visible": true,
+                            "label": "Oldest head (any pod)"
                         }
                     ],
                     [
@@ -2045,9 +2063,9 @@
                     [
                         {
                             "expression": "m3 / 1000",
-                            "label": "Oldest head per pod (p50 across pods)",
                             "id": "e4",
-                            "visible": true
+                            "visible": true,
+                            "label": "Oldest head per pod (p50 across pods)"
                         }
                     ],
                     [
@@ -2066,9 +2084,9 @@
                     [
                         {
                             "expression": "m5 / PERIOD(m5)",
-                            "label": "Partitions with head held > 5 min (fleet)",
                             "id": "e6",
                             "visible": true,
+                            "label": "Partitions with head held > 5 min (fleet)",
                             "yAxis": "right"
                         }
                     ]
@@ -2115,9 +2133,9 @@
                     [
                         {
                             "expression": "m1 / 1000",
-                            "label": "Oldest context",
                             "id": "e2",
-                            "visible": true
+                            "visible": true,
+                            "label": "Oldest context"
                         }
                     ],
                     [
@@ -2136,9 +2154,9 @@
                     [
                         {
                             "expression": "m3 / 1000",
-                            "label": "Oldest Kafka record",
                             "id": "e4",
-                            "visible": true
+                            "visible": true,
+                            "label": "Oldest Kafka record"
                         }
                     ]
                 ],
@@ -2180,9 +2198,9 @@
                     [
                         {
                             "expression": "m1 / 1000",
-                            "label": "Target transaction",
                             "id": "e2",
-                            "visible": true
+                            "visible": true,
+                            "label": "Target transaction"
                         }
                     ],
                     [
@@ -2201,9 +2219,9 @@
                     [
                         {
                             "expression": "m3 / 1000",
-                            "label": "Connect",
                             "id": "e4",
-                            "visible": true
+                            "visible": true,
+                            "label": "Connect"
                         }
                     ],
                     [
@@ -2222,9 +2240,9 @@
                     [
                         {
                             "expression": "m5 / 1000",
-                            "label": "Send",
                             "id": "e6",
-                            "visible": true
+                            "visible": true,
+                            "label": "Send"
                         }
                     ],
                     [
@@ -2243,9 +2261,9 @@
                     [
                         {
                             "expression": "m7 / 1000",
-                            "label": "Wait for response",
                             "id": "e8",
-                            "visible": true
+                            "visible": true,
+                            "label": "Wait for response"
                         }
                     ],
                     [
@@ -2264,9 +2282,9 @@
                     [
                         {
                             "expression": "m9 / 1000",
-                            "label": "Receive response",
                             "id": "e10",
-                            "visible": true
+                            "visible": true,
+                            "label": "Receive response"
                         }
                     ]
                 ],
@@ -2308,9 +2326,9 @@
                     [
                         {
                             "expression": "m1",
-                            "label": " p10",
                             "id": "e2",
-                            "visible": true
+                            "visible": true,
+                            "label": " p10"
                         }
                     ],
                     [
@@ -2329,9 +2347,9 @@
                     [
                         {
                             "expression": "m3",
-                            "label": " p50",
                             "id": "e4",
-                            "visible": true
+                            "visible": true,
+                            "label": " p50"
                         }
                     ],
                     [
@@ -2350,9 +2368,9 @@
                     [
                         {
                             "expression": "m5",
-                            "label": " p90",
                             "id": "e6",
-                            "visible": true
+                            "visible": true,
+                            "label": " p90"
                         }
                     ],
                     [
@@ -2371,9 +2389,9 @@
                     [
                         {
                             "expression": "m7",
-                            "label": " max",
                             "id": "e8",
-                            "visible": true
+                            "visible": true,
+                            "label": " max"
                         }
                     ]
                 ]
@@ -2409,9 +2427,9 @@
                     [
                         {
                             "expression": "m1",
-                            "label": " p10",
                             "id": "e2",
-                            "visible": true
+                            "visible": true,
+                            "label": " p10"
                         }
                     ],
                     [
@@ -2430,9 +2448,9 @@
                     [
                         {
                             "expression": "m3",
-                            "label": " p50",
                             "id": "e4",
-                            "visible": true
+                            "visible": true,
+                            "label": " p50"
                         }
                     ],
                     [
@@ -2451,9 +2469,9 @@
                     [
                         {
                             "expression": "m5",
-                            "label": " p90",
                             "id": "e6",
-                            "visible": true
+                            "visible": true,
+                            "label": " p90"
                         }
                     ],
                     [
@@ -2472,9 +2490,9 @@
                     [
                         {
                             "expression": "m7",
-                            "label": " max",
                             "id": "e8",
-                            "visible": true
+                            "visible": true,
+                            "label": " max"
                         }
                     ]
                 ]
@@ -2510,9 +2528,9 @@
                     [
                         {
                             "expression": "m1",
-                            "label": " p10",
                             "id": "e2",
-                            "visible": true
+                            "visible": true,
+                            "label": " p10"
                         }
                     ],
                     [
@@ -2531,9 +2549,9 @@
                     [
                         {
                             "expression": "m3",
-                            "label": " p50",
                             "id": "e4",
-                            "visible": true
+                            "visible": true,
+                            "label": " p50"
                         }
                     ],
                     [
@@ -2552,9 +2570,9 @@
                     [
                         {
                             "expression": "m5",
-                            "label": " p90",
                             "id": "e6",
-                            "visible": true
+                            "visible": true,
+                            "label": " p90"
                         }
                     ],
                     [
@@ -2573,9 +2591,9 @@
                     [
                         {
                             "expression": "m7",
-                            "label": " max",
                             "id": "e8",
-                            "visible": true
+                            "visible": true,
+                            "label": " max"
                         }
                     ]
                 ]
@@ -2611,9 +2629,9 @@
                     [
                         {
                             "expression": "m1",
-                            "label": " p10",
                             "id": "e2",
-                            "visible": true
+                            "visible": true,
+                            "label": " p10"
                         }
                     ],
                     [
@@ -2632,9 +2650,9 @@
                     [
                         {
                             "expression": "m3",
-                            "label": " p50",
                             "id": "e4",
-                            "visible": true
+                            "visible": true,
+                            "label": " p50"
                         }
                     ],
                     [
@@ -2653,9 +2671,9 @@
                     [
                         {
                             "expression": "m5",
-                            "label": " p90",
                             "id": "e6",
-                            "visible": true
+                            "visible": true,
+                            "label": " p90"
                         }
                     ],
                     [
@@ -2674,9 +2692,9 @@
                     [
                         {
                             "expression": "m7",
-                            "label": " max",
                             "id": "e8",
-                            "visible": true
+                            "visible": true,
+                            "label": " max"
                         }
                     ]
                 ]
@@ -2699,9 +2717,9 @@
                     [
                         {
                             "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,qualifier,reason} MetricName=\"capturePublisherFailures\" OTelLib=\"captureProxy\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60))",
-                            "label": "Publisher failures",
                             "id": "e1",
-                            "visible": true
+                            "visible": true,
+                            "label": "Publisher failures"
                         }
                     ],
                     [
@@ -2720,9 +2738,9 @@
                     [
                         {
                             "expression": "FILL(m2, 0)",
-                            "label": "Writes rejected",
                             "id": "e3",
-                            "visible": true
+                            "visible": true,
+                            "label": "Writes rejected"
                         }
                     ],
                     [
@@ -2741,9 +2759,9 @@
                     [
                         {
                             "expression": "FILL(m4, 0)",
-                            "label": "Heartbeat deadline violations",
                             "id": "e5",
-                            "visible": true
+                            "visible": true,
+                            "label": "Heartbeat deadline violations"
                         }
                     ],
                     [
@@ -2762,9 +2780,9 @@
                     [
                         {
                             "expression": "FILL(m6, 0)",
-                            "label": "Request exceptions",
                             "id": "e7",
-                            "visible": true
+                            "visible": true,
+                            "label": "Request exceptions"
                         }
                     ],
                     [
@@ -2783,9 +2801,9 @@
                     [
                         {
                             "expression": "FILL(m8, 0)",
-                            "label": "Source response exceptions",
                             "id": "e9",
-                            "visible": true
+                            "visible": true,
+                            "label": "Source response exceptions"
                         }
                     ],
                     [
@@ -2804,25 +2822,25 @@
                     [
                         {
                             "expression": "FILL(m10, 0)",
-                            "label": "Kafka commit exceptions",
                             "id": "e11",
-                            "visible": true
+                            "visible": true,
+                            "label": "Kafka commit exceptions"
                         }
                     ],
                     [
                         {
                             "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,outcome,qualifier,recordKind} MetricName=\"capturePublishingCompletions\" OTelLib=\"captureProxy\" qualifier=\"MA_QUALIFIER\" outcome=\"failed\"', 'Sum', 60))",
-                            "label": "Failed publications",
                             "id": "e12",
-                            "visible": true
+                            "visible": true,
+                            "label": "Failed publications"
                         }
                     ],
                     [
                         {
                             "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,captureActivationId,mode,processId,qualifier,sourceForwardingContinued} MetricName=\"captureGapActive\" OTelLib=\"captureProxy\" qualifier=\"MA_QUALIFIER\"', 'Maximum', 60))",
-                            "label": "Processes with an active capture gap",
                             "id": "e13",
-                            "visible": true
+                            "visible": true,
+                            "label": "Processes with an active capture gap"
                         }
                     ]
                 ]
@@ -2858,9 +2876,9 @@
                     [
                         {
                             "expression": "FILL(m1, 0)",
-                            "label": "Rebalance callbacks",
                             "id": "e2",
-                            "visible": true
+                            "visible": true,
+                            "label": "Rebalance callbacks"
                         }
                     ],
                     [
@@ -2879,9 +2897,9 @@
                     [
                         {
                             "expression": "FILL(m3, 0)",
-                            "label": "Generations retired",
                             "id": "e4",
-                            "visible": true
+                            "visible": true,
+                            "label": "Generations retired"
                         }
                     ],
                     [
@@ -2900,9 +2918,9 @@
                     [
                         {
                             "expression": "FILL(m5, 0)",
-                            "label": "Revocations reaching deadline",
                             "id": "e6",
-                            "visible": true
+                            "visible": true,
+                            "label": "Revocations reaching deadline"
                         }
                     ],
                     [
@@ -2921,17 +2939,17 @@
                     [
                         {
                             "expression": "FILL(m7, 0)",
-                            "label": "Records cancelled",
                             "id": "e8",
-                            "visible": true
+                            "visible": true,
+                            "label": "Records cancelled"
                         }
                     ],
                     [
                         {
                             "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,cause,qualifier} MetricName=\"kafkaSourceRecordsAbandonedAtRevocation\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60))",
-                            "label": "Records abandoned at revocation",
                             "id": "e9",
-                            "visible": true
+                            "visible": true,
+                            "label": "Records abandoned at revocation"
                         }
                     ],
                     [
@@ -2950,9 +2968,9 @@
                     [
                         {
                             "expression": "FILL(m10, 0) / PERIOD(m10)",
-                            "label": "Commit-uncertain partitions (fleet)",
                             "id": "e11",
-                            "visible": true
+                            "visible": true,
+                            "label": "Commit-uncertain partitions (fleet)"
                         }
                     ]
                 ]
@@ -2975,25 +2993,25 @@
                     [
                         {
                             "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,qualifier,reason} MetricName=\"replayFatalFailures\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60))",
-                            "label": "Fatal failures",
                             "id": "e1",
-                            "visible": true
+                            "visible": true,
+                            "label": "Fatal failures"
                         }
                     ],
                     [
                         {
                             "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,qualifier} MetricName=\"replayIntakeCaptureProtocolViolations\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60))",
-                            "label": "Capture protocol violations",
                             "id": "e2",
-                            "visible": true
+                            "visible": true,
+                            "label": "Capture protocol violations"
                         }
                     ],
                     [
                         {
                             "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,qualifier,resourceType} MetricName=\"resourceOwnershipInvariantFailures\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60))",
-                            "label": "Ownership invariant failures",
                             "id": "e3",
-                            "visible": true
+                            "visible": true,
+                            "label": "Ownership invariant failures"
                         }
                     ],
                     [
@@ -3012,9 +3030,9 @@
                     [
                         {
                             "expression": "FILL(m4, 0)",
-                            "label": "Stale-generation inputs ignored",
                             "id": "e5",
-                            "visible": true
+                            "visible": true,
+                            "label": "Stale-generation inputs ignored"
                         }
                     ]
                 ]
@@ -3037,52 +3055,52 @@
                     [
                         {
                             "expression": "MAX(SEARCH('{AWS/ES,ClientId,DomainName} MetricName=\"CPUUtilization\" DomainName=\"TARGET_DOMAIN\"', 'Maximum', 60))",
-                            "label": "CPU % (max node)",
                             "id": "e1",
-                            "visible": true
+                            "visible": true,
+                            "label": "CPU % (max node)"
                         }
                     ],
                     [
                         {
                             "expression": "MAX(SEARCH('{AWS/ES,ClientId,DomainName} MetricName=\"JVMMemoryPressure\" DomainName=\"TARGET_DOMAIN\"', 'Maximum', 60))",
-                            "label": "JVM pressure % (max node)",
                             "id": "e2",
-                            "visible": true
+                            "visible": true,
+                            "label": "JVM pressure % (max node)"
                         }
                     ],
                     [
                         {
                             "expression": "MAX(SEARCH('{AWS/ES,ClientId,DomainName} MetricName=\"ThreadpoolWriteQueue\" DomainName=\"TARGET_DOMAIN\"', 'Maximum', 60))",
-                            "label": "Write queue (max node)",
                             "id": "e3",
                             "visible": true,
+                            "label": "Write queue (max node)",
                             "yAxis": "right"
                         }
                     ],
                     [
                         {
                             "expression": "SUM(SEARCH('{AWS/ES,ClientId,DomainName} MetricName=\"ThreadpoolWriteRejected\" DomainName=\"TARGET_DOMAIN\"', 'Sum', 60))",
-                            "label": "Write rejected",
                             "id": "e4",
                             "visible": true,
+                            "label": "Write rejected",
                             "yAxis": "right"
                         }
                     ],
                     [
                         {
                             "expression": "SUM(SEARCH('{AWS/ES,ClientId,DomainName} MetricName=\"5xx\" DomainName=\"TARGET_DOMAIN\"', 'Sum', 60))",
-                            "label": "5xx",
                             "id": "e5",
                             "visible": true,
+                            "label": "5xx",
                             "yAxis": "right"
                         }
                     ],
                     [
                         {
                             "expression": "MAX(SEARCH('{AWS/ES,ClientId,DomainName} MetricName=\"IndexingLatency\" DomainName=\"TARGET_DOMAIN\"', 'Average', 60))",
-                            "label": "Indexing latency ms (max node)",
                             "id": "e6",
-                            "visible": false
+                            "visible": false,
+                            "label": "Indexing latency ms (max node)"
                         }
                     ]
                 ],
@@ -3125,9 +3143,9 @@
                     [
                         {
                             "expression": "m1 / PERIOD(m1)",
-                            "label": "CPU cores (fleet, 5 min)",
                             "id": "e2",
-                            "visible": true
+                            "visible": true,
+                            "label": "CPU cores (fleet, 5 min)"
                         }
                     ],
                     [
@@ -3146,9 +3164,9 @@
                     [
                         {
                             "expression": "m3 / 1048576",
-                            "label": "Working set MiB (avg pod)",
                             "id": "e4",
                             "visible": true,
+                            "label": "Working set MiB (avg pod)",
                             "yAxis": "right"
                         }
                     ],
@@ -3168,9 +3186,9 @@
                     [
                         {
                             "expression": "m5 / 1048576",
-                            "label": "Working set MiB (hottest pod)",
                             "id": "e6",
                             "visible": true,
+                            "label": "Working set MiB (hottest pod)",
                             "yAxis": "right"
                         }
                     ]
@@ -3214,35 +3232,35 @@
                     [
                         {
                             "expression": "m1 / PERIOD(m1)",
-                            "label": "CPU cores (fleet, 5 min)",
                             "id": "e2",
-                            "visible": true
+                            "visible": true,
+                            "label": "CPU cores (fleet, 5 min)"
                         }
                     ],
                     [
                         {
                             "expression": "SUM(SEARCH('{OpenSearchMigrations,container,device,namespace,pod} container=\"kafka\" MetricName=\"container_fs_writes_bytes_total\"', 'Sum', 300)) / 300 / 1048576",
-                            "label": "Disk writes (fleet)",
                             "id": "e3",
                             "visible": true,
+                            "label": "Disk writes (fleet)",
                             "yAxis": "right"
                         }
                     ],
                     [
                         {
                             "expression": "SUM(SEARCH('{OpenSearchMigrations,container,device,namespace,pod} container=\"kafka\" MetricName=\"container_fs_reads_bytes_total\"', 'Sum', 300)) / 300 / 1048576",
-                            "label": "Disk reads (fleet)",
                             "id": "e4",
                             "visible": true,
+                            "label": "Disk reads (fleet)",
                             "yAxis": "right"
                         }
                     ],
                     [
                         {
                             "expression": "MAX(SEARCH('{OpenSearchMigrations,container,device,namespace,pod} container=\"kafka\" MetricName=\"container_fs_writes_bytes_total\"', 'Sum', 300)) / 300 / 1048576",
-                            "label": "Disk writes (busiest volume)",
                             "id": "e5",
                             "visible": true,
+                            "label": "Disk writes (busiest volume)",
                             "yAxis": "right"
                         }
                     ]
@@ -3286,9 +3304,9 @@
                     [
                         {
                             "expression": "m1 / PERIOD(m1)",
-                            "label": "CPU cores (fleet, 5 min)",
                             "id": "e2",
-                            "visible": true
+                            "visible": true,
+                            "label": "CPU cores (fleet, 5 min)"
                         }
                     ],
                     [
@@ -3307,9 +3325,9 @@
                     [
                         {
                             "expression": "m3 / 1048576",
-                            "label": "Working set MiB (avg pod)",
                             "id": "e4",
                             "visible": true,
+                            "label": "Working set MiB (avg pod)",
                             "yAxis": "right"
                         }
                     ],
@@ -3329,9 +3347,9 @@
                     [
                         {
                             "expression": "m5 / 1048576",
-                            "label": "Working set MiB (hottest pod)",
                             "id": "e6",
                             "visible": true,
+                            "label": "Working set MiB (hottest pod)",
                             "yAxis": "right"
                         }
                     ]
@@ -3374,9 +3392,9 @@
                     [
                         {
                             "expression": "m1",
-                            "label": "Poll",
                             "id": "e2",
-                            "visible": true
+                            "visible": true,
+                            "label": "Poll"
                         }
                     ],
                     [
@@ -3395,9 +3413,9 @@
                     [
                         {
                             "expression": "m3",
-                            "label": "Commit",
                             "id": "e4",
-                            "visible": true
+                            "visible": true,
+                            "label": "Commit"
                         }
                     ],
                     [
@@ -3416,9 +3434,9 @@
                     [
                         {
                             "expression": "m5",
-                            "label": "Rebalance callback",
                             "id": "e6",
-                            "visible": true
+                            "visible": true,
+                            "label": "Rebalance callback"
                         }
                     ]
                 ]
@@ -3454,17 +3472,17 @@
                     [
                         {
                             "expression": "FILL(m1, 0) / PERIOD(m1)",
-                            "label": "Proxy pods reporting telemetry",
                             "id": "e2",
-                            "visible": true
+                            "visible": true,
+                            "label": "Proxy pods reporting telemetry"
                         }
                     ],
                     [
                         {
                             "expression": "MAX(SEARCH('{AWS/ES,ClientId,DomainName} MetricName=\"Nodes\" DomainName=\"SOURCE_DOMAIN\"', 'Maximum', 60))",
-                            "label": "Source domain nodes (all roles)",
                             "id": "e3",
-                            "visible": true
+                            "visible": true,
+                            "label": "Source domain nodes (all roles)"
                         }
                     ]
                 ],
@@ -3494,9 +3512,9 @@
                     [
                         {
                             "expression": "SUM(SEARCH('{OpenSearchMigrations,container,namespace,pod} container=\"kafka\" namespace=\"ma\" MetricName=\"container_memory_working_set_bytes\"', 'Maximum', 60) * 0 + 1)",
-                            "label": "Broker pods running",
                             "id": "e1",
-                            "visible": true
+                            "visible": true,
+                            "label": "Broker pods running"
                         }
                     ]
                 ],
@@ -3539,9 +3557,9 @@
                     [
                         {
                             "expression": "FILL(m1, 0) / PERIOD(m1)",
-                            "label": "Replayer pods reporting telemetry",
                             "id": "e2",
-                            "visible": true
+                            "visible": true,
+                            "label": "Replayer pods reporting telemetry"
                         }
                     ]
                 ],
@@ -3571,9 +3589,9 @@
                     [
                         {
                             "expression": "MAX(SEARCH('{AWS/ES,ClientId,DomainName} MetricName=\"Nodes\" DomainName=\"TARGET_DOMAIN\"', 'Maximum', 60))",
-                            "label": "Target domain nodes (all roles)",
                             "id": "e1",
-                            "visible": true
+                            "visible": true,
+                            "label": "Target domain nodes (all roles)"
                         }
                     ]
                 ],
@@ -3627,9 +3645,9 @@
                     [
                         {
                             "expression": "FILL(m1, 0) / PERIOD(m1)",
-                            "label": "Accepted/s",
                             "id": "e2",
-                            "visible": true
+                            "visible": true,
+                            "label": "Accepted/s"
                         }
                     ],
                     [
@@ -3648,9 +3666,9 @@
                     [
                         {
                             "expression": "FILL(m3, 0) / PERIOD(m3)",
-                            "label": "Durable/s",
                             "id": "e4",
-                            "visible": true
+                            "visible": true,
+                            "label": "Durable/s"
                         }
                     ],
                     [
@@ -3669,9 +3687,9 @@
                     [
                         {
                             "expression": "m5 / PERIOD(m5)",
-                            "label": "Pending (fleet)",
                             "id": "e6",
                             "visible": true,
+                            "label": "Pending (fleet)",
                             "yAxis": "right"
                         }
                     ]
@@ -3714,17 +3732,17 @@
                     [
                         {
                             "expression": "m1 / 1000",
-                            "label": "Mean write latency",
                             "id": "e2",
-                            "visible": true
+                            "visible": true,
+                            "label": "Mean write latency"
                         }
                     ],
                     [
                         {
                             "expression": "MAX(SEARCH('{OpenSearchMigrations,OTelLib,activity,qualifier} MetricName=\"replayOldestContextAgeByActivity\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\" activity=\"comparingResults\"', 'Maximum', 60)) / 1000",
-                            "label": "Oldest pending tuple (hottest pod)",
                             "id": "e3",
-                            "visible": true
+                            "visible": true,
+                            "label": "Oldest pending tuple (hottest pod)"
                         }
                     ]
                 ],
@@ -3766,9 +3784,9 @@
                     [
                         {
                             "expression": "FILL(m1, 0)",
-                            "label": "S3 upload retries",
                             "id": "e2",
-                            "visible": true
+                            "visible": true,
+                            "label": "S3 upload retries"
                         }
                     ],
                     [
@@ -3787,9 +3805,9 @@
                     [
                         {
                             "expression": "FILL(m3, 0)",
-                            "label": "S3 upload recoveries",
                             "id": "e4",
-                            "visible": true
+                            "visible": true,
+                            "label": "S3 upload recoveries"
                         }
                     ],
                     [
@@ -3808,9 +3826,9 @@
                     [
                         {
                             "expression": "FILL(m5, 0)",
-                            "label": "Outer tuple retries",
                             "id": "e6",
-                            "visible": true
+                            "visible": true,
+                            "label": "Outer tuple retries"
                         }
                     ],
                     [
@@ -3829,17 +3847,17 @@
                     [
                         {
                             "expression": "FILL(m7, 0)",
-                            "label": "Writes cancelled",
                             "id": "e8",
-                            "visible": true
+                            "visible": true,
+                            "label": "Writes cancelled"
                         }
                     ],
                     [
                         {
                             "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,failureReason,qualifier} MetricName=\"tupleDurabilityTerminalFailures\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60))",
-                            "label": "Terminal failures",
                             "id": "e9",
-                            "visible": true
+                            "visible": true,
+                            "label": "Terminal failures"
                         }
                     ],
                     [
@@ -3858,9 +3876,9 @@
                     [
                         {
                             "expression": "FILL(m10, 0) / PERIOD(m10)",
-                            "label": "S3 objects awaiting retry (fleet, now)",
                             "id": "e11",
-                            "visible": true
+                            "visible": true,
+                            "label": "S3 objects awaiting retry (fleet, now)"
                         }
                     ]
                 ]
@@ -3873,6 +3891,601 @@
             "width": 24,
             "height": 1,
             "properties": {
+                "markdown": "## Kafka broker storage",
+                "background": "transparent"
+            }
+        },
+        {
+            "type": "text",
+            "x": 0,
+            "y": 85,
+            "width": 24,
+            "height": 2,
+            "properties": {
+                "markdown": "These panels cover the complete Migration Assistant-managed Kafka cluster; no broker-volume selection is required. Fleet disk and inode utilization are capacity-weighted five-minute views. Free space and abnormal health retain per-volume legends to expose imbalance or a specific failing volume. Missing inode or abnormal-health data means the kubelet/CSI driver did not publish that metric; it is not treated as zero or healthy.",
+                "background": "transparent"
+            }
+        },
+        {
+            "type": "metric",
+            "x": 0,
+            "y": 87,
+            "width": 8,
+            "height": 7,
+            "properties": {
+                "title": "Kafka storage utilization (fleet, capacity-weighted)",
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "placeholder-region",
+                "period": 300,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        {
+                            "expression": "100 * (1 - SUM(FILL(SEARCH('{OpenSearchMigrations,EKSClusterName,qualifier,namespace,persistentvolumeclaim} EKSClusterName=\"EKS_CLUSTER_NAME\" qualifier=\"MA_QUALIFIER\" namespace=\"MA_NAMESPACE\" MetricName=\"kubelet_volume_stats_available_bytes\"', 'Minimum', 300), REPEAT)) / SUM(FILL(SEARCH('{OpenSearchMigrations,EKSClusterName,qualifier,namespace,persistentvolumeclaim} EKSClusterName=\"EKS_CLUSTER_NAME\" qualifier=\"MA_QUALIFIER\" namespace=\"MA_NAMESPACE\" MetricName=\"kubelet_volume_stats_capacity_bytes\"', 'Maximum', 300), REPEAT)))",
+                            "id": "e1",
+                            "visible": true,
+                            "label": "Fleet utilization"
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "min": 0,
+                        "max": 100,
+                        "label": "utilization %",
+                        "showUnits": false
+                    }
+                },
+                "annotations": {
+                    "horizontal": [
+                        {
+                            "label": "Warning",
+                            "value": "placeholder-warning-utilization",
+                            "color": "#ff9900"
+                        },
+                        {
+                            "label": "Critical",
+                            "value": "placeholder-critical-utilization",
+                            "color": "#d13212"
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "type": "metric",
+            "x": 8,
+            "y": 87,
+            "width": 8,
+            "height": 7,
+            "properties": {
+                "title": "Kafka free space by broker volume (GiB)",
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "placeholder-region",
+                "period": 300,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        {
+                            "expression": "FILL(SEARCH('{OpenSearchMigrations,EKSClusterName,qualifier,namespace,persistentvolumeclaim} EKSClusterName=\"EKS_CLUSTER_NAME\" qualifier=\"MA_QUALIFIER\" namespace=\"MA_NAMESPACE\" MetricName=\"kubelet_volume_stats_available_bytes\"', 'Minimum', 300), REPEAT) / 1073741824",
+                            "id": "e1",
+                            "visible": true
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "min": 0,
+                        "label": "GiB",
+                        "showUnits": false
+                    }
+                }
+            }
+        },
+        {
+            "type": "metric",
+            "x": 16,
+            "y": 87,
+            "width": 8,
+            "height": 7,
+            "properties": {
+                "title": "Kafka storage totals (GiB)",
+                "view": "singleValue",
+                "region": "placeholder-region",
+                "period": 300,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        {
+                            "expression": "SUM(FILL(SEARCH('{OpenSearchMigrations,EKSClusterName,qualifier,namespace,persistentvolumeclaim} EKSClusterName=\"EKS_CLUSTER_NAME\" qualifier=\"MA_QUALIFIER\" namespace=\"MA_NAMESPACE\" MetricName=\"kubelet_volume_stats_available_bytes\"', 'Minimum', 300), REPEAT))",
+                            "id": "e1",
+                            "visible": false,
+                            "label": "Fleet available bytes"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(FILL(SEARCH('{OpenSearchMigrations,EKSClusterName,qualifier,namespace,persistentvolumeclaim} EKSClusterName=\"EKS_CLUSTER_NAME\" qualifier=\"MA_QUALIFIER\" namespace=\"MA_NAMESPACE\" MetricName=\"kubelet_volume_stats_capacity_bytes\"', 'Maximum', 300), REPEAT))",
+                            "id": "e2",
+                            "visible": false,
+                            "label": "Fleet capacity bytes"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "e1 / 1073741824",
+                            "id": "e3",
+                            "visible": true,
+                            "label": "Free (GiB)"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "(e2 - e1) / 1073741824",
+                            "id": "e4",
+                            "visible": true,
+                            "label": "Used (GiB)"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "e2 / 1073741824",
+                            "id": "e5",
+                            "visible": true,
+                            "label": "Capacity (GiB)"
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "min": 0,
+                        "label": "GiB",
+                        "showUnits": false
+                    }
+                },
+                "sparkline": true
+            }
+        },
+        {
+            "type": "metric",
+            "x": 0,
+            "y": 94,
+            "width": 12,
+            "height": 7,
+            "properties": {
+                "title": "Kafka inode utilization (fleet, capacity-weighted)",
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "placeholder-region",
+                "period": 300,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        {
+                            "expression": "100 * (1 - SUM(FILL(SEARCH('{OpenSearchMigrations,EKSClusterName,qualifier,namespace,persistentvolumeclaim} EKSClusterName=\"EKS_CLUSTER_NAME\" qualifier=\"MA_QUALIFIER\" namespace=\"MA_NAMESPACE\" MetricName=\"kubelet_volume_stats_inodes_free\"', 'Minimum', 300), REPEAT)) / SUM(FILL(SEARCH('{OpenSearchMigrations,EKSClusterName,qualifier,namespace,persistentvolumeclaim} EKSClusterName=\"EKS_CLUSTER_NAME\" qualifier=\"MA_QUALIFIER\" namespace=\"MA_NAMESPACE\" MetricName=\"kubelet_volume_stats_inodes\"', 'Maximum', 300), REPEAT)))",
+                            "id": "e1",
+                            "visible": true,
+                            "label": "Fleet inode utilization"
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "min": 0,
+                        "max": 100,
+                        "label": "utilization %",
+                        "showUnits": false
+                    }
+                },
+                "annotations": {
+                    "horizontal": [
+                        {
+                            "label": "Low free inodes",
+                            "value": "placeholder-inode-utilization",
+                            "color": "#d13212"
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "type": "metric",
+            "x": 12,
+            "y": 94,
+            "width": 12,
+            "height": 7,
+            "properties": {
+                "title": "Kafka abnormal volume health",
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "placeholder-region",
+                "period": 300,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        {
+                            "expression": "SEARCH('{OpenSearchMigrations,EKSClusterName,qualifier,namespace,persistentvolumeclaim} EKSClusterName=\"EKS_CLUSTER_NAME\" qualifier=\"MA_QUALIFIER\" namespace=\"MA_NAMESPACE\" MetricName=\"kubelet_volume_stats_health_status_abnormal\"', 'Maximum', 300)",
+                            "id": "e1",
+                            "visible": true
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "min": 0,
+                        "max": 1,
+                        "label": "1 = abnormal",
+                        "showUnits": false
+                    }
+                }
+            }
+        },
+        {
+            "type": "text",
+            "x": 0,
+            "y": 101,
+            "width": 24,
+            "height": 1,
+            "properties": {
+                "markdown": "## Kafka broker internals",
+                "background": "transparent"
+            }
+        },
+        {
+            "type": "text",
+            "x": 0,
+            "y": 102,
+            "width": 24,
+            "height": 1,
+            "properties": {
+                "markdown": "One-minute managed-broker JMX metrics exported to CloudWatch. Request/error dimensions are limited to Produce, FetchConsumer, and FetchFollower; topic and partition labels are not exported. Kafka 4.0 combined-role brokers report the request-handler idle fractions for both broker and controller pools, so the saturation panel normalizes their sum by two.",
+                "background": "transparent"
+            }
+        },
+        {
+            "type": "metric",
+            "x": 0,
+            "y": 103,
+            "width": 8,
+            "height": 7,
+            "properties": {
+                "title": "Kafka replication and ISR health",
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "placeholder-region",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,EKSClusterName,qualifier,namespace,kafka_cluster,pod} EKSClusterName=\"EKS_CLUSTER_NAME\" qualifier=\"MA_QUALIFIER\" namespace=\"MA_NAMESPACE\" MetricName=\"kafka_server_replicamanager_under_replicated_partitions\"', 'Maximum', 60))",
+                            "id": "e1",
+                            "visible": true,
+                            "label": "Under-replicated partitions"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,EKSClusterName,qualifier,namespace,kafka_cluster,pod} EKSClusterName=\"EKS_CLUSTER_NAME\" qualifier=\"MA_QUALIFIER\" namespace=\"MA_NAMESPACE\" MetricName=\"kafka_controller_offline_partitions_count\"', 'Maximum', 60))",
+                            "id": "e2",
+                            "visible": true,
+                            "label": "Offline partitions"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,EKSClusterName,qualifier,namespace,kafka_cluster,pod} EKSClusterName=\"EKS_CLUSTER_NAME\" qualifier=\"MA_QUALIFIER\" namespace=\"MA_NAMESPACE\" MetricName=\"kafka_server_replicamanager_isr_expands_total\"', 'Sum', 60)) / 60",
+                            "id": "e3",
+                            "visible": true,
+                            "label": "ISR expands/s"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,EKSClusterName,qualifier,namespace,kafka_cluster,pod} EKSClusterName=\"EKS_CLUSTER_NAME\" qualifier=\"MA_QUALIFIER\" namespace=\"MA_NAMESPACE\" MetricName=\"kafka_server_replicamanager_isr_shrinks_total\"', 'Sum', 60)) / 60",
+                            "id": "e4",
+                            "visible": true,
+                            "label": "ISR shrinks/s"
+                        }
+                    ]
+                ]
+            }
+        },
+        {
+            "type": "metric",
+            "x": 8,
+            "y": 103,
+            "width": 8,
+            "height": 7,
+            "properties": {
+                "title": "Kafka controller, quorum, and uptime",
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "placeholder-region",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,EKSClusterName,qualifier,namespace,kafka_cluster,pod} EKSClusterName=\"EKS_CLUSTER_NAME\" qualifier=\"MA_QUALIFIER\" namespace=\"MA_NAMESPACE\" MetricName=\"kafka_controller_active_controller_count\"', 'Maximum', 60))",
+                            "id": "e1",
+                            "visible": true,
+                            "label": "Active controllers"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "MIN(SEARCH('{OpenSearchMigrations,EKSClusterName,qualifier,namespace,kafka_cluster,pod} EKSClusterName=\"EKS_CLUSTER_NAME\" qualifier=\"MA_QUALIFIER\" namespace=\"MA_NAMESPACE\" MetricName=\"kafka_server_raft_current_leader\"', 'Maximum', 60))",
+                            "id": "e2",
+                            "visible": true,
+                            "label": "Current quorum leader (minimum reported ID)"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "MAX(SEARCH('{OpenSearchMigrations,EKSClusterName,qualifier,namespace,kafka_cluster,pod} EKSClusterName=\"EKS_CLUSTER_NAME\" qualifier=\"MA_QUALIFIER\" namespace=\"MA_NAMESPACE\" MetricName=\"kafka_server_raft_current_epoch\"', 'Maximum', 60))",
+                            "id": "e3",
+                            "visible": true,
+                            "label": "Current quorum epoch"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "MIN(SEARCH('{OpenSearchMigrations,EKSClusterName,qualifier,namespace,kafka_cluster,pod} EKSClusterName=\"EKS_CLUSTER_NAME\" qualifier=\"MA_QUALIFIER\" namespace=\"MA_NAMESPACE\" MetricName=\"kafka_jvm_uptime_milliseconds\"', 'Maximum', 60)) / 3600000",
+                            "id": "e4",
+                            "visible": true,
+                            "label": "Youngest broker uptime",
+                            "yAxis": "right"
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "right": {
+                        "label": "hours",
+                        "showUnits": false
+                    }
+                }
+            }
+        },
+        {
+            "type": "metric",
+            "x": 16,
+            "y": 103,
+            "width": 8,
+            "height": 7,
+            "properties": {
+                "title": "Kafka produce/fetch errors and throttling",
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "placeholder-region",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,EKSClusterName,qualifier,namespace,kafka_cluster,pod,request,error} EKSClusterName=\"EKS_CLUSTER_NAME\" qualifier=\"MA_QUALIFIER\" namespace=\"MA_NAMESPACE\" request=\"Produce\" MetricName=\"kafka_network_request_errors_total\"', 'Sum', 60)) / 60",
+                            "id": "e1",
+                            "visible": true,
+                            "label": "Produce errors/s"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "MAX(SEARCH('{OpenSearchMigrations,EKSClusterName,qualifier,namespace,kafka_cluster,pod,request} EKSClusterName=\"EKS_CLUSTER_NAME\" qualifier=\"MA_QUALIFIER\" namespace=\"MA_NAMESPACE\" request=\"Produce\" MetricName=\"kafka_network_request_throttle_time_milliseconds\"', 'Maximum', 60))",
+                            "id": "e2",
+                            "visible": true,
+                            "label": "Produce max throttle",
+                            "yAxis": "right"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,EKSClusterName,qualifier,namespace,kafka_cluster,pod,request,error} EKSClusterName=\"EKS_CLUSTER_NAME\" qualifier=\"MA_QUALIFIER\" namespace=\"MA_NAMESPACE\" request=\"FetchConsumer\" MetricName=\"kafka_network_request_errors_total\"', 'Sum', 60)) / 60",
+                            "id": "e3",
+                            "visible": true,
+                            "label": "Consumer fetch errors/s"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "MAX(SEARCH('{OpenSearchMigrations,EKSClusterName,qualifier,namespace,kafka_cluster,pod,request} EKSClusterName=\"EKS_CLUSTER_NAME\" qualifier=\"MA_QUALIFIER\" namespace=\"MA_NAMESPACE\" request=\"FetchConsumer\" MetricName=\"kafka_network_request_throttle_time_milliseconds\"', 'Maximum', 60))",
+                            "id": "e4",
+                            "visible": true,
+                            "label": "Consumer fetch max throttle",
+                            "yAxis": "right"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,EKSClusterName,qualifier,namespace,kafka_cluster,pod,request,error} EKSClusterName=\"EKS_CLUSTER_NAME\" qualifier=\"MA_QUALIFIER\" namespace=\"MA_NAMESPACE\" request=\"FetchFollower\" MetricName=\"kafka_network_request_errors_total\"', 'Sum', 60)) / 60",
+                            "id": "e5",
+                            "visible": true,
+                            "label": "Follower fetch errors/s"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "MAX(SEARCH('{OpenSearchMigrations,EKSClusterName,qualifier,namespace,kafka_cluster,pod,request} EKSClusterName=\"EKS_CLUSTER_NAME\" qualifier=\"MA_QUALIFIER\" namespace=\"MA_NAMESPACE\" request=\"FetchFollower\" MetricName=\"kafka_network_request_throttle_time_milliseconds\"', 'Maximum', 60))",
+                            "id": "e6",
+                            "visible": true,
+                            "label": "Follower fetch max throttle",
+                            "yAxis": "right"
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "right": {
+                        "label": "throttle ms",
+                        "showUnits": false
+                    }
+                }
+            }
+        },
+        {
+            "type": "metric",
+            "x": 0,
+            "y": 110,
+            "width": 8,
+            "height": 7,
+            "properties": {
+                "title": "Kafka broker/controller request-handler utilization (average)",
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "placeholder-region",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        {
+                            "expression": "100 * (1 - AVG(SEARCH('{OpenSearchMigrations,EKSClusterName,qualifier,namespace,kafka_cluster,pod} EKSClusterName=\"EKS_CLUSTER_NAME\" qualifier=\"MA_QUALIFIER\" namespace=\"MA_NAMESPACE\" MetricName=\"kafka_server_request_handler_idle_ratio\"', 'Average', 60)) / 2)",
+                            "id": "e1",
+                            "visible": true,
+                            "label": "Fleet average busy"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "100 * (1 - MIN(SEARCH('{OpenSearchMigrations,EKSClusterName,qualifier,namespace,kafka_cluster,pod} EKSClusterName=\"EKS_CLUSTER_NAME\" qualifier=\"MA_QUALIFIER\" namespace=\"MA_NAMESPACE\" MetricName=\"kafka_server_request_handler_idle_ratio\"', 'Average', 60)) / 2)",
+                            "id": "e2",
+                            "visible": true,
+                            "label": "Busiest broker"
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "min": 0,
+                        "max": 100,
+                        "label": "busy %",
+                        "showUnits": false
+                    }
+                }
+            }
+        },
+        {
+            "type": "metric",
+            "x": 8,
+            "y": 110,
+            "width": 8,
+            "height": 7,
+            "properties": {
+                "title": "Kafka JVM heap and process CPU",
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "placeholder-region",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        {
+                            "expression": "100 * SUM(SEARCH('{OpenSearchMigrations,EKSClusterName,qualifier,namespace,kafka_cluster,pod} EKSClusterName=\"EKS_CLUSTER_NAME\" qualifier=\"MA_QUALIFIER\" namespace=\"MA_NAMESPACE\" MetricName=\"kafka_jvm_heap_used_bytes\"', 'Maximum', 60)) / SUM(SEARCH('{OpenSearchMigrations,EKSClusterName,qualifier,namespace,kafka_cluster,pod} EKSClusterName=\"EKS_CLUSTER_NAME\" qualifier=\"MA_QUALIFIER\" namespace=\"MA_NAMESPACE\" MetricName=\"kafka_jvm_heap_max_bytes\"', 'Maximum', 60))",
+                            "id": "e1",
+                            "visible": true,
+                            "label": "Fleet heap utilization"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "100 * MAX(SEARCH('{OpenSearchMigrations,EKSClusterName,qualifier,namespace,kafka_cluster,pod} EKSClusterName=\"EKS_CLUSTER_NAME\" qualifier=\"MA_QUALIFIER\" namespace=\"MA_NAMESPACE\" MetricName=\"kafka_jvm_process_cpu_ratio\"', 'Maximum', 60))",
+                            "id": "e2",
+                            "visible": true,
+                            "label": "Hottest broker process CPU"
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "min": 0,
+                        "max": 100,
+                        "label": "utilization %",
+                        "showUnits": false
+                    }
+                }
+            }
+        },
+        {
+            "type": "metric",
+            "x": 16,
+            "y": 110,
+            "width": 8,
+            "height": 7,
+            "properties": {
+                "title": "Kafka JVM garbage collection (G1)",
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "placeholder-region",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,EKSClusterName,qualifier,namespace,kafka_cluster,pod,collector} EKSClusterName=\"EKS_CLUSTER_NAME\" qualifier=\"MA_QUALIFIER\" namespace=\"MA_NAMESPACE\" collector=\"G1 Young Generation\" MetricName=\"kafka_jvm_gc_collection_time_milliseconds_total\"', 'Sum', 60)) / 1000 / 60",
+                            "id": "e1",
+                            "visible": true,
+                            "label": "G1 young GC time (fleet seconds/s)"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,EKSClusterName,qualifier,namespace,kafka_cluster,pod,collector} EKSClusterName=\"EKS_CLUSTER_NAME\" qualifier=\"MA_QUALIFIER\" namespace=\"MA_NAMESPACE\" collector=\"G1 Young Generation\" MetricName=\"kafka_jvm_gc_collections_total\"', 'Sum', 60)) / 60",
+                            "id": "e2",
+                            "visible": true,
+                            "label": "G1 young collections/s",
+                            "yAxis": "right"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,EKSClusterName,qualifier,namespace,kafka_cluster,pod,collector} EKSClusterName=\"EKS_CLUSTER_NAME\" qualifier=\"MA_QUALIFIER\" namespace=\"MA_NAMESPACE\" collector=\"G1 Old Generation\" MetricName=\"kafka_jvm_gc_collection_time_milliseconds_total\"', 'Sum', 60)) / 1000 / 60",
+                            "id": "e3",
+                            "visible": true,
+                            "label": "G1 old GC time (fleet seconds/s)"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,EKSClusterName,qualifier,namespace,kafka_cluster,pod,collector} EKSClusterName=\"EKS_CLUSTER_NAME\" qualifier=\"MA_QUALIFIER\" namespace=\"MA_NAMESPACE\" collector=\"G1 Old Generation\" MetricName=\"kafka_jvm_gc_collections_total\"', 'Sum', 60)) / 60",
+                            "id": "e4",
+                            "visible": true,
+                            "label": "G1 old collections/s",
+                            "yAxis": "right"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,EKSClusterName,qualifier,namespace,kafka_cluster,pod,collector} EKSClusterName=\"EKS_CLUSTER_NAME\" qualifier=\"MA_QUALIFIER\" namespace=\"MA_NAMESPACE\" collector=\"G1 Concurrent GC\" MetricName=\"kafka_jvm_gc_collection_time_milliseconds_total\"', 'Sum', 60)) / 1000 / 60",
+                            "id": "e5",
+                            "visible": true,
+                            "label": "G1 concurrent GC time (fleet seconds/s)"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,EKSClusterName,qualifier,namespace,kafka_cluster,pod,collector} EKSClusterName=\"EKS_CLUSTER_NAME\" qualifier=\"MA_QUALIFIER\" namespace=\"MA_NAMESPACE\" collector=\"G1 Concurrent GC\" MetricName=\"kafka_jvm_gc_collections_total\"', 'Sum', 60)) / 60",
+                            "id": "e6",
+                            "visible": true,
+                            "label": "G1 concurrent collections/s",
+                            "yAxis": "right"
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "right": {
+                        "label": "collections/s",
+                        "showUnits": false
+                    }
+                }
+            }
+        },
+        {
+            "type": "text",
+            "x": 0,
+            "y": 117,
+            "width": 24,
+            "height": 1,
+            "properties": {
                 "markdown": "## Source cluster and replayer internals",
                 "background": "transparent"
             }
@@ -3880,7 +4493,7 @@
         {
             "type": "metric",
             "x": 0,
-            "y": 85,
+            "y": 118,
             "width": 6,
             "height": 7,
             "properties": {
@@ -3894,43 +4507,43 @@
                     [
                         {
                             "expression": "MAX(SEARCH('{AWS/ES,ClientId,DomainName} MetricName=\"CPUUtilization\" DomainName=\"SOURCE_DOMAIN\"', 'Maximum', 60))",
-                            "label": "CPU % (max node)",
                             "id": "e1",
-                            "visible": true
+                            "visible": true,
+                            "label": "CPU % (max node)"
                         }
                     ],
                     [
                         {
                             "expression": "MAX(SEARCH('{AWS/ES,ClientId,DomainName} MetricName=\"JVMMemoryPressure\" DomainName=\"SOURCE_DOMAIN\"', 'Maximum', 60))",
-                            "label": "JVM pressure % (max node)",
                             "id": "e2",
-                            "visible": true
+                            "visible": true,
+                            "label": "JVM pressure % (max node)"
                         }
                     ],
                     [
                         {
                             "expression": "MAX(SEARCH('{AWS/ES,ClientId,DomainName} MetricName=\"ThreadpoolWriteQueue\" DomainName=\"SOURCE_DOMAIN\"', 'Maximum', 60))",
-                            "label": "Write queue (max node)",
                             "id": "e3",
                             "visible": true,
+                            "label": "Write queue (max node)",
                             "yAxis": "right"
                         }
                     ],
                     [
                         {
                             "expression": "SUM(SEARCH('{AWS/ES,ClientId,DomainName} MetricName=\"ThreadpoolWriteRejected\" DomainName=\"SOURCE_DOMAIN\"', 'Sum', 60))",
-                            "label": "Write rejected",
                             "id": "e4",
                             "visible": true,
+                            "label": "Write rejected",
                             "yAxis": "right"
                         }
                     ],
                     [
                         {
                             "expression": "SUM(SEARCH('{AWS/ES,ClientId,DomainName} MetricName=\"5xx\" DomainName=\"SOURCE_DOMAIN\"', 'Sum', 60))",
-                            "label": "5xx",
                             "id": "e5",
                             "visible": true,
+                            "label": "5xx",
                             "yAxis": "right"
                         }
                     ]
@@ -3946,7 +4559,7 @@
         {
             "type": "metric",
             "x": 6,
-            "y": 85,
+            "y": 118,
             "width": 6,
             "height": 7,
             "properties": {
@@ -3960,9 +4573,9 @@
                     [
                         {
                             "expression": "SEARCH('{OpenSearchMigrations,OTelLib,activity,qualifier} MetricName=\"replayActiveContextsByActivity\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60) / 60",
-                            "label": "${PROP('Dim.activity')}",
                             "id": "e1",
-                            "visible": true
+                            "visible": true,
+                            "label": "${PROP('Dim.activity')}"
                         }
                     ]
                 ]
@@ -3971,7 +4584,7 @@
         {
             "type": "metric",
             "x": 12,
-            "y": 85,
+            "y": 118,
             "width": 6,
             "height": 7,
             "properties": {
@@ -3985,9 +4598,9 @@
                     [
                         {
                             "expression": "SEARCH('{OpenSearchMigrations,OTelLib,operationType,qualifier} MetricName=\"replayActiveOwnerOperationsByType\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60) / 60",
-                            "label": "${PROP('Dim.operationType')}",
                             "id": "e1",
-                            "visible": true
+                            "visible": true,
+                            "label": "${PROP('Dim.operationType')}"
                         }
                     ]
                 ]
@@ -3996,7 +4609,7 @@
         {
             "type": "metric",
             "x": 18,
-            "y": 85,
+            "y": 118,
             "width": 6,
             "height": 7,
             "properties": {
@@ -4010,9 +4623,9 @@
                     [
                         {
                             "expression": "SEARCH('{OpenSearchMigrations,OTelLib,qualifier,resourceType} MetricName=\"resourceOwnedBytes\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60) / 60 / 1048576",
-                            "label": "${PROP('Dim.resourceType')}",
                             "id": "e1",
-                            "visible": true
+                            "visible": true,
+                            "label": "${PROP('Dim.resourceType')}"
                         }
                     ]
                 ]
@@ -4021,7 +4634,7 @@
         {
             "type": "metric",
             "x": 0,
-            "y": 92,
+            "y": 125,
             "width": 8,
             "height": 7,
             "properties": {
@@ -4049,9 +4662,9 @@
                     [
                         {
                             "expression": "m1 / PERIOD(m1)",
-                            "label": "CPU cores (fleet, 5 min)",
                             "id": "e2",
-                            "visible": true
+                            "visible": true,
+                            "label": "CPU cores (fleet, 5 min)"
                         }
                     ],
                     [
@@ -4070,9 +4683,9 @@
                     [
                         {
                             "expression": "m3 / 1048576",
-                            "label": "Working set MiB (avg pod)",
                             "id": "e4",
                             "visible": true,
+                            "label": "Working set MiB (avg pod)",
                             "yAxis": "right"
                         }
                     ],
@@ -4092,9 +4705,9 @@
                     [
                         {
                             "expression": "m5 / 1048576",
-                            "label": "Working set MiB (hottest pod)",
                             "id": "e6",
                             "visible": true,
+                            "label": "Working set MiB (hottest pod)",
                             "yAxis": "right"
                         }
                     ]
@@ -4110,7 +4723,7 @@
         {
             "type": "metric",
             "x": 8,
-            "y": 92,
+            "y": 125,
             "width": 8,
             "height": 7,
             "properties": {
@@ -4138,25 +4751,25 @@
                     [
                         {
                             "expression": "m1 / 1000",
-                            "label": "lag s",
                             "id": "e2",
-                            "visible": false
+                            "visible": false,
+                            "label": "lag s"
                         }
                     ],
                     [
                         {
                             "expression": "-1 * RATE(e2)",
-                            "label": "lag reduction s/s",
                             "id": "e3",
-                            "visible": false
+                            "visible": false,
+                            "label": "lag reduction s/s"
                         }
                     ],
                     [
                         {
                             "expression": "IF(e2 <= CATCHUP_FLOOR_SECONDS, 0, IF(e3 > 0.01, ((e2 - CATCHUP_FLOOR_SECONDS) / 3600) / e3, 0/0))",
-                            "label": "Hours to floor at current reduction rate (0 = caught up)",
                             "id": "e4",
-                            "visible": true
+                            "visible": true,
+                            "label": "Hours to floor at current reduction rate (0 = caught up)"
                         }
                     ]
                 ],
@@ -4172,7 +4785,7 @@
         {
             "type": "metric",
             "x": 16,
-            "y": 92,
+            "y": 125,
             "width": 8,
             "height": 7,
             "properties": {
@@ -4186,9 +4799,9 @@
                     [
                         {
                             "expression": "SEARCH('{OpenSearchMigrations,OTelLib,qualifier,demandState} MetricName=\"replayIntakeDemandEvaluations\" OTelLib=\"replayer\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60) / 60",
-                            "label": "${PROP('Dim.demandState')}/s",
                             "id": "e1",
-                            "visible": true
+                            "visible": true,
+                            "label": "${PROP('Dim.demandState')}/s"
                         }
                     ]
                 ]

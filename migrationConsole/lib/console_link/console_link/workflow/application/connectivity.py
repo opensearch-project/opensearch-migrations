@@ -233,6 +233,24 @@ class RepositoryCheckJobRunner:
                 name="AWS_SHARED_CREDENTIALS_FILE",
                 value="/config/credentials/configuration",
             ))
+        azure_secret_name = str(
+            config.get("azure_credentials_secret_name") or ""
+        ).strip()
+        if azure_secret_name:
+            for env_name, secret_key in (
+                ("AZURE_STORAGE_ACCOUNT_KEY", "accountKey"),
+                ("AZURE_STORAGE_SAS_TOKEN", "sasToken"),
+            ):
+                environment.append(client.V1EnvVar(
+                    name=env_name,
+                    value_from=client.V1EnvVarSource(
+                        secret_key_ref=client.V1SecretKeySelector(
+                            name=azure_secret_name,
+                            key=secret_key,
+                            optional=True,
+                        ),
+                    ),
+                ))
         container = client.V1Container(
             name="repository-check",
             image=image,

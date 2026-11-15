@@ -101,6 +101,7 @@ functionName(jobName: jobNameOverride ?: null)
 | k8sLocalElasticsearch7xTestCover.groovy | k8sLocalElasticsearch7xTest | JOB_NAME_OVERRIDE |
 | k8sLocalElasticsearch8xTestCover.groovy | k8sLocalElasticsearch8xTest | JOB_NAME_OVERRIDE |
 | k8sLocalOpensearch1xTestCover.groovy | k8sLocalOpensearch1xTest | JOB_NAME_OVERRIDE |
+| k8sLocalRfsBackpressureTestCover.groovy | k8sLocalRfsBackpressureTest | JOB_NAME_OVERRIDE |
 | k8sLocalSolr8xTestCover.groovy | k8sLocalSolr8xTest | JOB_NAME_OVERRIDE |
 | k8sLocalSolrOtherTestCover.groovy | k8sLocalSolrOtherTest | JOB_NAME_OVERRIDE |
 | k8sMatrixTestCover.groovy | k8sMatrixTest | JOB_NAME_OVERRIDE |
@@ -125,7 +126,8 @@ Jobs triggered:
 - `eks-cdc-*` (PR with `run-eks-tests` label, and main). This includes `eks-cdc-k6-load-test`, which
   runs test `0080` — a CDC migration whose traffic comes from a k6 load test. The test runner installs
   the standalone k6LoadTest chart for any `008x` ID, so the job needs no extra flag
-- `eks-aoss-integ-test` (PR with `run-eks-tests` label, and main; deploys and tests all three collection types)
+- `eks-aoss-integ-test` (PR with `run-eks-tests` label, and main; deploys and tests all three Classic collection
+  types in test `0021`, then routes through the per-account endpoint to NextGen collections in test `0024`)
 - `eks-byos-integ-test` (PR with `run-eks-byos-tests` label, and main)
 - `eks-cfn-*` (PR with `run-cfn-tests` label, and main)
 - `eks-full-e2e-isolated-vpc-test` (PR with `run-eks-isolated-tests` label, and main)

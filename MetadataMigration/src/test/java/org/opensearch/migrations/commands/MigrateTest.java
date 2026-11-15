@@ -1,20 +1,30 @@
 package org.opensearch.migrations.commands;
 
+import java.util.Arrays;
+import java.util.List;
 import java.util.regex.Pattern;
 
 import org.opensearch.migrations.MetadataMigration;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.SnapshotRepo;
+import org.opensearch.migrations.bulkload.models.IndexMetadata;
+import org.opensearch.migrations.cli.Clusters;
+import org.opensearch.migrations.cluster.ClusterReader;
 import org.opensearch.migrations.metadata.tracing.RootMetadataMigrationContext;
 
+import com.beust.jcommander.ParameterException;
 import org.junit.jupiter.api.Test;
 
 import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.when;
 
 class MigrateTest {
 
@@ -104,5 +114,89 @@ class MigrateTest {
 
         assertThat(results.getExitCode(), equalTo(Evaluate.UNEXPECTED_FAILURE_CODE));
         assertThat(results.getErrorMessage(), equalTo("Unexpected failure: Outer, inner cause: Inner"));
+    }
+
+    @Test
+    void migrate_rejectsAnInvalidRoutingTableBeforeConnecting() {
+        var args = new MigrateArgs();
+        args.snapshotName = "snap1";
+        args.collectionRouting = "[]";
+        var context = mock(RootMetadataMigrationContext.class);
+
+        var result = new MetadataMigration().migrate(args).execute(context);
+
+        assertThat(result.getExitCode(), equalTo(Migrate.INVALID_PARAMETER_CODE));
+        assertThat(result.getErrorMessage(), containsString("must be a JSON object"));
+    }
+
+    private static boolean collectionRoutedAfterCreatingClusters(String collectionRouting) {
+        var args = new MigrateArgs();
+        args.snapshotName = "snap1";
+        args.collectionRouting = collectionRouting;
+        args.targetArgs.host = "https://123456789012.aoss.us-east-1.on.aws";
+        args.targetArgs.awsRegion = "us-east-1";
+        args.targetArgs.awsServiceSigningName = "aoss";
+        // There is no source to connect to, but the target is marked first
+        assertThrows(Exception.class, new MetadataMigration().migrate(args)::createClusters);
+        return args.targetArgs.toConnectionContext().isCollectionRouted();
+    }
+
+    @Test
+    void createClusters_targetIsCollectionRoutedOnlyWithARoutingTable() {
+        assertThat(collectionRoutedAfterCreatingClusters(
+            "{\"staticCollectionRouting\": [{\"sourceIndex\": \"a\", \"collection\": \"c\"}]}"), equalTo(true));
+        assertThat(collectionRoutedAfterCreatingClusters(null), equalTo(false));
+        assertThat(collectionRoutedAfterCreatingClusters(""), equalTo(false));
+    }
+
+    @Test
+    void validateCollectionRouting_coversAllowlistedIndicesAndFailsOnUnmatched() {
+        var args = new MigrateArgs();
+        args.snapshotName = "snap1";
+        args.collectionRouting = "{\"regexCollectionRouting\": [{\"sourceIndex\": \"(.+)-\\\\d+\", \"collection\": \"$1\"}]}";
+        args.dataFilterArgs.indexAllowlist = List.of("regex:.*-\\d+");
+        var migrate = new MetadataMigration().migrate(args);
+
+        var clusters = clustersWithSnapshotIndices("b-1", "a-1", "b-2", "skipped");
+        assertDoesNotThrow(() -> migrate.validateCollectionRouting(clusters));
+
+        args.dataFilterArgs.indexAllowlist = List.of();
+        var unmatched = assertThrows(ParameterException.class,
+            () -> migrate.validateCollectionRouting(clusters));
+        assertThat(unmatched.getMessage(), containsString("[skipped]"));
+    }
+
+    @Test
+    void validateCollectionRouting_allowsAnEmptySelection() {
+        var args = new MigrateArgs();
+        args.snapshotName = "snap1";
+        args.collectionRouting = "{\"staticCollectionRouting\": [{\"sourceIndex\": \"a\", \"collection\": \"c\"}]}";
+        args.dataFilterArgs.indexAllowlist = List.of("nothing-matches");
+        var migrate = new MetadataMigration().migrate(args);
+
+        assertDoesNotThrow(() -> migrate.validateCollectionRouting(clustersWithSnapshotIndices("a")));
+    }
+
+    @Test
+    void validateCollectionRouting_ignoresOtherTargets() {
+        var args = new MigrateArgs();
+        args.snapshotName = "snap1";
+
+        assertDoesNotThrow(() -> new MetadataMigration().migrate(args).validateCollectionRouting(null));
+    }
+
+    private static Clusters clustersWithSnapshotIndices(String... names) {
+        var indices = Arrays.stream(names).map(name -> {
+            var index = mock(SnapshotRepo.Index.class);
+            when(index.getName()).thenReturn(name);
+            return index;
+        }).toList();
+        var repoDataProvider = mock(SnapshotRepo.Provider.class);
+        doReturn(indices).when(repoDataProvider).getIndicesInSnapshot("snap1");
+        var indexMetadata = mock(IndexMetadata.Factory.class);
+        when(indexMetadata.getRepoDataProvider()).thenReturn(repoDataProvider);
+        var source = mock(ClusterReader.class);
+        when(source.getIndexMetadata()).thenReturn(indexMetadata);
+        return Clusters.builder().source(source).build();
     }
 }

@@ -1,12 +1,13 @@
 package org.opensearch.migrations.parsing;
 
 import java.io.IOException;
+import java.net.HttpURLConnection;
 import java.util.ArrayList;
 import java.util.BitSet;
 import java.util.List;
 
-import org.opensearch.migrations.BulkDocErrorTypes;
 import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
+import org.opensearch.migrations.bulkload.common.retry.BulkItemErrorKind;
 
 import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonParser;
@@ -204,15 +205,10 @@ public class BulkResponseParser {
             } else if ("error".equals(innerFieldName)) {
                 // Extract error type from error object
                 if (parser.getCurrentToken() == JsonToken.START_OBJECT) {
-                    while (parser.nextToken() != JsonToken.END_OBJECT) {
-                        var errorFieldName = parser.currentName();
-                        parser.nextToken();
-                        if ("type".equals(errorFieldName)) {
-                            docInfo.errorType(parser.getText());
-                        } else {
-                            parser.skipChildren();
-                        }
-                    }
+                    var types = new ArrayList<String>();
+                    collectErrorTypes(parser, types);
+                    docInfo.errorType(types.isEmpty() ? null : types.get(0));
+                    docInfo.errorTypeChain(types);
                 } else {
                     parser.skipChildren();
                 }
@@ -222,6 +218,26 @@ public class BulkResponseParser {
             }
         }
         return docInfo.build();
+    }
+
+    /**
+     * Reads an error object, positioned on its START_OBJECT, adding its {@code type} and then each nested
+     * {@code caused_by} type to {@code types}, outermost first.
+     */
+    private static void collectErrorTypes(JsonParser parser, List<String> types) throws IOException {
+        int typeIndex = types.size();
+        while (parser.nextToken() != JsonToken.END_OBJECT) {
+            var fieldName = parser.currentName();
+            parser.nextToken();
+            if ("type".equals(fieldName) && parser.getCurrentToken().isScalarValue()) {
+                // The cause can come before or after the type, but the type always precedes it in the chain.
+                types.add(typeIndex, parser.getText());
+            } else if ("caused_by".equals(fieldName) && parser.getCurrentToken() == JsonToken.START_OBJECT) {
+                collectErrorTypes(parser, types);
+            } else {
+                parser.skipChildren();
+            }
+        }
     }
 
     /**
@@ -243,6 +259,9 @@ public class BulkResponseParser {
         private String id;
         private String result;
         private String errorType;
+        /** {@link #errorType}, then each nested {@code caused_by} type. */
+        @Builder.Default
+        private List<String> errorTypeChain = List.of();
         private Integer status;
     }
 
@@ -251,21 +270,31 @@ public class BulkResponseParser {
      * the original bulk request:
      * <ul>
      *   <li>{@code successPositions}: succeeded or allowlisted — drop from pending.</li>
-     *   <li>{@code nonRetryableFailures}: failed with a type in
-     *       {@link BulkDocErrorTypes#NON_RETRYABLE} (and not allowlisted) — emit to failed document stream
-     *       immediately and drop from pending so we don't keep retrying them.</li>
-     *   <li>{@code retryableFailures}: any other failure — keep in pending for retry.
-     *       If retries are exhausted, callers should emit these to the failed document stream with
-     *       {@code FailureClass.RETRYABLE_EXHAUSTED}.</li>
+     *   <li>{@code nonRetryableFailures}: failed with an error of kind {@link BulkItemErrorKind#DOCUMENT} (and
+     *       not allowlisted) — emit to failed document stream immediately and drop from pending so we don't keep
+     *       retrying them.</li>
+     *   <li>{@code retryableFailures}: any other failure, with its {@link ItemFailure#getKind() kind} — keep in
+     *       pending for retry.</li>
      * </ul>
      *
      * <p>Each failure carries the raw per-item response JSON so the failed document stream record can
      * include the cluster's full error object verbatim.
      *
-     * @return parsed partition, or {@code null} if the response could not be parsed
-     *         (caller should fall back to retrying all docs).
+     * <p>Only HTTP 200/201 responses acknowledge individual operations. Request-level failures
+     * must not acknowledge individual documents, even if their body resembles a bulk result.
+     *
+     * @return parsed partition, or {@code null} for a request-level failure, missing body, or
+     *         unparseable result; callers should retain all pending documents for retry.
      */
-    public static ItemPartition partitionItems(String bulkResponse, DocumentExceptionAllowlist allowlist) {
+    public static ItemPartition partitionItems(
+        int statusCode,
+        String bulkResponse,
+        DocumentExceptionAllowlist allowlist
+    ) {
+        if ((statusCode != HttpURLConnection.HTTP_OK && statusCode != HttpURLConnection.HTTP_CREATED)
+            || bulkResponse == null) {
+            return null;
+        }
         var partition = ItemPartition.builder();
         boolean foundItems = false;
         try (var parser = jsonFactory.createParser(bulkResponse)) {
@@ -325,6 +354,7 @@ public class BulkResponseParser {
         classifyParsed(parseItemFields(rawJson), rawJson, position, partition, allowlist);
     }
 
+    @SuppressWarnings("java:S1854")
     private static void classifyParsed(
         DocInfo parsed,
         String rawJson,
@@ -341,10 +371,12 @@ public class BulkResponseParser {
             partition.successPosition(position);
             return;
         }
-        if (parsed.getErrorType() != null && BulkDocErrorTypes.NON_RETRYABLE.contains(parsed.getErrorType())) {
-            partition.nonRetryableFailure(new ItemFailure(position, parsed.getId(), parsed.getErrorType(), rawJson));
+        var kind = BulkItemErrorKind.of(parsed.getErrorTypeChain());
+        var failure = new ItemFailure(position, parsed.getId(), parsed.getErrorType(), rawJson, kind);
+        if (kind == BulkItemErrorKind.DOCUMENT) {
+            partition.nonRetryableFailure(failure);
         } else {
-            partition.retryableFailure(new ItemFailure(position, parsed.getId(), parsed.getErrorType(), rawJson));
+            partition.retryableFailure(failure);
         }
     }
 
@@ -367,6 +399,21 @@ public class BulkResponseParser {
         String errorType;
         /** Full per-item response JSON from the bulk API. */
         String responseItemJson;
+        /** What the error's type chain says; {@link BulkItemErrorKind#UNKNOWN} when it couldn't be read. */
+        BulkItemErrorKind kind;
+
+        public ItemFailure(int position, String documentId, String errorType, String responseItemJson,
+                           BulkItemErrorKind kind) {
+            this.position = position;
+            this.documentId = documentId;
+            this.errorType = errorType;
+            this.responseItemJson = responseItemJson;
+            this.kind = kind;
+        }
+
+        public ItemFailure(int position, String documentId, String errorType, String responseItemJson) {
+            this(position, documentId, errorType, responseItemJson, BulkItemErrorKind.UNKNOWN);
+        }
     }
 
     /** Three-way classification of a bulk response, by item position. */
@@ -376,5 +423,10 @@ public class BulkResponseParser {
         @lombok.Singular("successPosition") List<Integer> successPositions;
         @lombok.Singular("nonRetryableFailure") List<ItemFailure> nonRetryableFailures;
         @lombok.Singular("retryableFailure") List<ItemFailure> retryableFailures;
+
+        /** Number of items in the response, which must equal the number of operations in the request. */
+        public int itemCount() {
+            return successPositions.size() + nonRetryableFailures.size() + retryableFailures.size();
+        }
     }
 }

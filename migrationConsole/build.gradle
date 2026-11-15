@@ -9,7 +9,7 @@ plugins {
 evaluationDependsOn(":libraries:kafkaUtils")
 
 node {
-    version = '22.14.0'
+    version = '22.23.1'
     download = true
 }
 

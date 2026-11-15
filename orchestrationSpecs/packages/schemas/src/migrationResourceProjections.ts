@@ -30,6 +30,8 @@ export interface ProjectedField {
     changeRestriction: ChangeRestriction;
     checksumFor?: ChecksumDependency[];
     invariant?: FieldInvariant;
+    /** A gated field where only an increase needs approval. */
+    gatedOnIncreaseOnly?: boolean;
 }
 
 interface SchemaProjection {
@@ -259,6 +261,7 @@ export function collectProjectedFields(): ProjectedField[] {
                     sourcePath: [fieldName],
                     changeRestriction: meta?.changeRestriction ?? "safe",
                     checksumFor: meta?.checksumFor,
+                    ...(meta?.gatedOnIncreaseOnly ? {gatedOnIncreaseOnly: true} : {}),
                 } satisfies ProjectedField;
             })
     );

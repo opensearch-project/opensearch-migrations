@@ -30,6 +30,7 @@ from .crd_utils import (
     resource_display_name,
 )
 from .hints import hint_after_approve_step, hint_after_approve_change
+from . import change_restriction_override as override_module
 
 logger = logging.getLogger(__name__)
 
@@ -769,9 +770,35 @@ def _apply_approvals(ctx, namespace, targets):
     click.echo(f"\nApproved {len(targets)} gate(s).")
 
 
+def _override_options(func):
+    """Hidden override options for the runtime-gate subcommands (see change_restriction_override.py)."""
+    func = click.option('--yes', 'assume_yes', is_flag=True, default=False, hidden=True)(func)
+    func = click.option('--all-fields', is_flag=True, default=False, hidden=True)(func)
+    func = click.option('--field', 'override_fields', multiple=True, hidden=True)(func)
+    func = click.option('--override-change-restrictions', 'override', is_flag=True, default=False, hidden=True)(func)
+    return func
+
+
+def _run_override(ctx, namespace, workflow_name, targets, fields, all_fields, assume_yes):
+    for gate in targets:
+        try:
+            message = override_module.override_change_restrictions(
+                namespace, workflow_name, gate, _KIND_TO_PLURAL.get(gate.resource_kind),
+                fields, all_fields, assume_yes)
+        except override_module.ChangeRestrictionOverrideError as e:
+            click.echo(f"Error: {e}", err=True)
+            ctx.exit(ExitCode.FAILURE.value)
+            return
+        click.echo(f"  ✓ {_display_name(gate)}: {message}")
+
+
 def _run_subcommand(ctx, category, names, list_flag, all_flag, pre_approve,
-                    workflow_name, namespace, output_format='text'):
-    """Core logic shared by all three subcommands."""
+                    workflow_name, namespace, output_format='text', override=None):
+    """Core logic shared by all three subcommands.
+
+    override, when given, is (fields, all_fields, assume_yes): annotate each target's resource to override its
+    field rules for this run, then approve the gate, skipping the reset prerequisite.
+    """
     _require_single_action(ctx, names, list_flag, all_flag)
 
     try:
@@ -822,6 +849,10 @@ def _run_subcommand(ctx, category, names, list_flag, all_flag, pre_approve,
     if not targets:
         return
 
+    if override is not None:
+        _run_override(ctx, namespace, workflow_name, targets, *override)
+        return
+
     if category == "retry":
         click.echo(
             "Impossible-change retry gates cannot be approved safely. "
@@ -848,6 +879,18 @@ def _run_subcommand(ctx, category, names, list_flag, all_flag, pre_approve,
         hint_after_approve_step()
     elif category == 'change':
         hint_after_approve_change()
+
+
+def _override_request(ctx, override, fields, all_fields, assume_yes):
+    if not override:
+        if fields or all_fields:
+            click.echo("Error: --field and --all-fields require --override-change-restrictions.", err=True)
+            ctx.exit(ExitCode.FAILURE.value)
+        return None
+    if fields and all_fields:
+        click.echo("Error: use either --field or --all-fields, not both.", err=True)
+        ctx.exit(ExitCode.FAILURE.value)
+    return (fields, all_fields, assume_yes)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -926,9 +969,11 @@ def approve_step(ctx, names, list_flag, output_format, all_flag, pre_approve,
               help='Approve every matching change gate')
 @click.option('--pre-approve', is_flag=True, default=False,
               help='Include change gates whose resource has not been updated yet')
+@_override_options
 @_shared_options
 @click.pass_context
-def approve_change(ctx, names, list_flag, output_format, all_flag, pre_approve,
+def approve_change(ctx, names, list_flag, output_format, all_flag, pre_approve,  # NOSONAR - Click injects options
+                   override, override_fields, all_fields, assume_yes,
                    workflow_name, argo_server, namespace, insecure, token):
     """Acknowledge gated configuration field changes.
 
@@ -942,7 +987,8 @@ def approve_change(ctx, names, list_flag, output_format, all_flag, pre_approve,
         workflow approve change --pre-approve --all
     """
     _run_subcommand(ctx, 'change', names, list_flag, all_flag, pre_approve,
-                    workflow_name, namespace, output_format=output_format)
+                    workflow_name, namespace, output_format=output_format,
+                    override=_override_request(ctx, override, override_fields, all_fields, assume_yes))
 
 
 @approve_group.command("retry")
@@ -955,9 +1001,11 @@ def approve_change(ctx, names, list_flag, output_format, all_flag, pre_approve,
               help='Output format for --list')
 @click.option('--all', 'all_flag', is_flag=True, default=False,
               help='Approve every matching retry gate (blocked if prereqs unmet)')
+@_override_options
 @_shared_options
 @click.pass_context
-def approve_retry(ctx, names, list_flag, output_format, all_flag,
+def approve_retry(ctx, names, list_flag, output_format, all_flag,  # NOSONAR - Click injects options
+                  override, override_fields, all_fields, assume_yes,
                   workflow_name, argo_server, namespace, insecure, token):
     """Inspect recovery gates after an impossible change.
 
@@ -972,4 +1020,5 @@ def approve_retry(ctx, names, list_flag, output_format, all_flag,
         workflow reset captureproxy.capture-proxy --resubmit
     """
     _run_subcommand(ctx, 'retry', names, list_flag, all_flag, False,
-                    workflow_name, namespace, output_format=output_format)
+                    workflow_name, namespace, output_format=output_format,
+                    override=_override_request(ctx, override, override_fields, all_fields, assume_yes))

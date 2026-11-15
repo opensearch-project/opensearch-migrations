@@ -5,8 +5,10 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import org.opensearch.migrations.bulkload.common.http.HttpResponse;
 
@@ -25,11 +27,13 @@ public class InvalidResponse extends RfsException {
     private static final Pattern MAPPING_PARAM_NAME = Pattern.compile("\\[([a-zA-Z0-9_.]+)\\s*:");
     private static final Pattern AWARENESS_ATTRIBUTE_EXCEPTION = Pattern.compile("expected total copies needs to be a multiple of total awareness attributes");
     private static final Pattern REMOVED_TOKEN_FILTER = Pattern.compile("The \\[([a-zA-Z0-9_.-]+)\\] token filter has been removed\\.?");
+    private static final Pattern UNSUPPORTED_KNN_ENGINE = Pattern.compile("Field parameter 'engine' is not supported");
     private static final ObjectMapper objectMapper = new ObjectMapper();
     private final transient HttpResponse response;
     private static final String ERROR_STRING = "error";
     private static final String ROOT_CAUSE = "root_cause";
     private static final String REASON = "reason";
+    private static final String CAUSED_BY = "caused_by";
 
     public InvalidResponse(String message, HttpResponse response) {
         super(message);
@@ -102,7 +106,7 @@ public class InvalidResponse extends RfsException {
             errorBody.map(node -> node.get("suppressed")).ifPresent(nodes ->
                 nodes.forEach(node -> Optional.ofNullable(getRemovedTokenFilter(node)).ifPresent(results::add))
             );
-            errorBody.map(node -> node.get("caused_by")).ifPresent(node ->
+            errorBody.map(node -> node.get(CAUSED_BY)).ifPresent(node ->
                 Optional.ofNullable(getRemovedTokenFilter(node)).ifPresent(results::add)
             );
 
@@ -139,7 +143,7 @@ public class InvalidResponse extends RfsException {
             errorBody.map(node -> node.get(ROOT_CAUSE)).ifPresent(nodes ->
                 nodes.forEach(node -> Optional.of(node).map(InvalidResponse::getUnsupportedParams).ifPresent(results::addAll))
             );
-            errorBody.map(node -> node.get("caused_by")).ifPresent(node ->
+            errorBody.map(node -> node.get(CAUSED_BY)).ifPresent(node ->
                 Optional.of(node).map(InvalidResponse::getUnsupportedParams).ifPresent(results::addAll)
             );
 
@@ -147,6 +151,26 @@ public class InvalidResponse extends RfsException {
         } catch (Exception e) {
             log.warn("Error parsing mapping error response: " + response.body, e);
             return Set.of();
+        }
+    }
+
+    public boolean isUnsupportedKnnEngine() {
+        try {
+            var errorBody = Optional.ofNullable(objectMapper.readTree(response.body)).map(node -> node.get(ERROR_STRING));
+            if (errorBody.isEmpty()) {
+                return false;
+            }
+            var body = errorBody.get();
+            return Stream.of(
+                    Stream.of(body),
+                    body.path(ROOT_CAUSE).valueStream(),
+                    Stream.of(body.path(CAUSED_BY)))
+                .flatMap(Function.identity())
+                .map(node -> node.path(REASON).asText())
+                .anyMatch(reason -> UNSUPPORTED_KNN_ENGINE.matcher(reason).find());
+        } catch (Exception e) {
+            log.warn("Error parsing knn engine error response: " + response.body, e);
+            return false;
         }
     }
 

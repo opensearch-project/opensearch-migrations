@@ -29,8 +29,10 @@ abandoned attempts do not add another committed range.
 | `metrics.source` | `upserts`, `deletes`, `bytes` | Root-document operations and body bytes before transformations. Sum across committed ranges. |
 | `metrics.target` | `upserts`, `deletes`, `bytes` | Output operations and body bytes after transformations, counted once before retries. Sum across committed ranges. |
 | `metrics.requests` | `batches`, `total`, `retries`, `bytes`, `durationMillis` | Logical batches and their HTTP request costs. Sum across committed ranges. |
+| `metrics.failures` | `nonRetryable`, `retryableExhausted` | Target operations that became terminal failures, by failure class. Sum across committed ranges. |
 | `metrics.workItem` | `durationMillis` | Acquired attempt's elapsed time through preparation of its first checkpoint/completion commit. Sum for committed worker time. |
 | `metrics.snapshot` | `liveDocuments`, `nestedDocuments`, `tombstonedDocuments` | Whole-shard Lucene counts. Present only on the final work item; take once per shard, then sum by index. |
+| `metrics.flowControl` | `throttleRetries`, `transientRetries`, `budgetWaitMillis`, `slotWaitMillis`, `limitCuts`, `lowestLimit`, `highestLimit`, `finalLimit` | The worker's bulk flow control during the attempt: retries by class, time retries waited for the retry budget and requests waited for an in-flight slot, and the adaptive in-flight limit's cuts and range. Counts and waits sum across committed ranges; the limits describe one attempt and don't. The limits are `null` without an in-flight limit. For post-mortems, not validation. |
 
 Source/target deletes contribute zero body bytes. Request bytes are uncompressed
 NDJSON, including action metadata and retries. `requests.total` includes retries;
@@ -40,7 +42,17 @@ filtered batches still count as batches but send no HTTP request.
 A transformation that doubles four source documents records `source.upserts=4`
 and `target.upserts=8`; one that filters half records 4 and 2. These count
 operations, not successful target inserts: IDs may be replaced and terminal
-document failures may be handled through the failed-document stream. The target
+document failures may be handled through the failed-document stream.
+
+`metrics.failures` counts target operations, after transformation, that RFS
+will no longer retry: each is one failed-document record, or would be with the
+stream disabled. Documents rejected for `maxDocumentSizeBytes` count as
+`nonRetryable`. Operations waiting on the target (throttled, unavailable
+shards, blocked writes) are never counted; they stay pending. A range's records
+are written before its watermark advances, so its count matches them. A worker
+that fails after writing records but before committing leaves records with no
+committed count, and its successor may write them again; the failed-document
+stream can therefore hold more records than the summed counts. The target
 metrics describe output originating from this source work item, even if a
 transformation routes it to another index. Request costs exclude abandoned
 work-item attempts. Retries are not error counts because a bulk request can
@@ -109,6 +121,7 @@ live Lucene count of 14, plus two tombstoned slots.
         "source": {"upserts": 5, "deletes": 0, "bytes": 500},
         "target": {"upserts": 5, "deletes": 0, "bytes": 500},
         "requests": {"batches": 2, "total": 3, "retries": 1, "bytes": 1500, "durationMillis": 90},
+        "failures": {"nonRetryable": 0, "retryableExhausted": 0},
         "workItem": {"durationMillis": 120000},
         "snapshot": {"liveDocuments": 14, "nestedDocuments": 9, "tombstonedDocuments": 2}
       }
@@ -142,6 +155,7 @@ validating the current snapshot baseline.
         "source": {"upserts": 3, "deletes": 1, "bytes": 300},
         "target": {"upserts": 3, "deletes": 1, "bytes": 300},
         "requests": {"batches": 2, "total": 3, "retries": 1, "bytes": 900, "durationMillis": 90},
+        "failures": {"nonRetryable": 0, "retryableExhausted": 0},
         "workItem": {"durationMillis": 90000},
         "snapshot": {"liveDocuments": 16, "nestedDocuments": 9, "tombstonedDocuments": 4}
       }

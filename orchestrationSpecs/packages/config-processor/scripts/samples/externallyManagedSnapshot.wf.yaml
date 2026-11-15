@@ -30,7 +30,8 @@ snapshotMigrationConfigs:
     fromSnapshot: existingSnap
     slice: default
     metadataMigrationConfig: {}
-    documentBackfillConfig: {}
+    documentBackfillConfig:
+      failedDocumentStream: { type: disabled }
 traffic:
   proxies: {}
   replayers: {}

@@ -1224,6 +1224,10 @@
               "name": "workloadIdentityChecksum"
             },
             {
+              "name": "recordedRfsSessionName",
+              "value": ""
+            },
+            {
               "name": "groupName_view"
             },
             {
@@ -1337,6 +1341,28 @@
           [
             {
               "templateRef": {
+                "template": "patchsnapshotmigrationrfssessionname",
+                "name": "resource-management"
+              },
+              "when": "{{=!(0 == len(inputs.parameters.documentBackfillConfig)) && 0 == len(inputs.parameters.recordedRfsSessionName)}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.crdName}}"
+                  },
+                  {
+                    "name": "rfsSessionName",
+                    "value": "{{='rfs-'+inputs.parameters.workloadIdentityChecksum}}"
+                  }
+                ]
+              },
+              "name": "recordRfsSessionName"
+            }
+          ],
+          [
+            {
+              "templateRef": {
                 "template": "setupandrunbulkload",
                 "name": "document-bulk-load"
               },
@@ -1405,7 +1431,7 @@
                   },
                   {
                     "name": "sessionName",
-                    "value": "{{='rfs-'+inputs.parameters.workloadIdentityChecksum}}"
+                    "value": "{{=((0 == len(inputs.parameters.recordedRfsSessionName)) ? ('rfs-'+inputs.parameters.workloadIdentityChecksum) : (inputs.parameters.recordedRfsSessionName))}}"
                   },
                   {
                     "name": "crdUid",
@@ -1691,6 +1717,10 @@
                   {
                     "name": "workloadIdentityChecksum",
                     "value": "{{=fromJSON(inputs.parameters.snapshotMigrationConfig)['workloadIdentityChecksum']}}"
+                  },
+                  {
+                    "name": "recordedRfsSessionName",
+                    "value": "{{steps.reconcileSnapshotMigrationResource.outputs.parameters.rfsSessionName}}"
                   }
                 ]
               },

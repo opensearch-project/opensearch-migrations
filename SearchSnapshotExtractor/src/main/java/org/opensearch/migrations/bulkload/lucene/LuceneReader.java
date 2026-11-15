@@ -14,6 +14,7 @@ import java.util.stream.IntStream;
 import org.opensearch.migrations.bulkload.common.DocumentChangeType;
 import org.opensearch.migrations.bulkload.common.LuceneDocumentChange;
 import org.opensearch.migrations.bulkload.common.SnapshotDocumentCounts;
+import org.opensearch.migrations.bulkload.common.SourceFormat;
 
 import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
@@ -286,46 +287,12 @@ public class LuceneReader {
         }
 
         String openSearchDocId = null;
-        String type = null;
-        byte[] sourceBytes = null;
-        String routing = null;
+        StoredFields fields;
+        byte[] sourceBytes;
 
         try {
-            for (var field : document.getFields()) {
-                String fieldName = field.name();
-                switch (fieldName) {
-                    case "_id": {
-                        // ES 6+ stores id separately; pre-6 baked type+id into _uid
-                        openSearchDocId = field.asUid();
-                        break;
-                    }
-                    case "_uid": {
-                        // ES 5 and earlier: _uid = "type#id"
-                        var combinedTypeId = field.stringValue().split("#", 2);
-                        type = combinedTypeId[0];
-                        openSearchDocId = combinedTypeId[1];
-                        break;
-                    }
-                    case "_source": {
-                        // All versions — keep as raw bytes to avoid String allocation
-                        sourceBytes = field.utf8Value();
-                        break;
-                    }
-                    case "_recovery_source": {
-                        // Only use as fallback when _source is missing (disabled or filtered)
-                        if (useRecoverySource && sourceBytes == null) {
-                            sourceBytes = field.utf8Value();
-                        }
-                        break;
-                    }
-                    case "_routing": {
-                        routing = field.stringValue();
-                        break;
-                    }
-                    default:
-                        break;
-                }
-            }
+            fields = StoredFields.read(document, useRecoverySource);
+            openSearchDocId = fields.id;
             if (openSearchDocId == null) {
                 log.atDebug().setMessage("Skipping document with index {} from segment {} from source {}, it does not have an referenceable id.")
                     .addArgument(luceneDocId)
@@ -335,8 +302,12 @@ public class LuceneReader {
                 return null;  // Skip documents with missing id
             }
 
-            sourceBytes = resolveSourceBytes(sourceBytes, reader, luceneDocId, document, mappingContext,
-                openSearchDocId, getSegmentReaderDebugInfo, indexDirectoryPath, termIndex);
+            byte[] jsonSource = toJsonOrNull(fields.source, openSearchDocId, indexDirectoryPath);
+            // An unconvertible source keeps its stored bytes so the sink can fail just this document. It skips the
+            // doc-values merge, which would round-trip it through a UTF-8 String and corrupt it.
+            sourceBytes = jsonSource == null && fields.source != null ? fields.source
+                : resolveSourceBytes(jsonSource, reader, luceneDocId, document, mappingContext,
+                    openSearchDocId, getSegmentReaderDebugInfo, indexDirectoryPath, termIndex);
             if (sourceBytes == null) {
                 return null;
             }
@@ -364,8 +335,51 @@ public class LuceneReader {
         // instead of silently dropping the document.
         Long version = operation == DocumentChangeType.INDEX ? readVersion(reader, luceneDocId, worker) : null;
         log.atDebug().setMessage("Document {} read successfully").addArgument(openSearchDocId).log();
-        return new LuceneDocumentChange(segmentDocBase + luceneDocId, openSearchDocId, type, sourceBytes,
-            routing, operation, version);
+        return new LuceneDocumentChange(segmentDocBase + luceneDocId, openSearchDocId, fields.type, sourceBytes,
+            fields.routing, operation, version);
+    }
+
+    /** The stored fields of a Lucene document that identify it and carry its source. */
+    private static final class StoredFields {
+        String id;
+        String type;
+        byte[] source;
+        String routing;
+
+        static StoredFields read(LuceneDocument document, boolean useRecoverySource) {
+            var fields = new StoredFields();
+            for (var field : document.getFields()) {
+                switch (field.name()) {
+                    case "_id":
+                        // ES 6+ stores id separately; pre-6 baked type+id into _uid
+                        fields.id = field.asUid();
+                        break;
+                    case "_uid": {
+                        // ES 5 and earlier: _uid = "type#id"
+                        var combinedTypeId = field.stringValue().split("#", 2);
+                        fields.type = combinedTypeId[0];
+                        fields.id = combinedTypeId[1];
+                        break;
+                    }
+                    case "_source":
+                        // All versions — keep as raw bytes to avoid String allocation
+                        fields.source = field.utf8Value();
+                        break;
+                    case "_recovery_source":
+                        // Only use as fallback when _source is missing (disabled or filtered)
+                        if (useRecoverySource && fields.source == null) {
+                            fields.source = field.utf8Value();
+                        }
+                        break;
+                    case "_routing":
+                        fields.routing = field.stringValue();
+                        break;
+                    default:
+                        break;
+                }
+            }
+            return fields;
+        }
     }
 
     private static Long readVersion(LuceneLeafReader reader, int luceneDocId, SegmentReadSession.Reader worker) {
@@ -373,6 +387,28 @@ public class LuceneReader {
             return worker == null ? (Long) reader.getNumericValue(luceneDocId, "_version") : worker.version(luceneDocId);
         } catch (IOException e) {
             throw Lombok.sneakyThrow(e);
+        }
+    }
+
+    /**
+     * Stored sources keep the indexing request's content type, so convert SMILE, CBOR, and YAML to JSON
+     * once, here, before anything parses or forwards them.
+     *
+     * @return JSON bytes, or null if there is no source or it cannot be converted
+     */
+    private static byte[] toJsonOrNull(byte[] sourceBytes, String docId, Path indexDirectoryPath) {
+        if (sourceBytes == null) {
+            return null;
+        }
+        try {
+            return SourceFormat.toJson(sourceBytes);
+        } catch (SourceFormat.InvalidDocumentSourceException e) {
+            log.atWarn().setCause(e)
+                .setMessage("Document {} from {} has a source that cannot be converted to JSON; passing it through")
+                .addArgument(docId)
+                .addArgument(indexDirectoryPath)
+                .log();
+            return null;
         }
     }
 

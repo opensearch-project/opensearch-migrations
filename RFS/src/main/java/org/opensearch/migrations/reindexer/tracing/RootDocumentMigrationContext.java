@@ -15,6 +15,7 @@ public class RootDocumentMigrationContext extends BaseRootRfsContext implements 
     public final DocumentMigrationContexts.DocumentReindexContext.MetricInstruments documentReindexInstruments;
     public final DocumentMigrationContexts.ShardSetupAttemptContext.MetricInstruments shardSetupMetrics;
     public final DocumentMigrationContexts.AddShardWorkItemContext.MetricInstruments addShardWorkItemMetrics;
+    public final PipelineInstruments pipelineInstruments;
 
     public RootDocumentMigrationContext(
         OpenTelemetry sdk,
@@ -26,6 +27,7 @@ public class RootDocumentMigrationContext extends BaseRootRfsContext implements 
         documentReindexInstruments = DocumentMigrationContexts.DocumentReindexContext.makeMetrics(meter);
         shardSetupMetrics = DocumentMigrationContexts.ShardSetupAttemptContext.makeMetrics(meter);
         addShardWorkItemMetrics = DocumentMigrationContexts.AddShardWorkItemContext.makeMetrics(meter);
+        pipelineInstruments = new PipelineInstruments(meter);
     }
 
     @Override

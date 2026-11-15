@@ -111,6 +111,7 @@ describe("editConfig state", () => {
                 fromSnapshot: "snap1",
                 slice: "slice-0",
                 documentBackfillConfig: {
+                    failedDocumentStream: {type: "disabled"},
                     podReplicas: 1,
                     documentBackfillPodReplicas: 2,
                 },
@@ -1877,7 +1878,9 @@ describe("editConfig state", () => {
                     toTarget: "target",
                     fromSnapshot: "snap1",
                     slice: "slice-1",
-                    documentBackfillConfig: {},
+                    documentBackfillConfig: {
+                        failedDocumentStream: {type: "disabled"},
+                    },
                 },
             ],
         }, {
@@ -2619,9 +2622,14 @@ describe("editConfig state", () => {
             snapshotMigrationConfigs: [{
                 fromSource: "source",
                 toTarget: "target",
-                    fromSnapshot: "a",
-                    slices: [{label: "slice-4",documentBackfillConfig: {}}],
-                },],
+                fromSnapshot: "a",
+                slices: [{
+                    label: "slice-4",
+                    documentBackfillConfig: {
+                        failedDocumentStream: {type: "disabled"},
+                    },
+                }],
+            },],
             traffic: {kafkaClusters: {}, proxies: {}, s3Sources: {}, replayers: {}},
         });
 

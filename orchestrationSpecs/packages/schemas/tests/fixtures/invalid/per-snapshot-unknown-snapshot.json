@@ -27,7 +27,11 @@
       "fromSnapshot": "does-not-exist",
       "slices": [
         {
-          "documentBackfillConfig": {},
+          "documentBackfillConfig": {
+            "failedDocumentStream": {
+              "type": "disabled"
+            }
+          },
           "label": "slice-0"
         }
       ]

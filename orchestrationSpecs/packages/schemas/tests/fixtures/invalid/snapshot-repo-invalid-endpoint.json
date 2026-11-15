@@ -34,7 +34,11 @@
       "fromSnapshot": "snap1",
       "slices": [
         {
-          "documentBackfillConfig": {},
+          "documentBackfillConfig": {
+            "failedDocumentStream": {
+              "type": "disabled"
+            }
+          },
           "label": "slice-0"
         }
       ]

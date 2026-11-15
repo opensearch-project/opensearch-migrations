@@ -66,6 +66,9 @@ aws:
   configureAwsEksResources: false
   region: us-east-2
   account: "123456789012"
+  # EKS cluster identity attached to Kafka PVC CloudWatch metrics. Deployment
+  # entrypoints populate this value from the CloudFormation stack output.
+  eksClusterName: ""
 
   # Tags to stamp onto the AWS resources that EKS Auto Mode provisions for this release:
   # EC2 instances, EBS volumes and the load balancers/target groups behind any Service or
@@ -111,13 +114,13 @@ cluster:
 # launches supported families, never nano/micro/small sizes, and nothing with a single CPU
 # (https://docs.aws.amazon.com/eks/latest/userguide/automode-learn-instances.html#auto-supported-instances).
 workloadsNodePool:
-  # Controls placement for the capture/replay data plane:
-  #   shared   - Kafka, capture proxies and replayers use general-work-pool together.
-  #   isolated - Kafka, capture proxies and replayers each use a dedicated, tainted pool.
+  # Controls placement for the migration data plane:
+  #   shared   - RFS, Kafka, capture proxies and replayers use general-work-pool together.
+  #   isolated - RFS, Kafka, capture proxies and replayers each use a dedicated, tainted pool.
   # The optional k6 load generator always uses its own tainted pool in either mode.
   # This setting only has an effect when cluster.useCustomKarpenterNodePool is true.
   mode: isolated
-  # How Kafka brokers, capture proxies and replayers spread across availability zones
+  # How RFS workers, Kafka brokers, capture proxies and replayers spread across availability zones
   # (topology.kubernetes.io/zone), applied whether or not the custom NodePools are enabled:
   #   required  - never place a pod where its zone would be more than one pod ahead of the least
   #               populated zone; pods wait for capacity in that zone instead.
@@ -133,12 +136,15 @@ workloadsNodePool:
   # the cluster's subnets.
   zoneCount: 0
   name: general-work-pool
+  # Exact EC2 instance types. When set, these replace the architecture, category, generation and
+  # size filters below so inherited filters cannot accidentally exclude the requested SKU.
+  instanceTypes: []  # e.g. ["c6id.24xlarge"].
   architectures: []  # e.g. ["arm64"] for Graviton only.
   # With no capacity type, Auto Mode prioritizes reserved, then spot, then on-demand
   # (https://docs.aws.amazon.com/eks/latest/userguide/create-node-pool.html#auto-supported-labels),
   # so spot will be used where available. This base value applies to the shared pool and to any
-  # dedicated pool that does not override it. Kafka, capture proxies and replayers override it
-  # below because interruptions destabilize capture availability and replay rate.
+  # dedicated pool that does not override it. RFS, Kafka, capture proxies and replayers override it
+  # below because interruptions destabilize backfill progress, capture availability and replay rate.
   capacityTypes: []
   instanceCategories: []  # e.g. ["c", "m", "r"] for compute, general purpose and memory optimized.
   minInstanceGeneration: null  # Inclusive, e.g. 5 means generation 5 and newer. 0 or null omits it.
@@ -161,12 +167,21 @@ workloadsNodePool:
     # Set e.g. 30m to keep an empty node around for the next migration step.
     consolidateAfter: 0s
 
-  # Dedicated pools inherit the architecture, capacity-type, instance-category, generation,
-  # instance-size and disruption settings above unless that setting is overridden below.
+  # Dedicated pools inherit the instance-type, architecture, capacity-type, instance-category,
+  # generation, instance-size and disruption settings above unless that setting is overridden below.
   # Pool limits are deliberately independent and empty by default: taints plus required pod
   # selection provide isolation without imposing a capacity ceiling. Set limits when a deployment
   # needs an explicit cost or quota guardrail.
   dedicatedPools:
+    rfs:
+      name: rfs-work-pool
+      # Backfills are long-lived and benchmark runs require stable capacity.
+      capacityTypes: ["on-demand"]
+      # Snapshot extraction needs both CPU and memory, and the ephemeral-storage request prevents
+      # Auto Mode from selecting instances without enough local or NodeClass-provided storage.
+      instanceCategories: ["c", "m", "r"]
+      minInstanceGeneration: 6
+      limits: {}
     kafka:
       name: kafka-work-pool
       # Broker interruptions destabilize both capture publishing and replay consumer groups.
@@ -286,6 +301,10 @@ otelConfiguration:
 
 metrics:
   enabled: true
+  cloudWatch:
+    # Disable to keep Prometheus/Grafana metrics while suppressing CloudWatch
+    # metric export and ACK-managed dashboards.
+    enabled: true
   metricsCollectorEndpoint: "http://otel-collector:4317"
   env: []
   collectorResources:
@@ -362,6 +381,22 @@ metrics:
           receivers: [ otlp ]
           processors:
           exporters: [ debug ]
+
+# Global policy shared by the Prometheus and CloudWatch dashboards.
+# Percentages describe capacity remaining free, not capacity used.
+kafkaObservability:
+  storage:
+    warningFreePercent: 20
+    criticalFreePercent: 10
+    inodeFreePercent: 10
+    forecastLookback: 6h
+    projectedFillWarningHorizonHours: 24
+    abnormalVolumeHealthAlerting: true
+  prometheusAlerts:
+    enabled: false
+  brokerMetrics:
+    enabled: true
+    alertsEnabled: false
 
 tracing:
   enabled: false
@@ -677,8 +712,8 @@ charts:
       resources:
         requests: { cpu: 50m, memory: 32Mi }
         limits:   { cpu: 200m, memory: 64Mi }
-      # Like the otel-collector DaemonSet: run on every node, including the tainted Kafka, proxy,
-      # replayer and k6 pools, so those pods' logs are collected too.
+      # Like the otel-collector DaemonSet: run on every node, including the tainted RFS, Kafka,
+      # proxy, replayer and k6 pools, so those pods' logs are collected too.
       tolerations:
         - operator: Exists
       affinity:
@@ -868,6 +903,11 @@ charts:
           requests: { cpu: 50m, memory: 128Mi }
           limits:   { cpu: 250m, memory: 256Mi }
       kube-state-metrics:
+        # kubelet_volume_stats_* identifies a PVC only by namespace/name. Export
+        # these Strimzi labels so PromQL can join the volume series to the PVC
+        # identity instead of treating every data-* claim as Kafka.
+        metricLabelsAllowlist:
+          - "persistentvolumeclaims=[strimzi.io/cluster,strimzi.io/pool-name]"
         resources:
           requests: { cpu: 50m, memory: 64Mi }
           limits:   { cpu: 200m, memory: 128Mi }

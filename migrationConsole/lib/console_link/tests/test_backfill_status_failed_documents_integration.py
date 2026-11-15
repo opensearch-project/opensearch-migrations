@@ -72,7 +72,7 @@ def _failure_record(document_id: str, target_index: str = "index0") -> dict:
         "failureType": "mapper_parsing_exception",
         "failureClass": "NON_RETRYABLE",
         "timestamp": "2026-07-21T15:38:47Z",
-        "requestItem": {"index": {"_index": target_index, "_id": document_id}},
+        "target": {"effectiveIndex": target_index, "documentId": document_id},
         "responseItem": {"index": {"status": 400,
                                    "error": {"type": "mapper_parsing_exception",
                                              "reason": "failed to parse field [year]"}}},

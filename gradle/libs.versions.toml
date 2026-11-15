@@ -2,6 +2,9 @@
 aws-crt = "0.48.4"
 aws-msk-iam-auth = "2.3.9"
 aws-sdk = "2.55.6"
+azure-core-http-jdk-httpclient = "1.1.7"
+azure-identity = "1.18.6"
+azure-storage-blob = "12.35.1"
 bouncycastle = "1.86"
 commons-collections = "4.6.0"
 commons-compress = "1.26.2"
@@ -80,6 +83,12 @@ guava = { module = "com.google.guava:guava", version.ref = "guava" }
 
 gcp-storage = { module = "com.google.cloud:google-cloud-storage", version.ref = "gcp-storage" }
 
+azure-storage-blob = { module = "com.azure:azure-storage-blob", version.ref = "azure-storage-blob" }
+
+azure-identity = { module = "com.azure:azure-identity", version.ref = "azure-identity" }
+
+azure-core-http-jdk-httpclient = { module = "com.azure:azure-core-http-jdk-httpclient", version.ref = "azure-core-http-jdk-httpclient" }
+
 hamcrest = { module = "org.hamcrest:hamcrest", version.ref = "hamcrest" }
 
 httpclient5 = { module = "org.apache.httpcomponents.client5:httpclient5", version.ref = "httpclient5" }
@@ -88,6 +97,7 @@ jackson-annotations = { module = "com.fasterxml.jackson.core:jackson-annotations
 jackson-core = { module = "com.fasterxml.jackson.core:jackson-core", version.ref = "jackson" }
 jackson-databind = { module = "com.fasterxml.jackson.core:jackson-databind", version.ref = "jackson" }
 jackson-dataformat-smile = { module = "com.fasterxml.jackson.dataformat:jackson-dataformat-smile", version.ref = "jackson" }
+jackson-dataformat-cbor = { module = "com.fasterxml.jackson.dataformat:jackson-dataformat-cbor", version.ref = "jackson" }
 jackson-dataformat-yaml = { module = "com.fasterxml.jackson.dataformat:jackson-dataformat-yaml", version.ref = "jackson" }
 
 jcommander = { module = "org.jcommander:jcommander", version.ref = "jcommander" }

@@ -313,6 +313,30 @@ describe("console resources", () => {
         expect(resources.kafkas[0].source).toBe("migrationRun");
     });
 
+    it("projects Azure repositories with their workload credential secret", async () => {
+        const config = multiResourceConfig();
+        config.sourceClusters.sourcea.snapshotInfo.repos.repoA = {
+            repoPathUri: "azure://storageaccount/snapshots/repository",
+            endpoint: "http://azurite.ma.svc.cluster.local:10000",
+            azureCredentialsSecretName: "azure-snapshot-creds",
+        };
+
+        const workflowConfig = await new MigrationConfigTransformer().processFromObject(config);
+        const resources = buildConsoleResources(workflowConfig, undefined, "config", config);
+        const repository = resources.sources
+            .find(source => source.refName === "sourcea")
+            ?.repositories?.find(repo => repo.refName === "repoA");
+
+        expect(repository).toEqual(expect.objectContaining({
+            provider: "azure",
+            clientConfig: {
+                repo_uri: "azure://storageaccount/snapshots/repository",
+                endpoint: "http://azurite.ma.svc.cluster.local:10000",
+                azure_credentials_secret_name: "azure-snapshot-creds",
+            },
+        }));
+    });
+
     it("projects historical resolved configs that predate new workflow defaults", async () => {
         const workflowConfig = await new MigrationConfigTransformer().processFromObject(multiResourceConfig());
         const resolvedConfig = buildResolvedMigrationResources(workflowConfig, "workflow-a") as any;

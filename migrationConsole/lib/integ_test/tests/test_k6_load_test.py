@@ -572,8 +572,10 @@ def test_k6_cdc_only_imported_workflow_uses_the_standard_tuple_bucket():
         if template["name"] == "build-cdc-only-config"
     )
     script = build["container"]["args"][0]
-    assert '"tupleS3Bucket": $tupleS3Bucket' in script
-    assert '"tupleS3Region": $tupleS3Region' in script
+    assert '"tupleOutput": {' in script
+    assert '"type": "s3"' in script
+    assert '"bucket": $tupleS3Bucket' in script
+    assert '"region": $tupleS3Region' in script
 
 
 def test_k6_stress_topology_is_an_explicit_override():

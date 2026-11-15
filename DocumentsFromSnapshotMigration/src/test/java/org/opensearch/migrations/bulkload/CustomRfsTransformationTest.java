@@ -120,6 +120,7 @@ public class CustomRfsTransformationTest extends SourceTestBase {
             esSourceContainer.copySnapshotData(tempDirSnapshot.toString());
 
             String[] processArgs = {
+                "--disable-failed-document-stream",
                 "--snapshot-name",
                 SNAPSHOT_NAME,
                 "--snapshot-local-dir",

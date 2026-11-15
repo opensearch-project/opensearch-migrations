@@ -98,7 +98,9 @@ function snapshotMigrationConfig(opts: {
                 slices: {
                     "slice-0": {
                     metadataMigrationConfig: {},
-                    ...(opts.withDocumentBackfill ? {documentBackfillConfig: {}} : {}),
+                    ...(opts.withDocumentBackfill ? {
+                        documentBackfillConfig: {failedDocumentStream: {type: "disabled"}},
+                    } : {}),
                     },
                 },
             },],

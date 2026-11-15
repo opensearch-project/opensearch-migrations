@@ -38,7 +38,8 @@ snapshotMigrationConfigs:
     toTarget: target
     fromSnapshot: s2
     slice: backfill
-    documentBackfillConfig: {}
+    documentBackfillConfig:
+      failedDocumentStream: { type: disabled }
 traffic:
   proxies: {}
   replayers: {}

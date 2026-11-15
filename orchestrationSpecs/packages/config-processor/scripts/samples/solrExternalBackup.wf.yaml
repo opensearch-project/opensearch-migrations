@@ -27,4 +27,5 @@ snapshotMigrationConfigs:
     fromSnapshot: customerBackup
     slice: default
     metadataMigrationConfig: {}
-    documentBackfillConfig: {}
+    documentBackfillConfig:
+      failedDocumentStream: { type: disabled }

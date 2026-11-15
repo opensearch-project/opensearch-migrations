@@ -84,6 +84,7 @@ function sampleConfig(): z.infer<typeof OVERALL_MIGRATION_CONFIG> {
                     "slice-0": {
                     metadataMigrationConfig: {},
                     documentBackfillConfig: {
+                        failedDocumentStream: {type: "disabled"},
                         maxConnections: 8,
                     },
                     },
@@ -294,6 +295,8 @@ describe("resolved migration resources", () => {
         expect(snapshotMigration.parameters.metadataMigrationOtelTraceCollectorEndpoint).toBe("");
         expect(snapshotMigration.parameters.metadataMigrationTransformerConfig).toBe("");
         expect(snapshotMigration.parameters.metadataMigrationTransformerConfigFile).toBe("");
+        expect(snapshotMigration.parameters.metadataMigrationCollectionRouting).toBe("");
+        expect(snapshotMigration.parameters.documentBackfillCollectionRouting).toBe("");
     });
 
     it("omits capture proxy workflow-only file source fields from generated custom resources", async () => {
@@ -562,6 +565,29 @@ describe("resolved migration resources", () => {
         };
 
         expect(dryRunResourcePolicy(proxyBefore, proxyAfter).changes).toEqual([]);
+    });
+
+    it("dry-runs RFS maxConnections as gated only on increase and initialLeaseDuration as safe", () => {
+        const before: ResolvedMigrationResource = {
+            apiVersion: "migrations.opensearch.org/v1alpha1",
+            kind: "SnapshotMigration",
+            name: "migration",
+            parameters: {documentBackfillMaxConnections: 10, documentBackfillInitialLeaseDuration: "PT1H"},
+            parameterPolicies: [],
+        };
+        const withParameters = (parameters: Record<string, unknown>) =>
+            ({...before, parameters: {...before.parameters, ...parameters}});
+
+        expect(dryRunResourcePolicy(before, withParameters({documentBackfillMaxConnections: 5})).allowed).toBe(true);
+        expect(dryRunResourcePolicy(before, withParameters({documentBackfillInitialLeaseDuration: "PT2H"})).allowed)
+            .toBe(true);
+        const raised = dryRunResourcePolicy(before, withParameters({documentBackfillMaxConnections: 20}));
+        expect(raised.changes).toContainEqual(expect.objectContaining({
+            path: "documentBackfillMaxConnections",
+            result: "approval-required",
+        }));
+        expect(dryRunResourcePolicy(before, withParameters({documentBackfillMaxConnections: 20}), {approved: true})
+            .allowed).toBe(true);
     });
 
     it("does not report legacy source auth fields as CaptureProxy or SnapshotMigration blockers", () => {

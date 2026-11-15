@@ -28,4 +28,5 @@ snapshotMigrationConfigs:
     fromSnapshot: workflowBackup
     slice: default
     metadataMigrationConfig: {}
-    documentBackfillConfig: {}
+    documentBackfillConfig:
+      failedDocumentStream: { type: disabled }

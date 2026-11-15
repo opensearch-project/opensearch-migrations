@@ -60,7 +60,8 @@ snapshotMigrationConfigs:
     toTarget: target-y
     fromSnapshot: snapB
     slice: backfill
-    documentBackfillConfig: {}
+    documentBackfillConfig:
+      failedDocumentStream: { type: disabled }
 traffic:
   kafkaClusters:
     default:
