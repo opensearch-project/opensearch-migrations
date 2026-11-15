@@ -4446,6 +4446,46 @@ test("opens raw repair when runtime and configuration navigation are empty", asy
   })).toBeNull();
 });
 
+test("opens a blank workflow with add controls and no missing-record errors", async () => {
+  const emptySnapshot = structuredClone(manageSnapshot);
+  emptySnapshot.workflow = null;
+  emptySnapshot.rootIds = [];
+  emptySnapshot.nodes = {};
+  server.use(
+    http.get(
+      "*/api/v1/manage/state",
+      () => HttpResponse.json(emptySnapshot),
+    ),
+    http.get(
+      "*/api/v1/config/document",
+      () => HttpResponse.json({
+        modelVersion: "1",
+        persistedRevision: "missing",
+        rawYaml: "",
+      }),
+    ),
+  );
+  renderApp(null);
+
+  expect(await screen.findByRole("heading", {
+    name: "No migration resources found",
+  })).toBeInTheDocument();
+  await enterEditMode();
+
+  const resources = await screen.findByRole("tree", {
+    name: "Workflow resources",
+  });
+  expect(await within(resources).findByRole("button", {
+    name: "Add source cluster",
+  })).toBeInTheDocument();
+  expect(await within(resources).findByRole("button", {
+    name: "Add target cluster",
+  })).toBeInTheDocument();
+  expect(screen.queryByText(
+    "Invalid input: expected record, received undefined",
+  )).toBeNull();
+});
+
 
 test("protects and locally discards unsent raw YAML edits on exit", async () => {
   const rawDraft = rawRepairDraft();

@@ -1360,13 +1360,22 @@ export function annotateDraftChanges(
     return annotated;
 }
 
+export function emptyWorkflowConfigForEditing(): Record<string, unknown> {
+    return {
+        sourceClusters: {},
+        targetClusters: {},
+    };
+}
+
 export function projectConfigYaml(
     rawYaml: string,
     options: ConfigEditCoreOptions = {},
 ): ConfigYamlProjectionV1 {
     let config: unknown;
     try {
-        config = rawYaml.trim() === "" ? {} : parse(rawYaml);
+        config = rawYaml.trim() === ""
+            ? emptyWorkflowConfigForEditing()
+            : parse(rawYaml);
     } catch (error) {
         return {
             config: null,

@@ -2,6 +2,7 @@ import {
     applyEditOperation as applyCoreEditOperation,
     buildEditStateFromObject as buildCoreEditStateFromObject,
     buildEditStateFromObjectWithValidation,
+    emptyWorkflowConfigForEditing,
     inputSchemaValidationError,
     rawRepairState,
     syntaxValidation,
@@ -143,7 +144,9 @@ export async function main(): Promise<void> {
     const yamlContents = await readYamlText(pendingConfigPath);
     let config: unknown;
     try {
-        config = yamlContents.trim() === "" ? {} : parse(yamlContents);
+        config = yamlContents.trim() === ""
+            ? emptyWorkflowConfigForEditing()
+            : parse(yamlContents);
     } catch (error) {
         if (subcommand === "state" && args.length === 0) {
             process.stdout.write(JSON.stringify(rawRepairState(

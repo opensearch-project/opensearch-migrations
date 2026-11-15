@@ -4041,6 +4041,10 @@ describe("editConfig state", () => {
                 lossy: false,
                 mode: "structured",
             });
+            expect(state.validation).toEqual({
+                valid: true,
+                errors: [],
+            });
             expect(findNode(state.nodes, "edit:sourceClusters:add")).toBeDefined();
             expect(findNode(state.nodes, "edit:targetClusters:add")).toBeDefined();
             expect(findNode(state.nodes, "edit:snapshotMigrationConfigs:add")).toBeDefined();

@@ -190,6 +190,28 @@ sourceClusters:
         expect(malformed.editState.validation.valid).toBe(false);
     });
 
+    it("projects a blank document as an empty editable workflow", () => {
+        const projected = projectConfigYaml(" \n");
+
+        expect(projected.config).toEqual({
+            sourceClusters: {},
+            targetClusters: {},
+        });
+        expect(projected.editState.provenance).toMatchObject({
+            mode: "structured",
+            lossy: false,
+        });
+        expect(projected.editState.validation).toEqual({
+            valid: true,
+            errors: [],
+        });
+        const nodes = projected.editState.nodes.flatMap(function visit(node): typeof projected.editState.nodes {
+            return [node, ...(node.children ?? []).flatMap(visit)];
+        });
+        expect(nodes.find(node => node.id === "edit:sourceClusters:add")).toBeDefined();
+        expect(nodes.find(node => node.id === "edit:targetClusters:add")).toBeDefined();
+    });
+
     it("annotates local changes against the saved projection", () => {
         const base = buildEditStateFromObject(config);
         const updated = buildEditStateFromObject(applyEditOperation(config, {

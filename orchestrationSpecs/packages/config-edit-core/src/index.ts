@@ -4,6 +4,7 @@ export {
     applyEditOperationToObject,
     buildEditStateFromObject,
     buildEditStateFromObjectWithValidation,
+    emptyWorkflowConfigForEditing,
     inputSchemaValidationError,
     projectConfigYaml,
     rawRepairState,
