@@ -82,6 +82,52 @@ mirror_copy_concurrency() {
   echo "$requested"
 }
 
+# Run newline-delimited tasks with a bounded, work-conserving worker pool.
+# Args: <task-file> <worker-count> <failure-file> <worker-function> [worker-args...]
+mirror_run_task_queue() {
+  local task_file="$1" max_jobs="$2" failure_file="$3" worker="$4"
+  shift 4
+  local task pid
+  local -a worker_args pids remaining
+  worker_args=("$@")
+  pids=()
+  remaining=()
+
+  : > "$failure_file"
+  while IFS= read -r task; do
+    [[ -z "$task" ]] && continue
+    while (( ${#pids[@]} >= max_jobs )); do
+      remaining=()
+      for pid in "${pids[@]}"; do
+        if kill -0 "$pid" 2>/dev/null; then
+          remaining+=("$pid")
+        else
+          wait "$pid" 2>/dev/null || true
+        fi
+      done
+      if (( ${#remaining[@]} > 0 )); then
+        pids=("${remaining[@]}")
+      else
+        pids=()
+      fi
+      (( ${#pids[@]} < max_jobs )) || sleep 0.2
+    done
+
+    (
+      "$worker" "$task" ${worker_args[@]+"${worker_args[@]}"} \
+        || printf '%s\n' "$task" >> "$failure_file"
+    ) &
+    pids+=("$!")
+  done < "$task_file"
+
+  if (( ${#pids[@]} > 0 )); then
+    for pid in "${pids[@]}"; do
+      wait "$pid" 2>/dev/null || true
+    done
+  fi
+  [[ ! -s "$failure_file" ]]
+}
+
 # Helm OCI charts appear as tagged images in ECR.
 mirror_ecr_tag_exists() {
   local region="$1" repo="$2" tag="$3"

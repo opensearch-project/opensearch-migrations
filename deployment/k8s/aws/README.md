@@ -64,8 +64,20 @@ from the public registries.
 
 On subsequent runs, mirroring skips image tags whose source and destination
 digests already match, skips Helm chart versions already present in ECR, and
-avoids recreating existing repositories. Image copies use up to six workers by
-default; set `MIRROR_CONCURRENCY` to a positive integer to tune that limit.
+avoids recreating existing repositories. When the script creates or updates the
+CloudFormation stack, mirroring starts as soon as its ECR repository exists and
+continues while EKS is provisioning and the cluster is configured.
+
+Migration Assistant images and third-party images share a work-conserving
+queue; Helm chart mirroring reserves at most one additional slot from the same
+global limit. The default limit is six concurrent transfers. Set
+`MIRROR_CONCURRENCY` to a positive integer to tune the total, including the
+chart slot.
+
+The overlap does not use local checkpoints. If the terminal disconnects,
+CloudFormation continues in AWS and a rerun attaches to an in-progress stack
+operation. Image tags and chart versions that finished before the disconnect
+are detected in ECR and skipped; only interrupted transfers are retried.
 
 For an end-to-end walkthrough that builds from source, creates a self-managed
 Elasticsearch source and an Amazon OpenSearch Service domain or Serverless

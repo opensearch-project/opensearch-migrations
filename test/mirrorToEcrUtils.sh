@@ -45,7 +45,8 @@ if MIRROR_CONCURRENCY=invalid mirror_copy_concurrency 10 >/dev/null 2>&1; then
 fi
 
 aws_calls="$(mktemp)"
-trap 'rm -f "$aws_calls"' EXIT
+queue_tmp="$(mktemp -d)"
+trap 'rm -f "$aws_calls"; rm -rf "$queue_tmp"' EXIT
 aws() {
   echo "$*" >> "$aws_calls"
   if [[ "$1 $2" == "ecr describe-repositories" ]]; then
@@ -68,5 +69,32 @@ ensure_mirror_ecr_repositories us-east-1 \
 if grep -q 'create-repository --repository-name mirrored/quay.io/already ' "$aws_calls"; then
   fail "existing repository was recreated"
 fi
+
+queue_tasks="${queue_tmp}/tasks"
+queue_failures="${queue_tmp}/failures"
+queue_log="${queue_tmp}/events"
+printf 'slow\nquick\nthird\nfail\n' > "$queue_tasks"
+: > "$queue_log"
+
+queue_worker() {
+  local task="$1"
+  printf '%s-start\n' "$task" >> "$queue_log"
+  case "$task" in
+    slow) sleep 0.8 ;;
+    *) sleep 0.05 ;;
+  esac
+  printf '%s-end\n' "$task" >> "$queue_log"
+  [[ "$task" != "fail" ]]
+}
+
+queue_rc=0
+mirror_run_task_queue "$queue_tasks" 2 "$queue_failures" queue_worker &
+queue_pid=$!
+sleep 0.25
+grep -qxF 'third-start' "$queue_log" \
+  || fail "worker pool waited for the oldest task instead of using an available slot"
+wait "$queue_pid" || queue_rc=$?
+[[ "$queue_rc" -ne 0 ]] || fail "task queue did not report a worker failure"
+grep -qxF 'fail' "$queue_failures" || fail "failed task was not recorded"
 
 echo "mirrorToEcrUtils tests passed"

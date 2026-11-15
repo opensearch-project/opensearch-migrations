@@ -127,13 +127,16 @@ run_success_case() {
   : >"${log_file}"
   setup_mocks "${mock_dir}"
 
-  env PATH="${mock_dir}:$PATH" MOCK_LOG="${log_file}" \
-    bash "${script_under_test}" \
-      --grant-eks-access-only \
-      --stage dev \
-      --region us-east-1 \
-      --eks-access-principal-arn "${principal_arn}" \
-      >"${output_file}" 2>&1
+  if ! env PATH="${mock_dir}:$PATH" MOCK_LOG="${log_file}" \
+      bash "${script_under_test}" \
+        --grant-eks-access-only \
+        --stage dev \
+        --region us-east-1 \
+        --eks-access-principal-arn "${principal_arn}" \
+        >"${output_file}" 2>&1; then
+    cat "${output_file}" >&2
+    fail "Grant-only bootstrap failed for ${label}"
+  fi
 
   assert_contains "Grant-only mode: skipping release version resolution." "${output_file}"
   assert_contains "Mode                   = Grant EKS access only (--grant-eks-access-only)" "${output_file}"
