@@ -73,6 +73,8 @@ public abstract class OpenSearchClient {
     private final CompressionMode compressionMode;
     private final int maxDocsPerBulkRequest;
     private final long maxBytesPerBulkRequest;
+    /** Maximum request or response body bytes included in each bulk trace entry; 0 logs the complete body. */
+    private volatile int bulkTraceMaxBytes = DEFAULT_BULK_TRACE_MAX_BYTES;
     private final FailedDocumentReporter failedDocumentReporter;
     private final BulkRuntime bulkRuntime;
     private final OpenSearchAdminClient adminClient;
@@ -127,7 +129,8 @@ public abstract class OpenSearchClient {
             compressionMode,
             failedDocumentReporter,
             bulkRuntime,
-            this::getBulkRequestPath
+            this::getBulkRequestPath,
+            this::getBulkTraceMaxBytes
         );
         this.bulkRequestPreparer = new BulkRequestPreparer(
             maxDocsPerBulkRequest,
@@ -178,7 +181,14 @@ public abstract class OpenSearchClient {
     }
 
     public void setBulkTraceMaxBytes(int bulkTraceMaxBytes) {
-        bulkRequestExecutor.setBulkTraceMaxBytes(bulkTraceMaxBytes);
+        if (bulkTraceMaxBytes < 0) {
+            throw new IllegalArgumentException("bulkTraceMaxBytes must be >= 0, got " + bulkTraceMaxBytes);
+        }
+        this.bulkTraceMaxBytes = bulkTraceMaxBytes;
+    }
+
+    private int getBulkTraceMaxBytes() {
+        return bulkTraceMaxBytes;
     }
 
     public void rejectOversizedDocument(

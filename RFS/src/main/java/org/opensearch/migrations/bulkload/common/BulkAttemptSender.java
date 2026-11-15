@@ -8,8 +8,9 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.concurrent.TimeoutException;
-import java.util.function.Function;
+import java.util.function.IntSupplier;
 import java.util.function.Supplier;
+import java.util.function.UnaryOperator;
 
 import org.opensearch.migrations.bulkload.common.OpenSearchClient.BulkResponse;
 import org.opensearch.migrations.bulkload.common.bulk.BulkNdjson;
@@ -29,7 +30,6 @@ import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
 import static org.opensearch.migrations.bulkload.common.OpenSearchClient.BULK_REQUEST_TRACE_LOGGER;
-import static org.opensearch.migrations.bulkload.common.OpenSearchClient.DEFAULT_BULK_TRACE_MAX_BYTES;
 import static org.opensearch.migrations.bulkload.common.OpenSearchClient.NoResponseException;
 
 /**
@@ -41,26 +41,21 @@ final class BulkAttemptSender {
     private final RestClient client;
     private final CompressionMode compressionMode;
     private final BulkRuntime bulkRuntime;
-    private final Function<String, String> bulkRequestPath;
-    private volatile int bulkTraceMaxBytes = DEFAULT_BULK_TRACE_MAX_BYTES;
+    private final UnaryOperator<String> bulkRequestPath;
+    private final IntSupplier bulkTraceMaxBytes;
 
     BulkAttemptSender(
         RestClient client,
         CompressionMode compressionMode,
         BulkRuntime bulkRuntime,
-        Function<String, String> bulkRequestPath
+        UnaryOperator<String> bulkRequestPath,
+        IntSupplier bulkTraceMaxBytes
     ) {
         this.client = client;
         this.compressionMode = compressionMode;
         this.bulkRuntime = bulkRuntime;
         this.bulkRequestPath = bulkRequestPath;
-    }
-
-    void setBulkTraceMaxBytes(int newBulkTraceMaxBytes) {
-        if (newBulkTraceMaxBytes < 0) {
-            throw new IllegalArgumentException("bulkTraceMaxBytes must be >= 0, got " + newBulkTraceMaxBytes);
-        }
-        bulkTraceMaxBytes = newBulkTraceMaxBytes;
+        this.bulkTraceMaxBytes = bulkTraceMaxBytes;
     }
 
     Mono<AssessedResponse> sendAttempt(
@@ -243,7 +238,7 @@ final class BulkAttemptSender {
             .addArgument(body.length)
             .addArgument(sentBytes)
             .addArgument(gzipped ? "gzipped" : "uncompressed")
-            .addArgument(() -> traceBody(body, bulkTraceMaxBytes))
+            .addArgument(() -> traceBody(body, bulkTraceMaxBytes.getAsInt()))
             .log();
     }
 
@@ -267,7 +262,7 @@ final class BulkAttemptSender {
             .addArgument(bodyBytes)
             .addArgument(sentBytes)
             .addArgument(gzipped ? "gzipped" : "uncompressed")
-            .addArgument(() -> traceBody(body, bulkTraceMaxBytes))
+            .addArgument(() -> traceBody(body, bulkTraceMaxBytes.getAsInt()))
             .log();
     }
 
@@ -283,7 +278,7 @@ final class BulkAttemptSender {
             .addArgument(Duration.ofNanos(elapsedNanos).toMillis())
             .addArgument(() -> response.body == null
                 ? null
-                : traceBody(response.body.getBytes(StandardCharsets.UTF_8), bulkTraceMaxBytes))
+                : traceBody(response.body.getBytes(StandardCharsets.UTF_8), bulkTraceMaxBytes.getAsInt()))
             .log();
     }
 
@@ -411,5 +406,27 @@ final class BulkAttemptSender {
         return BulkFlowMetrics.AttemptOutcome.CONNECTION_RESET;
     }
 
-    record AssessedResponse(HttpResponse response, BulkErrorClass errorClass, long assessmentNanos) {}
+    static final class AssessedResponse {
+        private final HttpResponse response;
+        private final BulkErrorClass errorClass;
+        private final long assessmentNanos;
+
+        AssessedResponse(HttpResponse response, BulkErrorClass errorClass, long assessmentNanos) {
+            this.response = response;
+            this.errorClass = errorClass;
+            this.assessmentNanos = assessmentNanos;
+        }
+
+        HttpResponse response() {
+            return response;
+        }
+
+        BulkErrorClass errorClass() {
+            return errorClass;
+        }
+
+        long assessmentNanos() {
+            return assessmentNanos;
+        }
+    }
 }

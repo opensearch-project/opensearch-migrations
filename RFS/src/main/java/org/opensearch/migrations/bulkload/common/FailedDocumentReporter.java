@@ -2,6 +2,7 @@ package org.opensearch.migrations.bulkload.common;
 
 import java.time.Instant;
 import java.util.Base64;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.opensearch.migrations.bulkload.common.bulk.BulkOperationSpec;
 import org.opensearch.migrations.bulkload.common.bulk.metadata.BaseMetadata;
@@ -20,14 +21,16 @@ import org.slf4j.LoggerFactory;
 final class FailedDocumentReporter {
     private static final ObjectMapper OBJECT_MAPPER = OpenSearchClient.OBJECT_MAPPER;
     private static final Logger log = LoggerFactory.getLogger(OpenSearchClient.class);
+    private static final String DOCUMENT_ID_FIELD = "documentId";
+    private static final String INDEX_OPERATION = "index";
 
-    private volatile FailedDocumentStreamSink sink;
+    private final AtomicReference<FailedDocumentStreamSink> sink = new AtomicReference<>();
     private volatile String sessionId = "unknown-session";
     private volatile String workerId = "unknown-worker";
     private volatile String workItemId;
 
     void setContext(FailedDocumentStreamSink failedDocumentStreamSink, String newSessionId, String newWorkerId) {
-        sink = failedDocumentStreamSink;
+        sink.set(failedDocumentStreamSink);
         sessionId = newSessionId;
         workerId = newWorkerId;
     }
@@ -37,7 +40,7 @@ final class FailedDocumentReporter {
     }
 
     FailedDocumentStreamSink getSink() {
-        return sink;
+        return sink.get();
     }
 
     void rejectOversizedDocument(
@@ -57,7 +60,7 @@ final class FailedDocumentReporter {
             .addArgument(size)
             .addArgument(limit)
             .log();
-        if (sink == null) {
+        if (sink.get() == null) {
             log.atError()
                 .setMessage(
                     "Document '{}' for index '{}' was skipped for its size and, with no failed document "
@@ -99,29 +102,30 @@ final class FailedDocumentReporter {
         if (context != null) {
             context.addBulkDocumentsFailed(FailureClass.NON_RETRYABLE.name(), 1);
         }
-        if (sink == null) {
+        var currentSink = sink.get();
+        if (currentSink == null) {
             return;
         }
         try {
             var sourceItem = OBJECT_MAPPER.createObjectNode();
-            sourceItem.put("documentId", docId);
+            sourceItem.put(DOCUMENT_ID_FIELD, docId);
             if (source != null) {
                 sourceItem.put("bodyBase64", Base64.getEncoder().encodeToString(source));
             }
             var targetItem = OBJECT_MAPPER.createObjectNode();
             targetItem.put("effectiveIndex", indexName);
-            targetItem.put("documentId", docId);
-            targetItem.put("operationType", "index");
+            targetItem.put(DOCUMENT_ID_FIELD, docId);
+            targetItem.put("operationType", INDEX_OPERATION);
             targetItem.putObject("action").put("_index", indexName).put("_id", docId);
             var responseItem = OBJECT_MAPPER.createObjectNode();
-            responseItem.putObject("index")
+            responseItem.putObject(INDEX_OPERATION)
                 .put("_index", indexName)
                 .put("_id", docId)
                 .put("status", 400)
                 .putObject("error")
                 .put("type", OpenSearchClient.INVALID_SOURCE_FORMAT)
                 .put("reason", cause.getMessage());
-            sink.write(
+            currentSink.write(
                 FailedDocumentStreamRecord.builder()
                     .sessionId(sessionId)
                     .workerId(workerId)
@@ -153,7 +157,8 @@ final class FailedDocumentReporter {
     }
 
     void emit(String indexName, BulkOperationSpec op, ItemFailure failure, FailureClass failureClass) {
-        if (sink == null) {
+        var currentSink = sink.get();
+        if (currentSink == null) {
             return;
         }
         try {
@@ -165,7 +170,7 @@ final class FailedDocumentReporter {
                 ? OBJECT_MAPPER.readTree(failure.getResponseItemJson())
                 : null;
             String failureType = failure != null ? failure.getErrorType() : null;
-            var record = FailedDocumentStreamRecord.builder()
+            var streamRecord = FailedDocumentStreamRecord.builder()
                 .sessionId(sessionId)
                 .workerId(workerId)
                 .workItemId(workItemId)
@@ -178,7 +183,7 @@ final class FailedDocumentReporter {
                 .target(targetPortion(op, effectiveIndex, docId))
                 .responseItem(responseItem)
                 .build();
-            sink.write(record).subscribe(
+            currentSink.write(streamRecord).subscribe(
                 v -> {},
                 err -> log.atError()
                     .setCause(err)
@@ -213,7 +218,7 @@ final class FailedDocumentReporter {
             return null;
         }
         var source = OBJECT_MAPPER.createObjectNode();
-        source.put("documentId", extractDocumentId(op));
+        source.put(DOCUMENT_ID_FIELD, extractDocumentId(op));
         source.set("body", OBJECT_MAPPER.valueToTree(original));
         return source;
     }
@@ -224,7 +229,7 @@ final class FailedDocumentReporter {
         }
         var target = OBJECT_MAPPER.createObjectNode();
         target.put("effectiveIndex", effectiveIndex);
-        target.put("documentId", documentId);
+        target.put(DOCUMENT_ID_FIELD, documentId);
         target.put("operationType", String.valueOf(op.getOperationType()));
         target.set("action", OBJECT_MAPPER.valueToTree(op.getOperation()));
         if (op.isIncludeDocument()) {
@@ -244,7 +249,7 @@ final class FailedDocumentReporter {
             }
             JsonNode meta = tree.path("operation").path("_id");
             if (meta.isMissingNode() || meta.isNull()) {
-                meta = tree.path("index").path("_id");
+                meta = tree.path(INDEX_OPERATION).path("_id");
             }
             if (meta.isMissingNode() || meta.isNull()) {
                 meta = tree.path("create").path("_id");

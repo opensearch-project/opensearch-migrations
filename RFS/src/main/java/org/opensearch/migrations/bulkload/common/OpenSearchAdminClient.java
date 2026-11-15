@@ -3,7 +3,7 @@ package org.opensearch.migrations.bulkload.common;
 import java.net.HttpURLConnection;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Function;
+import java.util.function.UnaryOperator;
 
 import org.opensearch.migrations.AwarenessAttributeSettings;
 import org.opensearch.migrations.Flavor;
@@ -36,12 +36,15 @@ final class OpenSearchAdminClient {
             .maxBackoff(DEFAULT_MAX_BACKOFF)
             .filter(throwable -> !(throwable instanceof InvalidResponse));
     static final String SNAPSHOT_PREFIX_STR = "_snapshot/";
+    private static final String PATH_DELIMITER = "/";
+    private static final String NULL_RESPONSE_ASSERTION =
+        "getResponse should not be null; it should either be a valid response or an exception should have been thrown.";
 
     private final RestClient client;
     private final Version version;
-    private final Function<String, String> createIndexPath;
+    private final UnaryOperator<String> createIndexPath;
 
-    OpenSearchAdminClient(RestClient client, Version version, Function<String, String> createIndexPath) {
+    OpenSearchAdminClient(RestClient client, Version version, UnaryOperator<String> createIndexPath) {
         this.client = client;
         this.version = version;
         this.createIndexPath = createIndexPath;
@@ -82,8 +85,7 @@ final class OpenSearchAdminClient {
             duration,
             getResponse != null ? getResponse.statusCode : "null"
         );
-        assert getResponse != null
-            : "getResponse should not be null; it should either be a valid response or an exception should have been thrown.";
+        assert getResponse != null : NULL_RESPONSE_ASSERTION;
         ObjectNode settings;
 
         String balanceIsEnabledSetting = "cluster.routing.allocation.awareness.balance";
@@ -249,8 +251,7 @@ final class OpenSearchAdminClient {
             getResponse.statusCode,
             duration
         );
-        assert getResponse != null
-            : "getResponse should not be null; it should either be a valid response or an exception should have been thrown.";
+        assert getResponse != null : NULL_RESPONSE_ASSERTION;
         return getResponse.statusCode == HttpURLConnection.HTTP_OK;
     }
 
@@ -288,7 +289,7 @@ final class OpenSearchAdminClient {
         ObjectNode settings,
         IRfsContexts.ICreateSnapshotContext context
     ) {
-        String targetPath = SNAPSHOT_PREFIX_STR + repoName + "/" + snapshotName;
+        String targetPath = SNAPSHOT_PREFIX_STR + repoName + PATH_DELIMITER + snapshotName;
         log.info("Starting createSnapshot for repoName={}, snapshotName={}", repoName, snapshotName);
         long startTime = System.currentTimeMillis();
         var putResponse = client.putAsync(targetPath, settings.toString(), context.createSnapshotContext())
@@ -317,7 +318,7 @@ final class OpenSearchAdminClient {
         String snapshotName,
         IRfsContexts.ICreateSnapshotContext context
     ) {
-        String targetPath = SNAPSHOT_PREFIX_STR + repoName + "/" + snapshotName;
+        String targetPath = SNAPSHOT_PREFIX_STR + repoName + PATH_DELIMITER + snapshotName;
         log.info("Starting getSnapshotStatus for repoName={}, snapshotName={}", repoName, snapshotName);
         long startTime = System.currentTimeMillis();
         var getResponse = client.getAsync(targetPath, context.createGetSnapshotContext())
@@ -347,8 +348,7 @@ final class OpenSearchAdminClient {
             getResponse != null ? getResponse.statusCode : "null"
         );
 
-        assert getResponse != null
-            : "getResponse should not be null; it should either be a valid response or an exception should have been thrown.";
+        assert getResponse != null : NULL_RESPONSE_ASSERTION;
         if (getResponse.statusCode == HttpURLConnection.HTTP_OK) {
             try {
                 return Optional.of(OBJECT_MAPPER.readValue(getResponse.body, ObjectNode.class));

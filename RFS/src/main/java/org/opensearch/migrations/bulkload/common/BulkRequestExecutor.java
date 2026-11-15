@@ -10,7 +10,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Function;
+import java.util.function.IntSupplier;
 import java.util.function.Supplier;
+import java.util.function.UnaryOperator;
 
 import org.opensearch.migrations.bulkload.common.OpenSearchClient.BulkResponse;
 import org.opensearch.migrations.bulkload.common.bulk.BulkOperationSpec;
@@ -62,16 +64,14 @@ final class BulkRequestExecutor {
         CompressionMode compressionMode,
         FailedDocumentReporter failedDocumentReporter,
         BulkRuntime bulkRuntime,
-        Function<String, String> bulkRequestPath
+        UnaryOperator<String> bulkRequestPath,
+        IntSupplier bulkTraceMaxBytes
     ) {
         this.failedRequestsLogger = failedRequestsLogger;
         this.failedDocumentReporter = failedDocumentReporter;
         this.bulkRuntime = bulkRuntime;
-        this.attemptSender = new BulkAttemptSender(client, compressionMode, bulkRuntime, bulkRequestPath);
-    }
-
-    void setBulkTraceMaxBytes(int newBulkTraceMaxBytes) {
-        attemptSender.setBulkTraceMaxBytes(newBulkTraceMaxBytes);
+        this.attemptSender =
+            new BulkAttemptSender(client, compressionMode, bulkRuntime, bulkRequestPath, bulkTraceMaxBytes);
     }
 
     public void setBulkRetryBudget(RetryBudget budget) {
