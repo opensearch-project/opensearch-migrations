@@ -167,7 +167,7 @@ function connectionIdentityParameters(
 ): Record<string, unknown> {
     return {
         [prefixedKey(prefix, "label")]: identity.label,
-        ...(options.includeVersion === false ? {} : {[prefixedKey(prefix, "version")]: identity.version}),
+        ...(options.includeVersion ? {[prefixedKey(prefix, "version")]: identity.version} : {}),
         [prefixedKey(prefix, "endpoint")]: identity.endpoint,
         [prefixedKey(prefix, "allowInsecure")]: identity.allowInsecure,
         ...(options.includeAuth === false ? {} : {
@@ -428,8 +428,7 @@ function snapshotMigrationParameters(migration: SnapshotMigrationConfig): Record
         ),
         ...connectionIdentityParameters(
             "target",
-            migration.targetConnectionIdentity as Record<string, unknown>,
-            {includeVersion: false}
+            migration.targetConnectionIdentity as Record<string, unknown>
         ),
         snapshotLabel: migration.label,
         snapshotSourceType: snapshotSourceType(snapshotNameResolution),
@@ -448,8 +447,7 @@ function trafficReplayParameters(replay: ReplayConfig): Record<string, unknown> 
         sourceLabel: replay.sourceLabel,
         ...connectionIdentityParameters(
             "target",
-            replay.targetConnectionIdentity as Record<string, unknown>,
-            {includeVersion: false}
+            replay.targetConnectionIdentity as Record<string, unknown>
         ),
     };
 }

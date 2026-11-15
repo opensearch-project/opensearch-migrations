@@ -1816,9 +1816,9 @@ public abstract class OpenSearchClient {
         DocumentExceptionAllowlist allowlist,
         RequestTotals totals
     ) {
-        ItemPartition partition = BulkResponseParser.partitionItems(resp.body, allowlist);
+        ItemPartition partition = BulkResponseParser.partitionItems(resp.statusCode, resp.body, allowlist);
         if (partition == null) {
-            // Can't parse response - assume all failed, retry all
+            // No trustworthy per-item result - assume all failed, retry all
             return 0;
         }
         if (partition.itemCount() != pendingDocs.size()) {

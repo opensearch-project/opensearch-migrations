@@ -13,7 +13,9 @@ const schemas = [
     ["traffic replayer", USER_REPLAYER_PROCESS_OPTIONS, {}],
     ["create snapshot", USER_CREATE_SNAPSHOT_PROCESS_OPTIONS, {}],
     ["metadata migration", USER_METADATA_PROCESS_OPTIONS, {}],
-    ["document backfill", USER_RFS_PROCESS_OPTIONS, {}],
+    ["document backfill", USER_RFS_PROCESS_OPTIONS, {
+        failedDocumentStream: {type: "disabled" as const},
+    }],
     ["Solr backup", SOLR_CREATE_BACKUP_OPTIONS, {}],
 ] as const;
 

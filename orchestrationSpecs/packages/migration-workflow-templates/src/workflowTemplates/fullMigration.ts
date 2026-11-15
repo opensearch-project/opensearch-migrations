@@ -4,7 +4,6 @@ import {
     ARGO_MIGRATION_CONFIG,
     ARGO_REPLAYER_OPTIONS,
     ARGO_RFS_OPTIONS,
-    CLUSTER_CONNECTION_IDENTITY,
     COMPLETE_SNAPSHOT_CONFIG,
     DEFAULT_RESOURCES,
     DENORMALIZED_CREATE_SNAPSHOTS_CONFIG,
@@ -20,6 +19,7 @@ import {
     NAMED_TARGET_CLUSTER_CONFIG,
     PER_SOURCE_CREATE_SNAPSHOTS_CONFIG,
     SNAPSHOT_MIGRATION_CONFIG,
+    TARGET_CLUSTER_CONNECTION_IDENTITY,
 } from '@opensearch-migrations/schemas'
 import {
     AllowLiteralOrExpression,
@@ -662,7 +662,7 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("fromCapturedTrafficSourceKind", typeToken<"proxy" | "s3">())
         .addRequiredInput("fromCapturedTrafficConfigChecksum", typeToken<string>())
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
-        .addRequiredInput("targetConnectionIdentity", typeToken<z.infer<typeof CLUSTER_CONNECTION_IDENTITY>>())
+        .addRequiredInput("targetConnectionIdentity", typeToken<z.infer<typeof TARGET_CLUSTER_CONNECTION_IDENTITY>>())
         .addRequiredInput("replayerOptions", typeToken<z.infer<typeof ARGO_REPLAYER_OPTIONS>>())
         .addRequiredInput("useLocalStack", typeToken<boolean>())
         .addRequiredInput("name", typeToken<string>())

@@ -1,7 +1,7 @@
 import {USER_RFS_OPTIONS} from "../src/userSchemas";
 
 describe("bulkRequestTraceMaxBytes", () => {
-    const base = {maxShardSizeBytes: 1024, disableFailedDocumentStream: true};
+    const base = {maxShardSizeBytes: 1024, failedDocumentStream: {type: "disabled" as const}};
 
     test("defaults to one MiB", () => {
         expect(USER_RFS_OPTIONS.parse(base).bulkRequestTraceMaxBytes).toBe(1024 * 1024);

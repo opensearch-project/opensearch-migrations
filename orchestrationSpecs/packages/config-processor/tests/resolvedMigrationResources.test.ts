@@ -74,7 +74,7 @@ function sampleConfig(): z.infer<typeof OVERALL_MIGRATION_CONFIG> {
                 snap1: [{
                     metadataMigrationConfig: {},
                     documentBackfillConfig: {
-                        disableFailedDocumentStream: true,
+                        failedDocumentStream: {type: "disabled"},
                         maxConnections: 8,
                     },
                 }],

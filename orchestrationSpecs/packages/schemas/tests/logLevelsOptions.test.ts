@@ -1,7 +1,10 @@
 import {USER_METADATA_OPTIONS, USER_PROXY_OPTIONS, USER_REPLAYER_OPTIONS, USER_RFS_OPTIONS} from "../src/userSchemas";
 
 describe("logLevels options", () => {
-    const rfsBase = {maxShardSizeBytes: 1024, disableFailedDocumentStream: true};
+    const rfsBase = {
+        maxShardSizeBytes: 1024,
+        failedDocumentStream: {type: "disabled" as const},
+    };
 
     test("RFS accepts all three loggers", () => {
         const parsed = USER_RFS_OPTIONS.parse({

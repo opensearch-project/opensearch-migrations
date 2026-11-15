@@ -18,6 +18,7 @@ import {
     TRANSFORM_PIPELINE,
     TRANSFORM_CONTEXT_VALUE,
     DEPLOYMENT_DEFAULTS_CONFIG,
+    FAILED_DOCUMENT_STREAM_CONFIG,
 } from '@opensearch-migrations/schemas';
 import {StreamSchemaTransformer} from './streamSchemaTransformer';
 import { z } from 'zod';
@@ -465,26 +466,26 @@ function trimToUndefined(value: unknown): string | undefined {
  * Resolve the failed-document-stream S3 region/endpoint before the workflow is created, so the
  * destination is recorded in run history rather than discovered from pod env at runtime.
  *
- * The bucket is the stream's on/off switch and comes from the user's config alone — no default.
+ * The user explicitly selects either an S3 destination or the disabled mode. The workflow-facing
+ * representation remains flat because it is passed directly to the RFS command.
  */
 export function resolveFailedDocumentStreamS3(
-    rest: Record<string, unknown>,
+    config: z.infer<typeof FAILED_DOCUMENT_STREAM_CONFIG>,
     repoConfig: { awsRegion?: string; endpoint?: string } | undefined,
     deploymentDefaults: z.infer<typeof DEPLOYMENT_DEFAULTS_CONFIG>
-): Record<string, string | undefined> {
-    const bucket = trimToUndefined(rest.failedDocumentStreamS3Bucket);
-    const userRegion = trimToUndefined(rest.failedDocumentStreamS3Region);
-    const userEndpoint = trimToUndefined(rest.failedDocumentStreamS3Endpoint);
-
-    if (!bucket) {
-        // Stream off; clear orphan region/endpoint.
+): Record<string, string | number | boolean | undefined> {
+    if (config.type === "disabled") {
         return {
             failedDocumentStreamS3Bucket: undefined,
+            disableFailedDocumentStream: true,
             failedDocumentStreamS3Region: undefined,
             failedDocumentStreamS3Endpoint: undefined,
         };
     }
 
+    const bucket = config.bucket.trim();
+    const userRegion = trimToUndefined(config.region);
+    const userEndpoint = trimToUndefined(config.endpoint);
     const region = userRegion
         ?? trimToUndefined(repoConfig?.awsRegion)
         ?? trimToUndefined(deploymentDefaults.defaultS3Region);
@@ -495,15 +496,18 @@ export function resolveFailedDocumentStreamS3(
     if (!region) {
         throw new Error(
             `failed document stream S3 bucket '${bucket}' was set but no region could be determined. ` +
-            `Set documentBackfillConfig.failedDocumentStreamS3Region, the snapshot repo's awsRegion, ` +
+            `Set documentBackfillConfig.failedDocumentStream.region, the snapshot repo's awsRegion, ` +
             `or the deployment default region.`
         );
     }
 
     return {
+        failedDocumentStreamS3Prefix: config.prefix,
         failedDocumentStreamS3Bucket: bucket,
+        disableFailedDocumentStream: false,
         failedDocumentStreamS3Region: region,
         failedDocumentStreamS3Endpoint: endpoint,
+        failedDocumentStreamMaxBufferBytes: config.maxBufferBytes,
     };
 }
 
@@ -518,7 +522,7 @@ function prepareDocumentBackfillConfig(
         return undefined;
     }
 
-    const {documentTransforms, ...rest} = config;
+    const {documentTransforms, failedDocumentStream, ...rest} = config;
     const fileSourceRegistry = new FileSourceRegistry();
     const generatedConfig = lowerTransformPipeline(documentTransforms, fileSourceRegistry);
     return ARGO_RFS_OPTIONS.parse({
@@ -528,7 +532,7 @@ function prepareDocumentBackfillConfig(
             bulkRequestTrace: rest.logLevels?.bulkRequestTrace ?? "off",
             failedRequests: rest.logLevels?.failedRequests ?? "warn",
         },
-        ...resolveFailedDocumentStreamS3(rest, repoConfig, deploymentDefaults),
+        ...resolveFailedDocumentStreamS3(failedDocumentStream, repoConfig, deploymentDefaults),
         skipApproval: rest.skipApproval ?? skipApprovals,
         ...fileSourceRegistry.resolvedFields,
         ...collectionRoutingFields(collectionRouting),
@@ -540,13 +544,19 @@ function prepareReplayerConfig(
     config: NonNullable<NonNullable<z.infer<typeof OVERALL_MIGRATION_CONFIG>["traffic"]>["replayers"][string]["replayerConfig"]> | undefined
 ) {
     const configuredLogLevels = config && "logLevels" in config ? config.logLevels : undefined;
-    const {requestTransforms, tupleTransforms, ...rest} = config ?? {};
+    const {requestTransforms, tupleTransforms, tupleOutput, ...rest} = config ?? {};
     const fileSourceRegistry = new FileSourceRegistry();
     const generatedRequestConfig = lowerTransformPipeline(requestTransforms, fileSourceRegistry);
     const generatedTupleConfig = lowerTransformPipeline(tupleTransforms, fileSourceRegistry);
 
     return ARGO_REPLAYER_OPTIONS.parse({
         ...rest,
+        ...(tupleOutput?.type === "s3" ? {
+            tupleS3Bucket: tupleOutput.bucket,
+            tupleS3Region: tupleOutput.region,
+            tupleS3Prefix: tupleOutput.prefix,
+            tupleS3Endpoint: tupleOutput.endpoint,
+        } : {}),
         logLevels: {
             root: configuredLogLevels?.root ?? "info",
         },
@@ -1047,7 +1057,9 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                     configChecksum: proxyChecksumForSnapshot.get(dep.name) ?? '',
                 }));
                 const sourceConnectionIdentity =
-                    MigrationConfigTransformer.clusterConnectionIdentity(s.sourceConfig as Record<string, unknown>);
+                    MigrationConfigTransformer.sourceClusterConnectionIdentity(
+                        s.sourceConfig as Record<string, unknown>
+                    );
                 const repoIdentity = MigrationConfigTransformer.repoIdentity(item.repo as Record<string, unknown>);
                 return {
                     ...item,
@@ -1216,7 +1228,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                 throw new Error(`Proxy '${proxyName}' references unknown source cluster '${proxy.source}'`);
             }
             const topic = proxy.kafkaTopic || proxyName;
-            const sourceConnectionIdentity = MigrationConfigTransformer.clusterConnectionIdentity({
+            const sourceConnectionIdentity = MigrationConfigTransformer.sourceClusterConnectionIdentity({
                 ...sourceCluster,
                 label: proxy.source,
             });
@@ -1308,7 +1320,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                     createConfigs.push({
                         label: snapshotName,
                         snapshotPrefix: snapshotConfig.createSnapshotConfig.snapshotPrefix || snapshotName,
-                        sourceConnectionIdentity: MigrationConfigTransformer.clusterConnectionIdentity({
+                        sourceConnectionIdentity: MigrationConfigTransformer.sourceClusterConnectionIdentity({
                             ...sourceCluster,
                             label: sourceName,
                         }),
@@ -1327,7 +1339,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                     createConfigs.push({
                         label: snapshotName,
                         snapshotPrefix: snapshotName,
-                        sourceConnectionIdentity: MigrationConfigTransformer.clusterConnectionIdentity({
+                        sourceConnectionIdentity: MigrationConfigTransformer.sourceClusterConnectionIdentity({
                             ...sourceCluster,
                             label: sourceName,
                         }),
@@ -1430,11 +1442,11 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                     const solrCollectionAllowlist = isSolrSourceVersion(sourceCluster.version)
                         ? solrCollectionAllowlistForSnapshot(snapshotDef)
                         : [];
-                    const sourceConnectionIdentity = MigrationConfigTransformer.clusterConnectionIdentity({
+                    const sourceConnectionIdentity = MigrationConfigTransformer.sourceClusterConnectionIdentity({
                         ...sourceCluster,
                         label: fromSource,
                     });
-                    const targetConnectionIdentity = MigrationConfigTransformer.clusterConnectionIdentity({
+                    const targetConnectionIdentity = MigrationConfigTransformer.targetClusterConnectionIdentity({
                         ...targetCluster,
                         label: toTarget,
                     });
@@ -1513,7 +1525,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             const replayerConfig = prepareReplayerConfig(
                 replayer.replayerConfig
             );
-            const targetConnectionIdentity = MigrationConfigTransformer.clusterConnectionIdentity({
+            const targetConnectionIdentity = MigrationConfigTransformer.targetClusterConnectionIdentity({
                 ...targetCluster,
                 label: replayer.toTarget,
             });
@@ -1644,15 +1656,24 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
         };
     }
 
-    static clusterConnectionIdentity(clusterConfig: Record<string, unknown>): Record<string, unknown> {
+    static targetClusterConnectionIdentity(clusterConfig: Record<string, unknown>): Record<string, unknown> {
         const authIdentity = MigrationConfigTransformer.authIdentity(clusterConfig.authConfig as ClusterAuthConfig);
         return {
             label: clusterConfig.label,
-            version: clusterConfig.version ?? "",
             endpoint: clusterConfig.endpoint ?? "",
             allowInsecure: clusterConfig.allowInsecure ?? false,
             solrContextPath: clusterConfig.solrContextPath ?? "",
             ...authIdentity,
+        };
+    }
+
+    static sourceClusterConnectionIdentity(clusterConfig: Record<string, unknown>): Record<string, unknown> {
+        const {label, ...identityWithoutVersion} =
+            MigrationConfigTransformer.targetClusterConnectionIdentity(clusterConfig);
+        return {
+            label,
+            version: clusterConfig.version ?? "",
+            ...identityWithoutVersion,
         };
     }
 
