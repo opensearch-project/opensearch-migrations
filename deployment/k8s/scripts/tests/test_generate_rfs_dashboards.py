@@ -636,8 +636,14 @@ class GeneratedDashboardTest(unittest.TestCase):
         self.assertEqual(["Retried", "Terminal"], [expression["label"] for expression in expressions])
         self.assertNotIn("${PROP(", str(item_errors))
         for expression in expressions:
-            self.assertIn('SUM(SEARCH(\'{OpenSearchMigrations,OTelLib,errorType,retryable,qualifier}', expression["expression"])
-            self.assertIn('0 * SUM(SEARCH(\'{OpenSearchMigrations,OTelLib,attempt,outcome,qualifier}', expression["expression"])
+            self.assertIn(
+                'SUM(SEARCH(\'{OpenSearchMigrations,OTelLib,errorType,retryable,qualifier}',
+                expression["expression"],
+            )
+            self.assertIn(
+                '0 * SUM(SEARCH(\'{OpenSearchMigrations,OTelLib,attempt,outcome,qualifier}',
+                expression["expression"],
+            )
             self.assertIn('MetricName="bulkAttempts"', expression["expression"])
 
     def test_cloudwatch_memory_utilization_avoids_dividing_by_an_empty_limit_series(self):
