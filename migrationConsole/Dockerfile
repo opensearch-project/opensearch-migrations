@@ -157,10 +157,20 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     --mount=type=cache,target=/root/.cache/pipenv \
     pipenv install
 
+# These projects intentionally share /.venv. Reapply the migration console lock
+# after installing the auxiliary tools so their older transitive pins cannot
+# leave the runtime environment inconsistent.
+WORKDIR /root/lib/console_link
+RUN --mount=type=cache,target=/root/.cache/pip \
+    --mount=type=cache,target=/root/.cache/pipenv \
+    pipenv sync && \
+    python -m pip check
+
 COPY lib/console_link/console_link /root/lib/console_link/console_link
 COPY lib/integ_test /root/lib/integ_test
 COPY cluster_tools /root/cluster_tools
 RUN rm -rf /root/cluster_tools/.venv
+RUN python -c "import console_link.workflow.web.app"
 WORKDIR /root
 
 RUN mkdir -p /usr/share/bash-completion/completions && \
