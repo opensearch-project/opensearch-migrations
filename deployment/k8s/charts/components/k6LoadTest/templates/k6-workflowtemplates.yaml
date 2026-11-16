@@ -168,6 +168,18 @@ spec:
             runner:
               image: "{{`{{workflow.parameters.runnerImage}}`}}"
               imagePullPolicy: {{ $.Values.image.pullPolicy }}
+{{- if $.Values.podIdentityAuth.enabled }}
+              serviceAccountName: {{ $.Values.workflow.serviceAccountName }}
+              volumes:
+                - name: k6-pod-identity-wrapper
+                  configMap:
+                    name: k6-pod-identity-wrapper
+                    defaultMode: 0555
+              volumeMounts:
+                - name: k6-pod-identity-wrapper
+                  mountPath: /opt/k6-pod-identity/bin
+                  readOnly: true
+{{- end }}
 {{- if $.Values.testRun.nodePoolName }}
               nodeSelector:
                 migrations.opensearch.org/workload-pool: {{ $.Values.testRun.nodePoolName | quote }}
@@ -215,6 +227,18 @@ spec:
               # same-named entries wins is not something a load test should depend on. A unit test
               # renders this chart and fails if the two lists ever stop matching.
               env:
+{{- if $.Values.podIdentityAuth.enabled }}
+                - name: PATH
+                  value: /opt/k6-pod-identity/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+                - name: K6_AUTH_MODE
+                  value: sigv4
+                - name: AWS_REGION
+                  value: {{ required "podIdentityAuth.region is required when Pod Identity auth is enabled" $.Values.podIdentityAuth.region | quote }}
+                - name: SIGV4_SERVICE
+                  value: {{ $.Values.podIdentityAuth.service | default "es" | quote }}
+                - name: SIGV4_SIGNING_ENDPOINT
+                  value: {{ required "podIdentityAuth.signingEndpoint is required when Pod Identity auth is enabled" $.Values.podIdentityAuth.signingEndpoint | quote }}
+{{- end }}
                 - name: CAPTURE_PROXY_URL
                   value: '{{ printf "{{workflow.parameters.CAPTURE_PROXY_URL}}" }}'
 {{- range $k, $v := $.Values.k6Output }}

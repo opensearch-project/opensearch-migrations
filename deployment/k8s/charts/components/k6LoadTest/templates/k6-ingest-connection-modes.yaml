@@ -97,10 +97,25 @@ spec:
             template: pod-churn
 
     - name: prepare-index
+{{- if .Values.podIdentityAuth.enabled }}
+      volumes:
+        - name: k6-pod-identity-wrapper
+          configMap:
+            name: k6-pod-identity-wrapper
+            defaultMode: 0555
+{{- end }}
       container:
         image: {{ $image | quote }}
         imagePullPolicy: {{ .Values.image.pullPolicy }}
+{{- if .Values.podIdentityAuth.enabled }}
+        command: [/opt/k6-pod-identity/bin/k6]
+        volumeMounts:
+          - name: k6-pod-identity-wrapper
+            mountPath: /opt/k6-pod-identity/bin
+            readOnly: true
+{{- else }}
         command: [k6]
+{{- end }}
         args: [run, --quiet, /scripts/scenarios/prepare-index.js]
         envFrom:
           - secretRef:
@@ -113,6 +128,16 @@ spec:
             value: "{{`{{workflow.parameters.INDEX_NAME}}`}}"
           - name: INDEX_NUMBER_OF_SHARDS
             value: "{{`{{workflow.parameters.INDEX_NUMBER_OF_SHARDS}}`}}"
+{{- if .Values.podIdentityAuth.enabled }}
+          - name: K6_AUTH_MODE
+            value: sigv4
+          - name: AWS_REGION
+            value: {{ required "podIdentityAuth.region is required when Pod Identity auth is enabled" .Values.podIdentityAuth.region | quote }}
+          - name: SIGV4_SERVICE
+            value: {{ .Values.podIdentityAuth.service | default "es" | quote }}
+          - name: SIGV4_SIGNING_ENDPOINT
+            value: {{ required "podIdentityAuth.signingEndpoint is required when Pod Identity auth is enabled" .Values.podIdentityAuth.signingEndpoint | quote }}
+{{- end }}
 
     - name: pod-churn
       inputs:

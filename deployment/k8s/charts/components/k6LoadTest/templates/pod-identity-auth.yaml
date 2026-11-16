@@ -1,0 +1,44 @@
+{{- if .Values.podIdentityAuth.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: k6-pod-identity-wrapper
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: k6-load-test
+data:
+  k6: |
+    #!/bin/sh
+    set -eu
+
+    if [ -z "${AWS_CONTAINER_CREDENTIALS_FULL_URI:-}" ] ||
+       [ -z "${AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE:-}" ]; then
+      echo "EKS Pod Identity credential endpoint is unavailable" >&2
+      exit 1
+    fi
+
+    token="$(cat "${AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE}")"
+    credentials="$(wget -qO- \
+      --header="Authorization: ${token}" \
+      "${AWS_CONTAINER_CREDENTIALS_FULL_URI}")"
+
+    json_value() {
+      printf '%s' "${credentials}" |
+        sed -n "s/.*\\\"$1\\\"[[:space:]]*:[[:space:]]*\\\"\\([^\\\"]*\\)\\\".*/\\1/p"
+    }
+
+    AWS_ACCESS_KEY_ID="$(json_value AccessKeyId)"
+    AWS_SECRET_ACCESS_KEY="$(json_value SecretAccessKey)"
+    AWS_SESSION_TOKEN="$(json_value Token)"
+    export AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
+
+    if [ -z "${AWS_ACCESS_KEY_ID}" ] ||
+       [ -z "${AWS_SECRET_ACCESS_KEY}" ] ||
+       [ -z "${AWS_SESSION_TOKEN}" ]; then
+      echo "EKS Pod Identity returned an incomplete credential document" >&2
+      exit 1
+    fi
+
+    unset credentials token
+    exec /usr/bin/k6 "$@"
+{{- end }}

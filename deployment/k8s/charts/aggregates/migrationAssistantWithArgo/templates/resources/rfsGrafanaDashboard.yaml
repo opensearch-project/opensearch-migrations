@@ -2325,7 +2325,7 @@ data:
               "type": "timeseries",
               "id": 44,
               "title": "Item errors per second",
-              "description": "Per-document errors returned inside otherwise successful bulk HTTP responses. Retried errors may reflect target state; terminal errors were attributed to the document and recorded for manual action.",
+              "description": "Per-document errors returned inside otherwise successful bulk HTTP responses. Retried errors may reflect target state; terminal errors were attributed to the document and recorded for manual action. CloudWatch aggregates error types into retried and terminal totals and shows zero while healthy bulk traffic is present; Grafana retains the per-error-type breakdown.",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${DS_PROMETHEUS}"
