@@ -69,7 +69,10 @@ def build_direct_migration_config(
             "perSnapshotConfig": {
                 snapshot_name: [{
                     "metadataMigrationConfig": {"indexAllowlist": DIRECT_INDICES},
-                    "documentBackfillConfig": {"indexAllowlist": DIRECT_INDICES},
+                    "documentBackfillConfig": {
+                        "failedDocumentStream": {"type": "disabled"},
+                        "indexAllowlist": DIRECT_INDICES,
+                    },
                 }]
             },
         }],
