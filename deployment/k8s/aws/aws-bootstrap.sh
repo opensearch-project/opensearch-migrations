@@ -931,14 +931,17 @@ if [[ "$deploy_cfn" == "true" ]]; then
 
   # Stream CloudFormation stack events in the background while deploy runs.
   # Polls describe-stack-events every 10s, prints new resource status changes.
+  # The API returns events newest first; the query reverses them so they print
+  # in the order they happened. (Reversing in the query rather than piping through
+  # `tac` keeps this working on macOS, which does not ship `tac`.)
   stream_cfn_events() {
     local seen_file
     seen_file=$(mktemp)
     trap "rm -f '$seen_file'" RETURN
     while true; do
       aws cloudformation describe-stack-events --stack-name "$cfn_stack_name" ${region:+--region "$region"} \
-        --query 'StackEvents[].[EventId,Timestamp,ResourceStatus,ResourceType,LogicalResourceId,ResourceStatusReason]' \
-        --output text 2>/dev/null | tac | while IFS=$'\t' read -r eid ts status rtype logical reason; do
+        --query 'reverse(StackEvents)[].[EventId,Timestamp,ResourceStatus,ResourceType,LogicalResourceId,ResourceStatusReason]' \
+        --output text 2>/dev/null | while IFS=$'\t' read -r eid ts status rtype logical reason; do
           grep -qxF "$eid" "$seen_file" 2>/dev/null && continue
           echo "$eid" >> "$seen_file"
           [[ "$reason" == "None" ]] && reason=""
