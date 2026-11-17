@@ -242,6 +242,7 @@ now a chart edit — no image rebuild.
 | The TestRun manifest itself (mount shape, `K6_OUT` trio, labels) | chart `templates/k6-workflowtemplates.yaml` | the templates' `resource.manifest` | `helm upgrade` |
 | Runner image / tag | chart `values.yaml` (`image.*`) | the `runnerImage` parameter default | `helm upgrade` |
 | Default auth Secret name | chart `values.yaml` (`authSecretName`) | optional `envFrom` on each runner | `helm upgrade` |
+| EKS Pod Identity auth | chart `values.yaml` (`podIdentityAuth.*`) | temporary credentials on index setup and runner pods | `helm upgrade` |
 
 **Apply a scenario edit** — rebuild the image, then submit a fresh run:
 
@@ -368,6 +369,27 @@ loadtest run --scenario ingest --target "$PROXY" --auth-secret-name k6-source-au
 Temporary credentials must remain valid for the whole run. The CDC k6 integration test resolves
 credentials through boto3's normal credential chain, creates a unique per-run Secret, and deletes it
 after k6 exits.
+
+On EKS, the chart can instead obtain temporary credentials from Pod Identity immediately before
+starting each k6 process. Associate the source-access IAM role with
+`workflow.serviceAccountName` (by default `argo-workflow-executor`), grant that role access in the
+source domain's resource policy, and enable the chart values:
+
+```bash
+helm upgrade k6-load-test "$CHART" -n ma \
+  --set image.repository=<registry>/migrations/k6_runner \
+  --set image.tag=latest \
+  --set podIdentityAuth.enabled=true \
+  --set-string podIdentityAuth.region=us-east-2 \
+  --set-string podIdentityAuth.service=es \
+  --set-string podIdentityAuth.signingEndpoint=https://search-source.us-east-2.es.amazonaws.com
+```
+
+No auth Secret is needed on this path. The index-setup pod and every TestRun runner use the
+associated service account and fetch their own credentials immediately before starting k6. The
+archive initializer does not send requests, so SigV4 signer construction is deferred until the
+first request and the initializer remains credential-free. The signing endpoint is the real source
+endpoint even though requests are sent to the capture proxy.
 
 | Key | Default | Meaning |
 |---|---|---|

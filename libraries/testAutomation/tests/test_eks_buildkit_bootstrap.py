@@ -57,6 +57,24 @@ docker() {
 ensure_eks_buildx_builder
 """
 
+RELEASE_HARNESS = r"""
+export MIGRATIONS_REPO_ROOT_DIR="$REPO_ROOT"
+export KUBE_CONTEXT=migration-eks-test
+export BUILDKIT_HELM_ARGS="--set-string nodeClassName=${NODE_CLASS}"
+source "$BACKEND"
+
+record() { printf '%s\n' "$*" >> "$STATE_DIR/calls"; }
+helm() {
+  record "helm $*"
+  if [[ "$*" == *" status buildkit -n buildkit"* ]]; then
+    [[ "${RELEASE_EXISTS:-true}" == "true" ]]
+    return
+  fi
+  [[ "$*" == "upgrade --install buildkit "* ]] || return 99
+}
+ensure_eks_buildkit_release
+"""
+
 
 def run_bootstrap(tmp_path, **overrides):
     env = {
@@ -75,6 +93,44 @@ def run_bootstrap(tmp_path, **overrides):
     calls_file = tmp_path / "calls"
     calls = calls_file.read_text().splitlines() if calls_file.exists() else []
     return completed, calls
+
+
+def run_release_reconcile(tmp_path, **overrides):
+    env = {
+        **os.environ,
+        "BACKEND": str(BACKEND),
+        "REPO_ROOT": str(BACKEND.parents[2]),
+        "STATE_DIR": str(tmp_path),
+        "NODE_CLASS": "migrations-tagged",
+        **overrides,
+    }
+    completed = subprocess.run(
+        ["/bin/bash", "-c", RELEASE_HARNESS],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    calls_file = tmp_path / "calls"
+    calls = calls_file.read_text().splitlines() if calls_file.exists() else []
+    return completed, calls
+
+
+def test_existing_buildkit_release_is_reconciled_with_nodeclass_and_reuses_values(tmp_path):
+    completed, calls = run_release_reconcile(tmp_path)
+    assert completed.returncode == 0, completed.stderr
+    upgrade = next(call for call in calls if " upgrade --install buildkit " in call)
+    assert "--reuse-values" in upgrade
+    assert "--set-string nodeClassName=migrations-tagged" in upgrade
+    assert "--set skipBuildJob=true" in upgrade
+
+
+def test_new_buildkit_release_uses_resolved_nodeclass_without_reuse_values(tmp_path):
+    completed, calls = run_release_reconcile(tmp_path, RELEASE_EXISTS="false", NODE_CLASS="default")
+    assert completed.returncode == 0, completed.stderr
+    upgrade = next(call for call in calls if " upgrade --install buildkit " in call)
+    assert "--reuse-values" not in upgrade
+    assert "--set-string nodeClassName=default" in upgrade
 
 
 @pytest.mark.parametrize("failure_rc", ["0", "1"])

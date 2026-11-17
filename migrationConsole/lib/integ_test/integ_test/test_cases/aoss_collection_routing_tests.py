@@ -113,6 +113,7 @@ def build_routed_migration_config(
                     **build_collection_routing(collection_prefix),
                     "metadataMigrationConfig": {"indexAllowlist": indices},
                     "documentBackfillConfig": {
+                        "failedDocumentStream": {"type": "disabled"},
                         "indexAllowlist": indices,
                         "podReplicas": RFS_POD_REPLICAS,
                     },

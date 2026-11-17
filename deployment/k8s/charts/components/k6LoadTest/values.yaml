@@ -116,6 +116,17 @@ captureProxyUrl: https://capture-proxy:9201
 # values out of Workflow parameters prevents them from being exposed in Argo/TestRun objects.
 authSecretName: k6-load-test-auth
 
+# Optional AWS SigV4 authentication through EKS Pod Identity. Associate the IAM role with
+# workflow.serviceAccountName and grant that role access in the source domain's resource policy.
+# The index setup and runners fetch per-pod temporary credentials immediately before starting k6,
+# so no Kubernetes Secret or long-lived credential is required. Archive initializers do not send
+# requests and therefore remain credential-free.
+podIdentityAuth:
+  enabled: false
+  region: ""
+  service: es
+  signingEndpoint: ""
+
 # ---------------------------------------------------------------------------
 # Scenario knobs and load profiles.
 # ---------------------------------------------------------------------------

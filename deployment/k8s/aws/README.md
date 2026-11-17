@@ -125,6 +125,15 @@ script resolves the correct CloudFormation exports. `--build` and `--version`
 are mutually exclusive. Run `./deployment/k8s/aws/aws-bootstrap.sh --help` for
 the existing-VPC and other deployment options.
 
+The redeployment command also preserves the cluster's current EKS Auto Mode
+`NodeClass`; it does not require `--stack-name` or repeating the original
+`--tags`. The persistent bootstrap `NodePool` is used when present, otherwise
+the script requires one unambiguous in-cluster `NodeClass` reference. A custom
+class's tags are reused for Helm-created EBS and load-balancer resources. The
+script stops before building or installing if the selection is ambiguous,
+missing, or not Ready. An explicit `aws.nodeClassName` in `--helm-values`
+continues to take precedence.
+
 ## Configuring workload NodePools
 
 The EKS deployment's main workload pool, `general-work-pool`, can be tuned by
@@ -290,6 +299,11 @@ flags. Use `aws-bootstrap.sh` directly when you need that functionality.
     StorageClass so provisioned volumes are tagged;
   - emits load balancer tag annotations for any Service or Ingress the
     chart creates.
+
+On a later `--skip-cfn-deploy` run, the script reads the retained custom
+`NodeClass` and its tags back from the cluster. You do not need to repeat
+`--tags`, and the BuildKit and Migration Assistant `NodePool`s are reconciled
+to the same class.
 
 This requires the cluster IAM role to permit user-defined tags on Auto
 Mode resources. The solution CloudFormation template declares that
