@@ -1755,8 +1755,12 @@ class TestConfigureCommands:
         # Verify save_config was called
         assert mock_store.save_config.called
 
+    @patch('console_link.workflow.commands.configure.get_azure_credentials_secret_store',
+           return_value=Mock(list_secrets=Mock(return_value=[])))
     @patch('console_link.workflow.commands.configure.get_credentials_secret_store')
-    def test_configure_credentials_list_shows_managed_credentials(self, mock_get_secret_store):
+    def test_configure_credentials_list_shows_managed_credentials(
+        self, mock_get_secret_store, _mock_get_azure_store,
+    ):
         runner = CliRunner()
         mock_secret_store = Mock()
         mock_get_secret_store.return_value = mock_secret_store
@@ -1852,8 +1856,12 @@ class TestConfigureCommands:
         assert result.exit_code == 0
         assert 'source-secret' in result.output
 
+    @patch('console_link.workflow.commands.configure.get_azure_credentials_secret_store',
+           return_value=Mock(list_secrets=Mock(return_value=[])))
     @patch('console_link.workflow.commands.configure.get_credentials_secret_store')
-    def test_configure_credentials_update_list_shows_managed_credentials(self, mock_get_secret_store):
+    def test_configure_credentials_update_list_shows_managed_credentials(
+        self, mock_get_secret_store, _mock_get_azure_store,
+    ):
         runner = CliRunner()
         mock_secret_store = Mock()
         mock_get_secret_store.return_value = mock_secret_store
@@ -1864,8 +1872,12 @@ class TestConfigureCommands:
         assert result.exit_code == 0
         assert 'source-secret' in result.output
 
+    @patch('console_link.workflow.commands.configure.get_azure_credentials_secret_store',
+           return_value=Mock(list_secrets=Mock(return_value=[])))
     @patch('console_link.workflow.commands.configure.get_credentials_secret_store')
-    def test_configure_credentials_delete_list_shows_managed_credentials(self, mock_get_secret_store):
+    def test_configure_credentials_delete_list_shows_managed_credentials(
+        self, mock_get_secret_store, _mock_get_azure_store,
+    ):
         runner = CliRunner()
         mock_secret_store = Mock()
         mock_get_secret_store.return_value = mock_secret_store
@@ -2052,6 +2064,137 @@ class TestConfigureCommands:
         assert 'not well-formed' in result.output
         assert 'USERNAME:PASSWORD' in result.output
         mock_secret_store.save_secret.assert_not_called()
+
+    @staticmethod
+    def _managed_azure_store(keys):
+        store = Mock()
+        store.secret_exists.return_value = True
+        store.get_secret_keys.return_value = keys
+        store.save_secret.return_value = 'Secret updated: azure-creds'
+        store.delete_secret.return_value = 'Secret deleted: azure-creds'
+        return store
+
+    @staticmethod
+    def _basic_store_without(name):
+        store = Mock()
+        store.secret_exists.side_effect = lambda n: n != name
+        return store
+
+    @pytest.mark.parametrize('command', [['list'], ['update', '--list'], ['delete', '--list']])
+    @patch('console_link.workflow.commands.configure.get_azure_credentials_secret_store')
+    @patch('console_link.workflow.commands.configure.get_credentials_secret_store')
+    def test_configure_credentials_list_includes_azure_credentials(
+        self, mock_get_secret_store, mock_get_azure_store, command,
+    ):
+        runner = CliRunner()
+        mock_get_secret_store.return_value = Mock(list_secrets=Mock(return_value=['source-secret']))
+        mock_get_azure_store.return_value = Mock(list_secrets=Mock(return_value=['azure-creds']))
+
+        result = runner.invoke(workflow_cli, ['configure', 'credentials', *command])
+
+        assert result.exit_code == 0
+        assert result.output == 'source-secret\nAzure storage credentials:\nazure-creds\n'
+
+    @pytest.mark.parametrize('key', ['accountKey', 'sasToken'])
+    @patch('console_link.workflow.commands.configure.get_azure_credentials_secret_store')
+    @patch('console_link.workflow.commands.configure.get_credentials_secret_store')
+    def test_configure_credentials_update_azure_stdin_replaces_the_existing_key(
+        self, mock_get_secret_store, mock_get_azure_store, key,
+    ):
+        runner = CliRunner()
+        mock_get_secret_store.return_value = self._basic_store_without('azure-creds')
+        azure_store = self._managed_azure_store([key])
+        mock_get_azure_store.return_value = azure_store
+
+        result = runner.invoke(
+            workflow_cli,
+            ['configure', 'credentials', 'update', '--stdin', 'azure-creds'],
+            input='new-value\n',
+        )
+
+        assert result.exit_code == 0
+        assert result.output == ''
+        azure_store.save_secret.assert_called_once_with('azure-creds', {key: 'new-value'})
+
+    @patch('console_link.workflow.commands.configure.get_azure_credentials_secret_store')
+    @patch('console_link.workflow.commands.configure.get_credentials_secret_store')
+    def test_configure_credentials_update_azure_prompts_for_sas_token(
+        self, mock_get_secret_store, mock_get_azure_store,
+    ):
+        runner = CliRunner()
+        mock_get_secret_store.return_value = self._basic_store_without('azure-creds')
+        azure_store = self._managed_azure_store(['sasToken'])
+        mock_get_azure_store.return_value = azure_store
+
+        result = runner.invoke(
+            workflow_cli,
+            ['configure', 'credentials', 'update', 'azure-creds'],
+            input='?sv=new&sig=xyz\n?sv=new&sig=xyz\n',
+        )
+
+        assert result.exit_code == 0
+        assert 'SAS token:' in result.output
+        assert 'sv=new' not in result.output
+        assert 'Credentials updated: azure-creds' in result.output
+        azure_store.save_secret.assert_called_once_with('azure-creds', {'sasToken': 'sv=new&sig=xyz'})
+
+    @patch('console_link.workflow.commands.configure.get_azure_credentials_secret_store')
+    @patch('console_link.workflow.commands.configure.get_credentials_secret_store')
+    def test_configure_credentials_update_azure_rejects_secret_with_both_keys(
+        self, mock_get_secret_store, mock_get_azure_store,
+    ):
+        runner = CliRunner()
+        mock_get_secret_store.return_value = self._basic_store_without('azure-creds')
+        azure_store = self._managed_azure_store(['accountKey', 'sasToken'])
+        mock_get_azure_store.return_value = azure_store
+
+        result = runner.invoke(
+            workflow_cli,
+            ['configure', 'credentials', 'update', '--stdin', 'azure-creds'],
+            input='new-value\n',
+        )
+
+        assert result.exit_code != 0
+        assert 'must hold exactly one of accountKey or sasToken' in result.output
+        azure_store.save_secret.assert_not_called()
+
+    @pytest.mark.parametrize('command', [['update', '--stdin'], ['delete', '--yes']])
+    @patch('console_link.workflow.commands.configure.get_azure_credentials_secret_store')
+    @patch('console_link.workflow.commands.configure.get_credentials_secret_store')
+    def test_configure_credentials_update_and_delete_reject_unknown_names(
+        self, mock_get_secret_store, mock_get_azure_store, command,
+    ):
+        runner = CliRunner()
+        mock_get_secret_store.return_value = Mock(secret_exists=Mock(return_value=False))
+        azure_store = Mock(secret_exists=Mock(return_value=False))
+        mock_get_azure_store.return_value = azure_store
+
+        result = runner.invoke(workflow_cli, ['configure', 'credentials', *command, 'missing-creds'],
+                               input='new-value\n')
+
+        assert result.exit_code != 0
+        assert 'No managed credentials found: missing-creds' in result.output
+        azure_store.save_secret.assert_not_called()
+        azure_store.delete_secret.assert_not_called()
+
+    @patch('console_link.workflow.commands.configure.get_azure_credentials_secret_store')
+    @patch('console_link.workflow.commands.configure.get_credentials_secret_store')
+    def test_configure_credentials_delete_azure_names_the_kind_in_the_prompt(
+        self, mock_get_secret_store, mock_get_azure_store,
+    ):
+        runner = CliRunner()
+        basic_store = self._basic_store_without('azure-creds')
+        mock_get_secret_store.return_value = basic_store
+        azure_store = self._managed_azure_store(['sasToken'])
+        mock_get_azure_store.return_value = azure_store
+
+        result = runner.invoke(workflow_cli, ['configure', 'credentials', 'delete', 'azure-creds'], input='y\n')
+
+        assert result.exit_code == 0
+        assert "Delete managed Azure storage credentials 'azure-creds'?" in result.output
+        assert 'Credentials deleted: azure-creds' in result.output
+        azure_store.delete_secret.assert_called_once_with('azure-creds')
+        basic_store.delete_secret.assert_not_called()
 
     @staticmethod
     def _azure_secret_store(existing=None):
@@ -2251,12 +2394,15 @@ class TestConfigureCommands:
         assert 'cluster-creds' in result.output
         assert 'existing-creds' not in result.output
 
+    @patch('console_link.workflow.commands.configure.get_azure_credentials_secret_store',
+           return_value=Mock(list_secrets=Mock(return_value=[])))
     @patch('console_link.workflow.commands.configure.get_current_namespace', return_value='ma')
     @patch('console_link.workflow.commands.configure.get_credentials_secret_store')
     def test_configure_credentials_update_completion_initializes_context(
         self,
         mock_get_secret_store,
         _mock_get_namespace,
+        _mock_get_azure_store,
     ):
         runner = CliRunner()
         mock_secret_store = Mock()
