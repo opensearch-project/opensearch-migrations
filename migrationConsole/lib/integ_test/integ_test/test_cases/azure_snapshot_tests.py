@@ -1,4 +1,5 @@
 import logging
+import uuid
 
 from ..cluster_version import (
     ElasticsearchV7_X,
@@ -38,6 +39,10 @@ class Test0029AzureSnapshotMigration(MATestBase):
                          description=description,
                          migrations_required=[MigrationType.METADATA, MigrationType.BACKFILL],
                          allow_source_target_combinations=allow_combinations)
+        self.index_name = f"test-0029-{self.unique_id}-{uuid.uuid4().hex[:4]}"
+        self.doc_id = "test_0029_doc"
+        self.source_cluster = None
+        self.target_cluster = None
 
     def prepare_workflow_snapshot_and_migration_config(self):
         super().prepare_workflow_snapshot_and_migration_config()
@@ -57,6 +62,12 @@ class Test0029AzureSnapshotMigration(MATestBase):
         if self.image_registry_prefix:
             self.parameters["image-registry-prefix"] = self.image_registry_prefix
 
+    def prepare_clusters(self):
+        self.source_operations.create_document(cluster=self.source_cluster, index_name=self.index_name,
+                                               doc_id=self.doc_id)
+        self.source_operations.get_document(cluster=self.source_cluster, index_name=self.index_name,
+                                            doc_id=self.doc_id)
+
     def verify_clusters(self):
-        """Workflow success is the primary exit criterion for the Azure path."""
-        pass
+        self.target_operations.get_document(cluster=self.target_cluster, index_name=self.index_name,
+                                            doc_id=self.doc_id, max_attempts=10, delay=3.0)
