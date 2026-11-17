@@ -2,6 +2,7 @@ package org.opensearch.migrations.replay;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.Optional;
 
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
@@ -36,5 +37,32 @@ class TimeShifterTest {
             sourceTime2,
             shifter.transformRealTimeToSourceTime(shifter.transformSourceTimeToRealTime(sourceTime2)).get()
         );
+    }
+
+    @Test
+    void injectedClockProvesPacingWithoutWallClockWaiting() {
+        var deploymentStart = Instant.parse("2026-09-26T12:00:00Z");
+        var shifter = new TimeShifter(
+            2.0,
+            Duration.ofSeconds(3),
+            java.time.Clock.fixed(deploymentStart, ZoneOffset.UTC)
+        );
+        var sourceStart = Instant.parse("2025-01-01T00:00:00Z");
+        shifter.setFirstTimestamp(sourceStart);
+
+        Assertions.assertEquals(
+            deploymentStart.plusSeconds(8),
+            shifter.transformSourceTimeToRealTime(sourceStart.plusSeconds(10))
+        );
+        Assertions.assertEquals(
+            sourceStart.plusSeconds(10),
+            shifter.transformRealTimeToSourceTime(deploymentStart.plusSeconds(8)).orElseThrow()
+        );
+    }
+
+    @Test
+    void rejectsInvalidRateMultipliers() {
+        Assertions.assertThrows(IllegalArgumentException.class, () -> new TimeShifter(0.0));
+        Assertions.assertThrows(IllegalArgumentException.class, () -> new TimeShifter(Double.NaN));
     }
 }

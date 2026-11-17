@@ -26,6 +26,7 @@ pub struct App<'r, R: CommandRunner> {
     pub env: Env,
     pub runner: &'r R,
     pub state: State,
+    pub ecr: Box<dyn ecr_sdk::EcrApi>,
 }
 
 impl<'r, R: CommandRunner> App<'r, R> {
@@ -33,7 +34,12 @@ impl<'r, R: CommandRunner> App<'r, R> {
     pub fn load(env: Env, runner: &'r R) -> Result<Self> {
         let mut state = State::new(env.stage_dir());
         state.load()?;
-        Ok(Self { env, runner, state })
+        Ok(Self {
+            env,
+            runner,
+            state,
+            ecr: Box::new(ecr_sdk::SdkEcr),
+        })
     }
 
     /// CFN deploy or skip. Idempotent: a healthy stack or `SKIP_CFN_DEPLOY=Y`
@@ -276,7 +282,7 @@ impl<'r, R: CommandRunner> App<'r, R> {
     /// line).
     /// Obtain ECR credentials for `registry_host` via the AWS SDK.
     fn ecr_creds(&self, registry_host: &str, region: &str) -> Vec<RegistryCred> {
-        match ecr_sdk::get_ecr_credentials(region) {
+        match self.ecr.credentials(region) {
             Ok((user, pass)) => vec![RegistryCred {
                 registry: registry_host.to_string(),
                 username: user,
@@ -363,6 +369,13 @@ impl<'r, R: CommandRunner> App<'r, R> {
         let ma_ver = self.state.get_owned("MA_VERSION", "");
         let stack = self.state.get_owned("CFN_STACK_NAME", "");
         let outputs = self.cfn_outputs(&stack, &region);
+        let eks_cluster_name =
+            cfn::pick(&outputs, &["MIGRATIONS_EKS_CLUSTER_NAME", "EKSClusterName"])
+                .ok_or_else(|| {
+                    Error::die(format!(
+                        "could not read EKS cluster name from CFN outputs of '{stack}'"
+                    ))
+                })?;
         let mirror = self.state.get_or("MIRROR_IMAGES", "Y") == "Y";
         let registry = self.state.get_owned("CRANE_REGISTRY", "");
         let mirror_tag = self.resolve_image_tag();
@@ -395,8 +408,13 @@ impl<'r, R: CommandRunner> App<'r, R> {
         args.push(format!("stageName={stage}"));
         args.push("--set".into());
         args.push(format!("aws.region={region}"));
-        args.push("--set".into());
+        // Helm otherwise parses a 12-digit account ID as a number. On a later
+        // --reuse-values upgrade it can be serialized in scientific notation,
+        // producing invalid account-derived resource names such as S3 buckets.
+        args.push("--set-string".into());
         args.push(format!("aws.account={account}"));
+        args.push("--set".into());
+        args.push(format!("aws.eksClusterName={eks_cluster_name}"));
         if let Some(role) = snapshot_role {
             args.push("--set".into());
             args.push(format!("defaultBucketConfiguration.snapshotRoleArn={role}"));
@@ -558,6 +576,12 @@ impl<'r, R: CommandRunner> App<'r, R> {
         if cluster.is_empty() {
             return Err(Error::die("grant_eks_access: EKS_CLUSTER not resolved yet"));
         }
+        // The access policy lives in the principal's partition (aws, aws-cn,
+        // aws-iso-e, ...); a hard-coded `arn:aws:` is rejected outside commercial.
+        let policy_arn = format!(
+            "arn:{}:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy",
+            crate::util::partition_of(&arn)
+        );
         ui::step(&format!("Configuring EKS access for {arn}"));
         let exists = self
             .runner
@@ -602,7 +626,7 @@ impl<'r, R: CommandRunner> App<'r, R> {
                 "--principal-arn",
                 &arn,
                 "--policy-arn",
-                "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy",
+                &policy_arn,
                 "--access-scope",
                 "type=cluster",
                 "--region",
@@ -750,7 +774,6 @@ impl<'r, R: CommandRunner> App<'r, R> {
         let image_tag = self.resolve_image_tag();
         self.state.set("BUILD_IMAGE_TAG", &image_tag);
         let builder = artifact::builder_name(&kube_ctx);
-        let skip_test = self.state.get_or("SKIP_TEST_IMAGES", "N") == "Y";
 
         // Run the whole image-build block as a single bash script mirroring
         // Set up the kubernetes-driver buildkit builder (the
@@ -762,7 +785,7 @@ impl<'r, R: CommandRunner> App<'r, R> {
         // Jenkins console only shows our summary line).
         ui::step("Building images (buildkit setup + gradle buildImagesToRegistry)");
         let script = artifact::build_images_script(
-            &base, &region, &ecr_host, &registry, &builder, &image_tag, &kube_ctx, skip_test,
+            &base, &region, &ecr_host, &registry, &builder, &image_tag, &kube_ctx,
         );
         // Stream: buildkit setup + multi-arch image build runs ~8+ min.
         let out = self
@@ -840,7 +863,7 @@ impl<'r, R: CommandRunner> App<'r, R> {
         for &src in crate::mirror::IMAGES {
             let repo = crate::mirror::ecr_repo_name(src);
             let dst = crate::mirror::ecr_dest(src, ecr_host);
-            if let Err(e) = ecr_sdk::create_repository(&repo, region) {
+            if let Err(e) = self.ecr.create_repository(&repo, region) {
                 ui::warn(&format!("create-repository {repo}: {e}"));
             }
             if retry.copy(src, &dst, creds) {
@@ -860,7 +883,7 @@ impl<'r, R: CommandRunner> App<'r, R> {
 
     fn mirror_helm_charts(&self, ecr_host: &str, region: &str) -> Result<()> {
         ui::step("Mirroring helm charts to private ECR");
-        match ecr_sdk::get_ecr_credentials(region) {
+        match self.ecr.credentials(region) {
             Ok((_user, pass)) => {
                 let login = self.runner.run(
                     "helm",
@@ -906,7 +929,7 @@ impl<'r, R: CommandRunner> App<'r, R> {
         region: &str,
     ) -> bool {
         let chart_repo = format!("charts/{}", chart.name);
-        if let Err(e) = ecr_sdk::create_repository(&chart_repo, region) {
+        if let Err(e) = self.ecr.create_repository(&chart_repo, region) {
             ui::warn(&format!("create-repository {chart_repo}: {e}"));
         }
         let pull_ok = if chart.repo.starts_with("oci://") {
@@ -1208,6 +1231,29 @@ impl OciRetry {
 mod tests {
     use super::*;
     use crate::runner::MockRunner;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    /// ECR that refuses credentials and records the repositories it was asked to create.
+    #[derive(Default)]
+    struct StubEcr {
+        created: Rc<RefCell<Vec<String>>>,
+    }
+
+    impl ecr_sdk::EcrApi for StubEcr {
+        fn credentials(&self, _region: &str) -> std::result::Result<(String, String), String> {
+            Err("stub: no credentials".to_string())
+        }
+
+        fn create_repository(
+            &self,
+            repo_name: &str,
+            _region: &str,
+        ) -> std::result::Result<(), String> {
+            self.created.borrow_mut().push(repo_name.to_string());
+            Ok(())
+        }
+    }
 
     fn env_in(dir: &std::path::Path) -> Env {
         Env {
@@ -1362,6 +1408,10 @@ mod tests {
             "defaultBucketConfiguration.snapshotRoleArn=arn:aws:iam::629003556176:role/snap"
         ));
         assert!(j.contains("stageName=ma"));
+        assert!(j.contains("--set-string aws.account=629003556176"));
+        assert!(j.contains(
+            "--set aws.eksClusterName=migration-eks-cluster-default-us-east-1"
+        ));
         // Waited for the console pod.
         assert!(r.any_call_contains("pod/migration-console-0"));
     }
@@ -1504,7 +1554,31 @@ mod tests {
         app.grant_eks_access().unwrap();
         assert!(r.any_call_contains("create-access-entry"));
         assert!(r.any_call_contains("associate-access-policy --cluster-name migration-eks-x"));
-        assert!(r.any_call_contains("AmazonEKSClusterAdminPolicy"));
+        assert!(r.any_call_contains(
+            "--policy-arn arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+        ));
+    }
+
+    #[test]
+    fn grant_eks_access_uses_the_principal_partition() {
+        let dir = tempfile::tempdir().unwrap();
+        let r = MockRunner::new()
+            .stub("aws", &["describe-access-entry"], 0, "")
+            .stub("aws", &["associate-access-policy"], 0, "");
+        let app = {
+            let mut a = App::load(env_in(dir.path()), &r).unwrap();
+            a.state.set("AWS_REGION", "cn-northwest-1");
+            a.state.set("EKS_CLUSTER", "migration-eks-x");
+            a.state
+                .set("EKS_ACCESS_PRINCIPAL_ARN", "arn:aws-cn:iam::1:role/Admin");
+            a
+        };
+        app.grant_eks_access().unwrap();
+        assert!(!r.any_call_contains("create-access-entry"));
+        assert!(r.any_call_contains(
+            "--policy-arn arn:aws-cn:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+        ));
+        assert!(!r.any_call_contains("arn:aws:eks::"));
     }
 
     #[test]
@@ -1538,7 +1612,6 @@ mod tests {
         app.state.set("MA_VERSION", "local-build");
         app.state.set("CFN_STACK_NAME", "MigrationAssistant-ma");
         app.state.set("KUBECTL_CONTEXT", "migration-eks-ma");
-        app.state.set("SKIP_TEST_IMAGES", "Y");
         app.build_images_or_skip().unwrap();
         let g = r
             .calls_to("bash")
@@ -1573,11 +1646,17 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let r = MockRunner::new().stub("aws", &["describe-stacks"], 0, REAL_OUTPUTS);
         let mut app = App::load(env_in(dir.path()), &r).unwrap();
+        let ecr = StubEcr::default();
+        let created = ecr.created.clone();
+        app.ecr = Box::new(ecr);
         app.state.set("MIRROR_IMAGES", "Y");
         app.state.set("AWS_REGION", "us-east-1");
         app.state.set("CFN_STACK_NAME", "MigrationAssistant-ma");
-        // No real ECR creds in test env → mirror fails.
         let result = app.mirror_images_and_charts();
         assert!(result.is_err());
+        assert!(
+            created.borrow().is_empty(),
+            "no repositories without credentials"
+        );
     }
 }

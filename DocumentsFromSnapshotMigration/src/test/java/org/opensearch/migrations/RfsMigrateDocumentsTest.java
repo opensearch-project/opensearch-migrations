@@ -50,6 +50,32 @@ class RfsMigrateDocumentsTest {
     }
 
     @ParameterizedTest
+    @CsvSource({
+        "PT1M, P1D, 11",   // 2^11 minutes is the first doubling past 1440
+        "PT1H, P1D, 5",    // 32h is the first doubling past 24h
+        "PT1H, PT8H, 3",   // exactly 2^3
+        "PT1H, PT1H, 0",
+    })
+    void maxUsefulLeaseExponentIsTheFirstExponentThatReachesTheCap(Duration initial, Duration max, int expected) {
+        Assertions.assertEquals(expected, RfsMigrateDocuments.maxUsefulLeaseExponent(initial, max));
+    }
+
+    @Test
+    void successorExponentNeverExceedsTheCap() {
+        var workItemTimeProvider = new WorkItemTimeProvider();
+        var leaseDuration = TEST_INITIAL_LEASE_DURATION.multipliedBy(64); // exponent 6
+        workItemTimeProvider.getLeaseAcquisitionTimeRef().set(Instant.EPOCH);
+        // Slow shard setup, so the uncapped successor exponent would grow to 7.
+        workItemTimeProvider.getDocumentMigraionStartTimeRef().set(Instant.EPOCH.plus(leaseDuration.dividedBy(2)));
+        var expiration = Instant.EPOCH.plus(leaseDuration);
+
+        Assertions.assertEquals(7, RfsMigrateDocuments.getSuccessorNextAcquisitionLeaseExponent(
+            workItemTimeProvider, TEST_INITIAL_LEASE_DURATION, expiration));
+        Assertions.assertEquals(3, RfsMigrateDocuments.getSuccessorNextAcquisitionLeaseExponent(
+            workItemTimeProvider, TEST_INITIAL_LEASE_DURATION, TEST_INITIAL_LEASE_DURATION.multipliedBy(8), expiration));
+    }
+
+    @ParameterizedTest
     @MethodSource("emitDocTypeCases")
     void testResolveEmitDocType(RfsMigrateDocuments.EmitDocTypeMode mode, Version version, String transformerConfig, boolean expected) {
         Assertions.assertEquals(expected, RfsMigrateDocuments.resolveEmitDocType(mode, version, transformerConfig));

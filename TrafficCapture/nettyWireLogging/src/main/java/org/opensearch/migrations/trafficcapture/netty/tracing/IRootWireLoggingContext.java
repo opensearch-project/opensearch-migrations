@@ -4,6 +4,8 @@ import org.opensearch.migrations.trafficcapture.tracing.IRootOffloaderContext;
 
 public interface IRootWireLoggingContext extends IRootOffloaderContext {
 
+    CaptureConnectionMetrics getCaptureConnectionMetrics();
+
     WireCaptureContexts.ConnectionContext.MetricInstruments getConnectionInstruments();
 
     WireCaptureContexts.RequestContext.MetricInstruments getRequestInstruments();

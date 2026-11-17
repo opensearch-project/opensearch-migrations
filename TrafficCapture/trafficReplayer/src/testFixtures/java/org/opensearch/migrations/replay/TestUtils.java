@@ -178,7 +178,7 @@ public class TestUtils {
             transformer,
             authTransformer,
             testPacketCapture,
-            rootContext.getTestConnectionRequestContext("TEST_CONNECTION", 0)
+            rootContext.getTestConnectionRequestContext("TEST_CONNECTION", 0).createTransformationContext()
         );
 
         var contentLength = stringParts.stream().mapToInt(String::length).sum();

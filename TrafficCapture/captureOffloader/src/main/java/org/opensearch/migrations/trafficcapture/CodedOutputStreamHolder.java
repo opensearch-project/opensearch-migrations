@@ -3,7 +3,7 @@ package org.opensearch.migrations.trafficcapture;
 import com.google.protobuf.CodedOutputStream;
 import lombok.NonNull;
 
-public interface CodedOutputStreamHolder {
+public interface CodedOutputStreamHolder extends AutoCloseable {
 
     /**
      * Returns the maximum number of bytes that can be written to the output stream before exceeding
@@ -29,4 +29,11 @@ public interface CodedOutputStreamHolder {
 
     @NonNull
     CodedOutputStream getOutputStream();
+
+    /**
+     * Releases resources retained by this output stream. Implementations backed only by
+     * garbage-collected storage do not need to override this method.
+     */
+    @Override
+    default void close() {}
 }

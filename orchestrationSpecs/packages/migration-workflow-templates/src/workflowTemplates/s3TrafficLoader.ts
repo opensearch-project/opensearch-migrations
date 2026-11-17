@@ -17,7 +17,7 @@ import {SetupKafka} from "./setupKafka";
 import {ResourceManagement} from "./resourceManagement";
 import {CONTAINER_TEMPLATE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
 import {BaseExpression} from "@opensearch-migrations/argo-workflow-builders";
-import {MIGRATION_RESOURCE_UID_LABEL} from "./commonUtils/resourceLabels";
+import {COMPONENT_LABEL, COMPONENTS, MIGRATION_RESOURCE_UID_LABEL} from "./commonUtils/resourceLabels";
 
 // Same shape used by setupCapture / fullMigration: skip a step if the CR's
 // current checksum already matches what we'd write. For the s3 loader path,
@@ -60,6 +60,7 @@ export const S3TrafficLoader = WorkflowBuilder.create({
         .addOptionalInput("kafkaAuthType", c => "none")
         .addRequiredInput("loadCompletionChecksum", typeToken<string>())
         .addRequiredInput("resourceUid", typeToken<string>())
+        .addOptionalInput("taskK8sLabel", c => "s3TrafficLoader")
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
 
         .addContainer(b => b
@@ -139,6 +140,8 @@ kubectl patch capturedtraffic "$CT_NAME" \\
 `])
             .addPodMetadata(({inputs}) => ({
                 labels: {
+                    'migrations.opensearch.org/task': inputs.taskK8sLabel,
+                    [COMPONENT_LABEL]: COMPONENTS.S3_TRAFFIC_LOADER,
                     [MIGRATION_RESOURCE_UID_LABEL]: inputs.resourceUid,
                 },
             }))

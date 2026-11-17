@@ -203,6 +203,7 @@ public class SolrS3SnapshotReadFailureProcessTest {
         String javaExecutable = Paths.get(System.getProperty("java.home"), "bin", "java").toString();
 
         var args = new ArrayList<>(List.of(
+            "--disable-failed-document-stream",
             "--snapshot-name", snapshotName,
             "--source-version", "SOLR_8.11.4",
             "--s3-repo-uri", s3RepoUri,

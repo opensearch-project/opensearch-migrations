@@ -48,6 +48,7 @@ namespace="ma"
 build=false
 use_public_images=true
 skip_console_exec=false
+helm_upgrade=false
 stage_filter=""
 extra_helm_values=""
 disable_general_purpose_pool=false
@@ -58,6 +59,8 @@ deploy_import_vpc=false
 cfn_stack_name=""
 vpc_id=""
 subnet_ids=""
+availability_zone_count=3
+availability_zone_count_set=false
 eks_access_principal_arn=""
 grant_eks_access_only=false
 skip_cfn_deploy=false
@@ -70,7 +73,6 @@ ignore_checks=false
 push_images_to_ecr=true
 ma_images_source=""
 skip_setting_k8s_context=false
-skip_test_images=false
 with_load_test_images=false
 image_tag="latest"
 kubectl_context=""
@@ -85,6 +87,9 @@ while [[ $# -gt 0 ]]; do
     --namespace) namespace="$2"; shift 2 ;;
     --build) build=true; shift 1 ;;
     --skip-console-exec) skip_console_exec=true; shift 1 ;;
+    # Undocumented on purpose (not in --help): Migration Assistant releases aren't backward compatible yet,
+    # so upgrading an existing release in place is unsupported. For developers redeploying their own builds.
+    --helm-upgrade) helm_upgrade=true; shift 1 ;;
     --stage) stage_filter="$2"; shift 2 ;;
     --helm-values) extra_helm_values="$2"; shift 2 ;;
     --disable-general-purpose-pool) disable_general_purpose_pool=true; shift 1 ;;
@@ -95,6 +100,7 @@ while [[ $# -gt 0 ]]; do
     --stack-name) cfn_stack_name="$2"; shift 2 ;;
     --vpc-id) vpc_id="$2"; shift 2 ;;
     --subnet-ids) subnet_ids="$2"; shift 2 ;;
+    --availability-zone-count) availability_zone_count="$2"; availability_zone_count_set=true; shift 2 ;;
     --eks-access-principal-arn) eks_access_principal_arn="$2"; shift 2 ;;
     --grant-eks-access-only) grant_eks_access_only=true; shift 1 ;;
     --skip-cfn-deploy) skip_cfn_deploy=true; shift 1 ;;
@@ -113,7 +119,8 @@ while [[ $# -gt 0 ]]; do
     --ma-images-source) ma_images_source="$2"; shift 2 ;;
     --skip-setting-k8s-context) skip_setting_k8s_context=true; shift 1 ;;
     --kubectl-context) kubectl_context="$2"; shift 2 ;;
-    --skip-test-images) skip_test_images=true; shift 1 ;;
+    # Accepted for older callers; the EKS build never includes test-only images now.
+    --skip-test-images) shift 1 ;;
     --with-load-test-images) with_load_test_images=true; shift 1 ;;
     --image-tag) image_tag="$2"; shift 2 ;;
     --tls-mode) tls_mode="$2"; shift 2 ;;
@@ -140,6 +147,9 @@ while [[ $# -gt 0 ]]; do
       echo "  --vpc-id <id>                             VPC ID (required with --deploy-import-vpc-cfn)."
       echo "  --subnet-ids <id1,id2>                    Comma-separated subnet IDs, each in a different AZ"
       echo "                                            (required with --deploy-import-vpc-cfn)."
+      echo "  --availability-zone-count <2|3>           Number of AZs for a newly created VPC (default: 3)."
+      echo "                                            Only valid with --deploy-create-vpc-cfn. EKS requires"
+      echo "                                            cluster subnets in at least two Availability Zones."
       echo "  --create-vpc-endpoints [list]             Create VPC endpoints for private subnet connectivity."
       echo "                                            Only valid with --deploy-import-vpc-cfn."
       echo "                                            No argument or 'all' creates: s3,ecr,ecrDocker,cloudwatchLogs,monitoring,efs,sts,eksAuth."
@@ -199,8 +209,7 @@ while [[ $# -gt 0 ]]; do
       echo "                                            to every kubectl/helm command, or set the context yourself."
       echo "  --kubectl-context <name>                  Custom alias for the kubectl context (default: EKS cluster name)."
       echo "                                            Useful for CI systems that need a predictable context name."
-      echo "  --skip-test-images                        Skip building test-only images (e.g. elasticsearch_searchguard)"
-      echo "  --with-load-test-images                   Also build the load-test images (migrations/k6_runner)."
+      echo "  --with-load-test-images                   Also build the load-test runner and patched operator images."
       echo "                                            They are not part of the standard image set. Only the k6"
       echo "                                            load-test cases (Test008x) need them. Requires --build."
       echo "  --image-tag <tag>                         Override the image tag (default: git short SHA)"
@@ -487,6 +496,17 @@ validate_args() {
       echo "Error: --subnet-ids is only valid with --deploy-import-vpc-cfn." >&2
       exit 1
     fi
+  fi
+  case "$availability_zone_count" in
+    2|3) ;;
+    *)
+      echo "Error: --availability-zone-count must be 2 or 3; EKS requires at least two Availability Zones." >&2
+      exit 1
+      ;;
+  esac
+  if [[ "$availability_zone_count_set" == "true" && "$deploy_create_vpc" != "true" ]]; then
+    echo "Error: --availability-zone-count is only valid with --deploy-create-vpc-cfn." >&2
+    exit 1
   fi
   # Validate repo checkout exists when --build is specified
   if [[ "$build" == "true" ]]; then
@@ -841,6 +861,9 @@ if [[ "$deploy_cfn" == "true" ]]; then
 
   # Build parameter overrides for `aws cloudformation deploy`
   cfn_params=("Stage=${stage_filter}")
+  if [[ "$deploy_create_vpc" == "true" ]]; then
+    cfn_params+=("AvailabilityZoneCount=${availability_zone_count}")
+  fi
   if [[ "$deploy_import_vpc" == "true" ]]; then
     cfn_params+=("VPCId=${vpc_id}")
     cfn_params+=("VPCSubnetIds=${subnet_ids}")
@@ -908,14 +931,21 @@ if [[ "$deploy_cfn" == "true" ]]; then
 
   # Stream CloudFormation stack events in the background while deploy runs.
   # Polls describe-stack-events every 10s, prints new resource status changes.
+  # This is a progress display, not a full history: --no-paginate fetches only the
+  # first (newest) page of events instead of the whole stack history on every poll.
+  # The API returns events newest first; the query reverses that page so events print
+  # in the order they happened. (Reversing in the query rather than piping through
+  # `tac` keeps this working on macOS, which does not ship `tac`. The query is applied
+  # per page, which is another reason to fetch only one.)
   stream_cfn_events() {
     local seen_file
     seen_file=$(mktemp)
     trap "rm -f '$seen_file'" RETURN
     while true; do
       aws cloudformation describe-stack-events --stack-name "$cfn_stack_name" ${region:+--region "$region"} \
-        --query 'StackEvents[].[EventId,Timestamp,ResourceStatus,ResourceType,LogicalResourceId,ResourceStatusReason]' \
-        --output text 2>/dev/null | tac | while IFS=$'\t' read -r eid ts status rtype logical reason; do
+        --no-paginate \
+        --query 'reverse(StackEvents)[].[EventId,Timestamp,ResourceStatus,ResourceType,LogicalResourceId,ResourceStatusReason]' \
+        --output text 2>/dev/null | while IFS=$'\t' read -r eid ts status rtype logical reason; do
           grep -qxF "$eid" "$seen_file" 2>/dev/null && continue
           echo "$eid" >> "$seen_file"
           [[ "$reason" == "None" ]] && reason=""
@@ -1015,6 +1045,17 @@ else
 fi
 echo ""
 
+# The AWS partition of an ARN (arn:<partition>:...), e.g. aws, aws-cn or aws-iso-e.
+# Falls back to aws for anything that isn't an ARN.
+arn_partition() {
+  local rest="${1#arn:}"
+  if [[ "$rest" == "$1" || -z "${rest%%:*}" ]]; then
+    echo "aws"
+  else
+    echo "${rest%%:*}"
+  fi
+}
+
 # --- EKS access entry (optional) ---
 grant_eks_cluster_admin() {
   local principal_arn="$1"
@@ -1032,7 +1073,7 @@ grant_eks_cluster_admin() {
   aws eks associate-access-policy \
     --cluster-name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
     --principal-arn "$principal_arn" \
-    --policy-arn arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy \
+    --policy-arn "arn:$(arn_partition "$principal_arn"):eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy" \
     --access-scope type=cluster \
     ${region:+--region "$region"}
   echo "EKS access configured for $principal_arn"
@@ -1061,10 +1102,45 @@ else
   kubectl config use-context "${KUBE_CONTEXT}" >/dev/null 2>&1
 fi
 
+# NodeClass that the Helm chart's NodePools will reference. The built-in EKS-managed class is the
+# default, while --tags creates the named class below. On --skip-cfn-deploy this is resolved from
+# the live cluster before any builds or Helm installs.
+auto_mode_node_class="default"
+AUTO_MODE_TAGGED_NODE_CLASS="migrations-tagged"
+AUTO_MODE_BOOTSTRAP_NODE_POOL="migrations-bootstrap-pool"
+configure_tagged_auto_mode_compute_requested=false
+user_node_class_override=""
+
+extract_rendered_node_class_names() {
+  awk '
+    {
+      match($0, /^[[:space:]]*/)
+      indent = RLENGTH
+      line = $0
+      sub(/^[[:space:]]*/, "", line)
+
+      if (in_ref && indent <= ref_indent && line != "") {
+        in_ref = 0
+      }
+      if (line == "nodeClassRef:") {
+        in_ref = 1
+        ref_indent = indent
+        next
+      }
+      if (in_ref && line ~ /^name:[[:space:]]*/) {
+        sub(/^name:[[:space:]]*/, "", line)
+        gsub(/^"|"$/, "", line)
+        print line
+        in_ref = 0
+      }
+    }
+  ' | sort -u
+}
+
 # --- validate --helm-values against the cluster ---
 # This is the first point the cluster is reachable, and it comes before anything slow or
 # cluster-mutating: the Auto Mode compute changes for --tags, image mirroring and --build. Render
-# general-work-pool from the chart and the deployer's --helm-values files, and have the API server
+# workload NodePools from the chart and the deployer's --helm-values files, and have the API server
 # check it against the NodePool CRD that EKS Auto Mode installs. --dry-run=server persists nothing,
 # so a bad value fails in seconds. Only the NodePool is checked: it is what the overrides
 # configure, and the rest of the chart needs values (images, private ECR, TLS) that don't exist yet.
@@ -1072,26 +1148,68 @@ validate_helm_values_against_cluster() {
   [[ -z "$user_helm_values" || "$use_general_node_pool" == "true" ]] && return 0
   resolve_chart_source
 
-  local eks_values nodepool f
-  local -a values_args files
+  local eks_values nodepool node_class_probe f node_class_values_file
+  local node_class_sentinel="auto-mode-discovery-sentinel"
+  local -a values_args=() files rendered_node_classes=()
   if [[ -f "$ma_chart_dir" ]]; then
     eks_values=$(tar -xzOf "$ma_chart_dir" migration-assistant/valuesEks.yaml)
   else
     eks_values=$(<"$ma_chart_dir/valuesEks.yaml")
   fi
+
+  # Put a valid sentinel before the deployer's values. If the rendered NodePools replace it, the
+  # deployer explicitly selected aws.nodeClassName and that selection takes precedence over
+  # automatic cluster discovery. A --set flag cannot be used here because Helm always gives it
+  # precedence over values files regardless of argument order.
+  node_class_values_file=$(mktemp)
+  printf 'aws:\n  nodeClassName: %s\n' "$node_class_sentinel" > "$node_class_values_file"
+  values_args=(-f "$node_class_values_file")
   IFS=',' read -ra files <<< "$user_helm_values"
   for f in "${files[@]}"; do values_args+=(-f "$f"); done
 
-  echo "Validating general-work-pool from --helm-values (${user_helm_values}) against the cluster..."
+  echo "Validating workload NodePools from --helm-values (${user_helm_values}) against the cluster..."
   nodepool=$(helm template "$namespace" "$ma_chart_dir" --kube-version 1.35.0 -f - "${values_args[@]}" \
-    --set stageName="$STAGE" --set aws.region="$AWS_CFN_REGION" --set aws.account="$AWS_ACCOUNT" \
+    --set stageName="$STAGE" --set aws.region="$AWS_CFN_REGION" --set-string aws.account="$AWS_ACCOUNT" \
+    --set aws.eksClusterName="$MIGRATIONS_EKS_CLUSTER_NAME" \
     --show-only templates/resources/aws/workloadsNodePool.yaml <<< "$eks_values") \
-    || { echo "Error: failed to render general-work-pool from --helm-values." >&2; exit 1; }
-  kubectl --context="$KUBE_CONTEXT" apply --dry-run=server -f - <<< "$nodepool" >/dev/null \
-    || { echo "Error: the cluster rejected general-work-pool as rendered from --helm-values:" >&2
-         echo "$nodepool" >&2
-         echo "  Nothing was changed. Fix the workloadsNodePool values and re-run the bootstrap." >&2
+    || { rm -f "$node_class_values_file"
+         echo "Error: failed to render workload NodePools from --helm-values." >&2
          exit 1; }
+  # The workload pools can be disabled by a values file while the dedicated migration-console
+  # NodePool remains enabled. Probe that template too so any effective aws.nodeClassName is still
+  # validated and passed consistently to BuildKit.
+  node_class_probe=$(helm template "$namespace" "$ma_chart_dir" --kube-version 1.35.0 -f - "${values_args[@]}" \
+    --set stageName="$STAGE" --set aws.region="$AWS_CFN_REGION" --set-string aws.account="$AWS_ACCOUNT" \
+    --set aws.eksClusterName="$MIGRATIONS_EKS_CLUSTER_NAME" \
+    --show-only templates/resources/migrationConsole.yaml <<< "$eks_values") \
+    || { rm -f "$node_class_values_file"
+         echo "Error: failed to resolve aws.nodeClassName from --helm-values." >&2
+         exit 1; }
+  rm -f "$node_class_values_file"
+
+  while IFS= read -r f; do
+    [[ -n "$f" ]] && rendered_node_classes+=("$f")
+  done < <(printf '%s\n%s\n' "$nodepool" "$node_class_probe" | extract_rendered_node_class_names)
+  if [[ ${#rendered_node_classes[@]} -gt 1 ]]; then
+    echo "Error: --helm-values rendered workload NodePools with multiple NodeClasses:" >&2
+    printf '  %s\n' "${rendered_node_classes[@]}" >&2
+    exit 1
+  fi
+  if [[ ${#rendered_node_classes[@]} -eq 1 &&
+        "${rendered_node_classes[0]}" != "$node_class_sentinel" ]]; then
+    user_node_class_override="${rendered_node_classes[0]}"
+    echo "  Explicit aws.nodeClassName override: ${user_node_class_override}"
+  fi
+
+  # A values file may deliberately disable the chart-managed NodePools. There is then no manifest
+  # for the API server to validate, and its aws.nodeClassName value is irrelevant to this chart.
+  if [[ -n "${nodepool//[[:space:]]/}" ]]; then
+    kubectl --context="$KUBE_CONTEXT" apply --dry-run=server -f - <<< "$nodepool" >/dev/null \
+      || { echo "Error: the cluster rejected workload NodePools as rendered from --helm-values:" >&2
+           echo "$nodepool" >&2
+           echo "  Nothing was changed. Fix the workloadsNodePool values and re-run the bootstrap." >&2
+           exit 1; }
+  fi
 }
 validate_helm_values_against_cluster
 
@@ -1107,12 +1225,6 @@ validate_helm_values_against_cluster
 # built-in "system"/"general-purpose" NodePools are hard-wired to it. Tagging every node therefore
 # means replacing all three with our own, which is why this only happens when --tags is given.
 # =============================================================================
-
-# NodeClass that the Helm chart's NodePools will reference. Stays "default" (the EKS-managed one)
-# unless tags need to be carried. Must not be named "default": EKS owns that name.
-auto_mode_node_class="default"
-AUTO_MODE_TAGGED_NODE_CLASS="migrations-tagged"
-AUTO_MODE_BOOTSTRAP_NODE_POOL="migrations-bootstrap-pool"
 
 # Inherit the deployed stack's tags when --tags was not passed, so that a re-run (in particular
 # --skip-cfn-deploy, which never touches stack tags) keeps the cluster's tagging in step with the
@@ -1139,19 +1251,210 @@ emit_resource_tags_yaml() {
   done
 }
 
-# Write the tags into a Helm values file. The chart uses them for the StorageClass's
-# tagSpecification parameters and for load balancer annotations, and needs nodeClassName so its
-# NodePools bind to the NodeClass created below rather than to "default".
-emit_tag_helm_values() {
+print_auto_mode_compute_state() {
+  local nodepools_json="$1"
+  local nodeclasses_json="$2"
+  echo "  In-cluster NodePool references:" >&2
+  jq -r '
+    if (.items | length) == 0 then
+      "    <none>"
+    else
+      .items[] |
+        "    NodePool/\(.metadata.name) -> NodeClass/\(.spec.template.spec.nodeClassRef.name // "<missing>")"
+    end
+  ' <<< "$nodepools_json" >&2
+  echo "  In-cluster NodeClasses:" >&2
+  jq -r '
+    if (.items | length) == 0 then
+      "    <none>"
+    else
+      .items[] |
+        ([.status.conditions[]? | select(.type == "Ready") | .status] | last // "Missing") as $ready |
+        "    NodeClass/\(.metadata.name) Ready=\($ready)"
+    end
+  ' <<< "$nodeclasses_json" >&2
+}
+
+restore_auto_mode_node_class() {
+  local node_class_name="$1"
+  local restore_resource_tags="${2:-false}"
+  local nodeclass_json ready_status tag_key tag_value restored_count=0
+
+  if ! nodeclass_json=$(kubectl --context="${KUBE_CONTEXT}" \
+      get nodeclass "$node_class_name" -o json 2>/dev/null); then
+    echo "Error: selected EKS Auto Mode NodeClass '${node_class_name}' does not exist." >&2
+    echo "  Refusing to install NodePools that would remain unusable." >&2
+    return 1
+  fi
+  ready_status=$(jq -r \
+    '[.status.conditions[]? | select(.type == "Ready") | .status] | last // "Missing"' \
+    <<< "$nodeclass_json")
+  if [[ "$ready_status" != "True" ]]; then
+    echo "Error: selected EKS Auto Mode NodeClass '${node_class_name}' is not Ready" >&2
+    echo "  (Ready=${ready_status}). Refusing to install NodePools that cannot provision nodes." >&2
+    return 1
+  fi
+
+  if [[ "$restore_resource_tags" == "true" && "$node_class_name" != "default" ]]; then
+    while IFS= read -r -d '' tag_key && IFS= read -r -d '' tag_value; do
+      validate_and_add_tag "$tag_key" "$tag_value" "NodeClass/${node_class_name} tag"
+      restored_count=$((restored_count + 1))
+    done < <(jq -j '(.spec.tags // {}) | to_entries[] | .key, "\u0000", (.value | tostring), "\u0000"' \
+      <<< "$nodeclass_json")
+    echo "  Restored ${restored_count} resource tag(s) from NodeClass/${node_class_name}."
+  fi
+}
+
+discover_auto_mode_node_class() {
+  local nodepools_json nodeclasses_json candidate="" candidate_source=""
+  local bootstrap_count
+  local -a referenced_node_classes=() available_node_classes=()
+
+  echo "Discovering the existing cluster's EKS Auto Mode NodeClass..."
+  if ! nodepools_json=$(kubectl --context="${KUBE_CONTEXT}" get nodepools -o json); then
+    echo "Error: could not list EKS Auto Mode NodePools in context ${KUBE_CONTEXT}." >&2
+    return 1
+  fi
+  if ! nodeclasses_json=$(kubectl --context="${KUBE_CONTEXT}" get nodeclasses -o json); then
+    echo "Error: could not list EKS Auto Mode NodeClasses in context ${KUBE_CONTEXT}." >&2
+    return 1
+  fi
+
+  # This pool is deliberately kept outside the MA Helm release, so it survives the documented
+  # uninstall/redeploy flow. Its reference is therefore the strongest signal of the class that the
+  # bootstrap previously selected, even if other application NodePools are temporarily present.
+  bootstrap_count=$(jq -r --arg name "$AUTO_MODE_BOOTSTRAP_NODE_POOL" \
+    '[.items[] | select(.metadata.name == $name)] | length' <<< "$nodepools_json")
+  if [[ "$bootstrap_count" -gt 0 ]]; then
+    candidate=$(jq -r --arg name "$AUTO_MODE_BOOTSTRAP_NODE_POOL" \
+      '.items[] | select(.metadata.name == $name) |
+       .spec.template.spec.nodeClassRef.name // empty' <<< "$nodepools_json")
+    if [[ -z "$candidate" ]]; then
+      echo "Error: NodePool/${AUTO_MODE_BOOTSTRAP_NODE_POOL} has no NodeClass reference." >&2
+      print_auto_mode_compute_state "$nodepools_json" "$nodeclasses_json"
+      return 1
+    fi
+    candidate_source="persistent NodePool/${AUTO_MODE_BOOTSTRAP_NODE_POOL}"
+  else
+    while IFS= read -r candidate; do
+      [[ -n "$candidate" ]] && referenced_node_classes+=("$candidate")
+    done < <(jq -r '[.items[].spec.template.spec.nodeClassRef.name // empty] | unique[]' \
+      <<< "$nodepools_json")
+
+    if [[ ${#referenced_node_classes[@]} -eq 1 ]]; then
+      candidate="${referenced_node_classes[0]}"
+      candidate_source="the cluster's NodePool references"
+    elif [[ ${#referenced_node_classes[@]} -gt 1 ]]; then
+      echo "Error: EKS Auto Mode NodeClass discovery is ambiguous; NodePools reference multiple classes." >&2
+      print_auto_mode_compute_state "$nodepools_json" "$nodeclasses_json"
+      echo "  Set aws.nodeClassName explicitly with --helm-values to select one." >&2
+      return 1
+    else
+      while IFS= read -r candidate; do
+        [[ -n "$candidate" ]] && available_node_classes+=("$candidate")
+      done < <(jq -r '[.items[].metadata.name] | unique[]' <<< "$nodeclasses_json")
+      if [[ ${#available_node_classes[@]} -eq 1 ]]; then
+        candidate="${available_node_classes[0]}"
+        candidate_source="the only in-cluster NodeClass"
+      elif [[ ${#available_node_classes[@]} -gt 1 ]]; then
+        echo "Error: EKS Auto Mode NodeClass discovery is ambiguous; no NodePool selects among the classes." >&2
+        print_auto_mode_compute_state "$nodepools_json" "$nodeclasses_json"
+        echo "  Set aws.nodeClassName explicitly with --helm-values to select one." >&2
+        return 1
+      else
+        echo "Error: no EKS Auto Mode NodeClass exists in context ${KUBE_CONTEXT}." >&2
+        print_auto_mode_compute_state "$nodepools_json" "$nodeclasses_json"
+        return 1
+      fi
+    fi
+  fi
+
+  auto_mode_node_class="$candidate"
+  echo "  Preserving NodeClass/${auto_mode_node_class} from ${candidate_source}."
+  restore_auto_mode_node_class "$auto_mode_node_class" true
+}
+
+resolve_auto_mode_configuration() {
+  if [[ "$use_general_node_pool" == "true" ]]; then
+    if [[ ${#tag_keys[@]} -gt 0 ]]; then
+      echo "Error: --use-general-node-pool cannot be combined with resource tags restored from" >&2
+      echo "  the existing stack; the built-in NodeClass/default cannot carry those tags." >&2
+      return 1
+    fi
+    auto_mode_node_class="default"
+    if [[ "$skip_cfn_deploy" == "true" ]]; then
+      restore_auto_mode_node_class "$auto_mode_node_class" false
+    fi
+    return 0
+  fi
+
+  # Capture this before discovery restores tags from an existing class. Only explicit/stack tags
+  # should reconfigure compute; restored tags are for Helm-created storage and load balancers.
+  if [[ ${#tag_keys[@]} -gt 0 ]]; then
+    configure_tagged_auto_mode_compute_requested=true
+    auto_mode_node_class="$AUTO_MODE_TAGGED_NODE_CLASS"
+  fi
+
+  if [[ -n "$user_node_class_override" ]]; then
+    if [[ "$configure_tagged_auto_mode_compute_requested" == "true" &&
+          "$user_node_class_override" == "default" ]]; then
+      echo "Error: --helm-values selects NodeClass/default, but --tags disables and removes it." >&2
+      echo "  Select a Ready custom NodeClass or remove one of those explicit configurations." >&2
+      return 1
+    fi
+    auto_mode_node_class="$user_node_class_override"
+    if [[ "$configure_tagged_auto_mode_compute_requested" != "true" ||
+          "$auto_mode_node_class" != "$AUTO_MODE_TAGGED_NODE_CLASS" ]]; then
+      # Explicit --tags remain authoritative for resourceTags. Without them, restore the selected
+      # custom class's tags so EBS and load-balancer resources stay aligned with its compute.
+      restore_auto_mode_node_class "$auto_mode_node_class" \
+        "$([[ ${#tag_keys[@]} -eq 0 ]] && echo true || echo false)"
+    fi
+    return 0
+  fi
+
+  if [[ "$configure_tagged_auto_mode_compute_requested" == "true" ]]; then
+    return 0
+  fi
+  if [[ "$skip_cfn_deploy" == "true" ]]; then
+    discover_auto_mode_node_class
+  fi
+}
+
+resolve_auto_mode_configuration || exit 1
+
+# Write the resolved NodeClass and resource tags into a generated values file. It is prepended to
+# the deployer's --helm-values files so explicit user values retain their established precedence.
+emit_auto_mode_helm_values() {
   local values_file
   values_file=$(mktemp)
   {
     echo "aws:"
     echo "  nodeClassName: \"${auto_mode_node_class}\""
-    echo "  resourceTags:"
-    emit_resource_tags_yaml
+    if [[ ${#tag_keys[@]} -gt 0 ]]; then
+      echo "  resourceTags:"
+      emit_resource_tags_yaml
+    else
+      echo "  resourceTags: {}"
+    fi
   } > "$values_file"
   printf '%s' "$values_file"
+}
+
+prepend_auto_mode_helm_values() {
+  auto_mode_values_file=$(emit_auto_mode_helm_values)
+  echo "  Auto Mode values written to $auto_mode_values_file"
+  if [[ -n "$extra_helm_values" ]]; then
+    extra_helm_values="$auto_mode_values_file,$extra_helm_values"
+  else
+    extra_helm_values="$auto_mode_values_file"
+  fi
+}
+
+set_buildkit_node_class_helm_arg() {
+  # Put the generated value first so an explicit BUILDKIT_HELM_ARGS value retains precedence.
+  BUILDKIT_HELM_ARGS="--set-string nodeClassName=${auto_mode_node_class}${BUILDKIT_HELM_ARGS:+ $BUILDKIT_HELM_ARGS}"
+  export BUILDKIT_HELM_ARGS
 }
 
 AUTO_MODE_TAG_PROPAGATION_POLICY_NAME="AutoModeTagPropagationPolicy"
@@ -1172,8 +1475,7 @@ ensure_auto_mode_tag_propagation_policy() {
     exit 1
   fi
   cluster_role_name="${cluster_role_arn##*/}"
-  part="${cluster_role_arn#arn:}"
-  part="${part%%:*}"
+  part="$(arn_partition "$cluster_role_arn")"
 
   # Keep this aligned with the EKS Auto Mode tag-propagation policy:
   # https://docs.aws.amazon.com/eks/latest/userguide/auto-learn-iam.html
@@ -1341,7 +1643,7 @@ enforce_tags_on_cluster_role_for_tests() {
   # Parallel arrays rather than an associative array: bash 3.2 (macOS) has none.
   # Each group pairs a set of actions with ONLY the resource types that receive those actions'
   # request tags -- see the note above about RunInstances and launch-template/*.
-  local part="${AWS_PARTITION:-aws}"
+  local part="${AWS_PARTITION:-$(arn_partition "$cluster_role_arn")}"
   local group_sids=(InstanceLaunch StandaloneStorage NetworkInterface LoadBalancer TargetGroup ListenerAndRule)
   local group_actions=(
     '"ec2:RunInstances"'
@@ -1439,13 +1741,43 @@ ensure_auto_node_access_entry() {
   aws eks associate-access-policy \
     --cluster-name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
     --principal-arn "$node_role_arn" \
-    --policy-arn "arn:aws:eks::aws:cluster-access-policy/AmazonEKSAutoNodePolicy" \
+    --policy-arn "arn:$(arn_partition "$node_role_arn"):eks::aws:cluster-access-policy/AmazonEKSAutoNodePolicy" \
     --access-scope type=cluster \
     --region "${AWS_CFN_REGION}" >/dev/null \
     || {
       echo "Error: failed to associate AmazonEKSAutoNodePolicy with ${node_role_arn}." >&2
       exit 1
     }
+}
+
+# DescribeCluster can still report ACTIVE before an asynchronous update starts, and becomes ACTIVE
+# again even if the update fails. Only the returned update ID identifies the operation we must wait
+# for: https://docs.aws.amazon.com/eks/latest/APIReference/API_UpdateClusterConfig.html
+wait_for_eks_config_update() {
+  local update_id="$1" status attempt
+  if [[ -z "$update_id" || "$update_id" == "None" ]]; then
+    echo "Error: EKS did not return an update ID." >&2
+    return 1
+  fi
+  echo "  Waiting for EKS configuration update ${update_id}..."
+  for ((attempt = 0; attempt < 40; attempt++)); do
+    status=$(aws eks describe-update \
+      --name "${MIGRATIONS_EKS_CLUSTER_NAME}" --update-id "$update_id" \
+      --region "${AWS_CFN_REGION}" --query 'update.status' --output text) || return 1
+    case "$status" in
+      Successful) return 0 ;;
+      InProgress) sleep 30 ;;
+      *)
+        echo "Error: EKS configuration update ${update_id} ended with status ${status}." >&2
+        aws eks describe-update \
+          --name "${MIGRATIONS_EKS_CLUSTER_NAME}" --update-id "$update_id" \
+          --region "${AWS_CFN_REGION}" --output json >&2 || true
+        return 1
+        ;;
+    esac
+  done
+  echo "Error: Timed out waiting for EKS configuration update ${update_id} after 20 minutes." >&2
+  return 1
 }
 
 configure_tagged_auto_mode_compute() {
@@ -1492,10 +1824,6 @@ configure_tagged_auto_mode_compute() {
   echo "  Node role:       $node_role_name"
   echo "  Subnets:         $subnet_ids_text"
   echo "  Security group:  $cluster_sg"
-
-  if [[ "$enforce_tags_on_create_for_tests" == "true" ]]; then
-    enforce_tags_on_cluster_role_for_tests
-  fi
 
   # The NodeClass carries the tags; Auto Mode stamps them on the instance, its launch template,
   # its ENIs and its root/ephemeral volumes. The NodePool exists so that pods -- including the
@@ -1566,11 +1894,16 @@ EOF
   kubectl --context="${KUBE_CONTEXT}" apply -f "$manifest" \
     || { echo "Error: failed to apply the tagged NodeClass/NodePool." >&2; cat "$manifest" >&2; exit 1; }
   rm -f "$manifest"
+  echo "  Waiting for NodeClass/${AUTO_MODE_TAGGED_NODE_CLASS} to become Ready..."
+  kubectl --context="${KUBE_CONTEXT}" wait --for=condition=Ready \
+    "nodeclass/${AUTO_MODE_TAGGED_NODE_CLASS}" --timeout=5m \
+    || { echo "Error: NodeClass/${AUTO_MODE_TAGGED_NODE_CLASS} did not become Ready." >&2
+         echo "  Refusing to remove the existing compute or install unusable NodePools." >&2
+         exit 1; }
 
   # These are applied outside the Helm release on purpose: the release's own pre-install hook Jobs
   # need a schedulable node before the release exists, and they must outlive `helm uninstall` so a
   # reinstall has somewhere to run.
-  auto_mode_node_class="${AUTO_MODE_TAGGED_NODE_CLASS}"
 
   # Every node from a built-in NodePool uses the untaggable "default" NodeClass, so leaving either
   # enabled would keep producing untagged instances. Removing them from computeConfig deletes the
@@ -1587,33 +1920,46 @@ EOF
     # A cluster with no built-in NodePools is expected to carry no compute-level node role -- the
     # role lives on the custom NodeClass applied above instead.
     # https://docs.aws.amazon.com/eks/latest/userguide/create-node-pool.html#_cluster_without_built_in_node_pools
-    aws eks update-cluster-config \
+    local update_id
+    update_id=$(aws eks update-cluster-config \
       --name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
       --region "${AWS_CFN_REGION}" \
       --compute-config '{"enabled": true, "nodePools": []}' \
       --kubernetes-network-config '{"elasticLoadBalancing":{"enabled": true}}' \
-      --storage-config '{"blockStorage":{"enabled": true}}' >/dev/null
-    echo "  Waiting for the cluster update to complete..."
-    aws eks wait cluster-active --name "${MIGRATIONS_EKS_CLUSTER_NAME}" --region "${AWS_CFN_REGION}"
-    echo "  Built-in NodePools disabled; all compute now comes from ${AUTO_MODE_TAGGED_NODE_CLASS}."
+      --storage-config '{"blockStorage":{"enabled": true}}' \
+      --query 'update.id' --output text) || return 1
+    wait_for_eks_config_update "$update_id" || return 1
+  fi
+
+  # The default NodeClass can still issue untagged RunInstances validation requests while EKS
+  # removes the built-in compute resources. Wait for Kubernetes deletion too, including on a rerun
+  # that already sees nodePools=[] but interrupted the previous handoff. kubectl's delete waiter
+  # succeeds immediately for resources that are already absent.
+  echo "  Waiting for the built-in NodePools and default NodeClass to be removed..."
+  kubectl --context="${KUBE_CONTEXT}" wait --for=delete \
+    nodepool/system nodepool/general-purpose nodeclass/default --timeout=20m || return 1
+  echo "  Built-in compute removed; all compute now comes from ${AUTO_MODE_TAGGED_NODE_CLASS}."
+
+  # Enforce only after the untaggable default NodeClass is gone. Attaching the test policy earlier
+  # races its final validation calls and leaves historical IAM denials in the CloudTrail verdict,
+  # even when every subsequent workload uses the tagged NodeClass successfully.
+  if [[ "$enforce_tags_on_create_for_tests" == "true" ]]; then
+    enforce_tags_on_cluster_role_for_tests
   fi
 }
 
-if [[ ${#tag_keys[@]} -gt 0 ]]; then
+if [[ "$configure_tagged_auto_mode_compute_requested" == "true" ]]; then
   configure_tagged_auto_mode_compute
-  # Prepended, not appended, so an explicit --helm-values file still wins.
-  tag_values_file=$(emit_tag_helm_values)
-  echo "  Tag values written to $tag_values_file"
-  if [[ -n "$extra_helm_values" ]]; then
-    extra_helm_values="$tag_values_file,$extra_helm_values"
-  else
-    extra_helm_values="$tag_values_file"
-  fi
 fi
 
-# Check if general-purpose pool is disabled and re-enable if needed for installation. The tagged
-# path already created its replacement pool, so it needs neither this check nor another API call.
-if [[ ${#tag_keys[@]} -eq 0 ]]; then
+# Always carry the resolved class into the MA chart. Prepending the generated file preserves the
+# precedence of an explicit --helm-values file, including an explicit aws.nodeClassName.
+prepend_auto_mode_helm_values
+
+# Check if the general-purpose pool is disabled and re-enable if needed for installation. A custom
+# NodeClass means the cluster intentionally uses custom compute, so do not restore an incompatible
+# built-in pool merely because its tags were discovered rather than passed again.
+if [[ "$auto_mode_node_class" == "default" ]]; then
   CURRENT_NODEPOOLS=$(aws eks describe-cluster --name "${MIGRATIONS_EKS_CLUSTER_NAME}" --region "${AWS_CFN_REGION}" \
     --query 'cluster.computeConfig.nodePools' --output text 2>/dev/null)
   if [[ "$CURRENT_NODEPOOLS" != *"general-purpose"* ]] && [[ "$build" != "true" ]]; then
@@ -1861,7 +2207,7 @@ if [[ "$build" == "true" && -z "$ma_images_source" ]]; then
   BUILD_TARGETS=":buildImages:buildImagesToRegistry"
   # Load-test images are their own aggregate (see buildImages/build.gradle), so
   # buildImagesToRegistry does not build them. Only the k6 load-test cases
-  # (Test008x) need migrations/k6_runner in the registry.
+  # (Test008x) need migrations/k6_runner and migrations/k6_operator in the registry.
   if [[ "$with_load_test_images" == "true" ]]; then
     BUILD_TARGETS="${BUILD_TARGETS} :buildImages:buildKitLoadTestAll"
   fi
@@ -1870,32 +2216,32 @@ if [[ "$build" == "true" && -z "$ma_images_source" ]]; then
   # When mirroring, buildkit still pulls from public registries — building on
   # isolated clusters is not supported. Use --ma-images-source instead.
 
+  # EKS/bootstrap builds are always Kubernetes-hosted; they cannot assume
+  # direct access to a local Docker daemon from the target environment.
+  source "${base_dir}/buildImages/backends/eksKubernetesBuildkit.sh"
   BUILDER_NAME="builder-${KUBE_CONTEXT//[^a-zA-Z0-9_-]/-}"
-  if docker buildx inspect "$BUILDER_NAME" --bootstrap &>/dev/null; then
-    echo "Buildkit already configured and healthy, skipping setup"
+  if [[ "$push_images_to_ecr" == "true" ]]; then
+    # Use the ECR-mirrored buildkit image so the kubernetes driver doesn't pull
+    # from Docker Hub. mirror_images_to_ecr already copied this image above.
+    ECR_HOST="${MIGRATIONS_ECR_REGISTRY%%/*}"
+    export BUILDKIT_IMAGE="${ECR_HOST}/mirrored/docker.io/moby/buildkit:buildx-stable-1"
   else
-    echo "Setting up buildkit for local builds..."
+    unset BUILDKIT_IMAGE
+  fi
+  # Reconcile the release on every build, even when an existing buildx builder is healthy. The
+  # BuildKit NodePool must use the same resolved NodeClass as the MA NodePools.
+  set_buildkit_node_class_helm_arg
+  ensure_eks_buildkit_release
+
+  if builder_status=$(docker buildx inspect "$BUILDER_NAME" 2>/dev/null) \
+      && buildx_nodes_are_ready <<< "$builder_status"; then
+    echo "Buildkit release reconciled and existing builder is healthy"
+  else
+    echo "Setting up the buildx builder for local builds..."
     # Remove stale builder if it exists but failed health check above (e.g. orphaned
     # from a previous interrupted run). This is safe — the builder is recreated below.
     docker buildx rm "$BUILDER_NAME" 2>/dev/null || true
-    # EKS/bootstrap builds are always Kubernetes-hosted; they cannot assume
-    # direct access to a local Docker daemon from the target environment.
-    source "${base_dir}/buildImages/backends/eksKubernetesBuildkit.sh"
-    if [[ "$push_images_to_ecr" == "true" ]]; then
-      # Use the ECR-mirrored buildkit image so the kubernetes driver doesn't pull
-      # from Docker Hub. mirror_images_to_ecr already copied this image above.
-      ECR_HOST="${MIGRATIONS_ECR_REGISTRY%%/*}"
-      export BUILDKIT_IMAGE="${ECR_HOST}/mirrored/docker.io/moby/buildkit:buildx-stable-1"
-    else
-      unset BUILDKIT_IMAGE
-    fi
-    # buildkit gets its own NodePool; point it at the same NodeClass as everything else so its
-    # (large, short-lived) build instances are tagged too, and so it doesn't reference the
-    # built-in "default" NodeClass after --tags has disabled the built-in NodePools.
-    if [[ "$auto_mode_node_class" != "default" ]]; then
-      export BUILDKIT_HELM_ARGS="${BUILDKIT_HELM_ARGS:+$BUILDKIT_HELM_ARGS }--set nodeClassName=${auto_mode_node_class}"
-    fi
-    setup_build_backend
+    ensure_eks_buildx_builder
   fi
 
   echo "Building images to MIGRATIONS_ECR_REGISTRY=$MIGRATIONS_ECR_REGISTRY"
@@ -1905,8 +2251,9 @@ if [[ "$build" == "true" && -z "$ma_images_source" ]]; then
     | docker login --username AWS --password-stdin "$ecr_domain" \
     || { echo "ECR login failed"; exit 1; }
 
-  skip_test_arg=""
-  [[ "$skip_test_images" == "true" ]] && skip_test_arg="-PskipTestImages=true"
+  # Test-only images (the SearchGuard Elasticsearch used by the Docker Compose and ECS solutions)
+  # are never needed on EKS: the testClusters source there uses the public elasticsearch-oss image.
+  skip_test_arg="-PskipTestImages=true"
 
   "$base_dir/gradlew" -p "$base_dir" ${BUILD_TARGETS} -PregistryEndpoint="$MIGRATIONS_ECR_REGISTRY" -Pbuilder="$BUILDER_NAME" -PimageVersion="$IMAGE_TAG" $skip_test_arg -x test \
     || { echo "Image build failed, retrying in 10s..."; sleep 10; \
@@ -1968,15 +2315,24 @@ else
   HELM_VALUES_FLAGS="-f ${ma_chart_dir}/values.yaml -f ${ma_chart_dir}/valuesEks.yaml"
 fi
 
-check_existing_ma_release "$namespace" "$namespace"
+[[ "$helm_upgrade" == "true" ]] || check_existing_ma_release "$namespace" "$namespace"
 
 # Build TLS-related helm --set flags and create Pod Identity Associations
 TLS_HELM_FLAGS=""
 
 # Override custom nodepool when --use-general-node-pool is set
 NODEPOOL_HELM_FLAGS=""
+# The zone spread's minDomains comes from the number of zones the cluster's subnets cover, so a
+# workload fleet waits for capacity in every zone rather than filling the first zones to get nodes.
+cluster_zone_count=$(aws ec2 describe-subnets --region "${AWS_CFN_REGION}" \
+  --subnet-ids $(aws eks describe-cluster --name "${MIGRATIONS_EKS_CLUSTER_NAME}" --region "${AWS_CFN_REGION}" \
+    --query 'cluster.resourcesVpcConfig.subnetIds' --output text) \
+  --query 'Subnets[].AvailabilityZone' --output text 2>/dev/null | tr '\t' '\n' | sort -u | grep -c . || true)
+if [[ "${cluster_zone_count:-0}" -gt 1 ]]; then
+  NODEPOOL_HELM_FLAGS="--set workloadsNodePool.zoneCount=${cluster_zone_count}"
+fi
 if [[ "$use_general_node_pool" == "true" ]]; then
-  NODEPOOL_HELM_FLAGS="--set cluster.useCustomKarpenterNodePool=false"
+  NODEPOOL_HELM_FLAGS="${NODEPOOL_HELM_FLAGS} --set cluster.useCustomKarpenterNodePool=false"
 fi
 
 # For any PCA mode, ensure Pod Identity Association exists
@@ -2070,6 +2426,7 @@ echo "Set flags:"
 echo "  stageName=${STAGE}"
 echo "  aws.region=${AWS_CFN_REGION}"
 echo "  aws.account=${AWS_ACCOUNT}"
+echo "  aws.eksClusterName=${MIGRATIONS_EKS_CLUSTER_NAME}"
 echo "  defaultBucketConfiguration.snapshotRoleArn=${SNAPSHOT_ROLE}"
 echo "Image flags:"
 echo "  ${IMAGE_FLAGS}"
@@ -2090,7 +2447,7 @@ if [[ -n "$extra_helm_values" ]]; then
 fi
 # Suppress trace to avoid leaking helm values in logs
 set +x
-helm install "$namespace" "${ma_chart_dir}" \
+helm $([[ "$helm_upgrade" == "true" ]] && echo "upgrade --install" || echo install) "$namespace" "${ma_chart_dir}" \
   --kube-context="${KUBE_CONTEXT}" \
   --namespace $namespace \
   --create-namespace \
@@ -2099,7 +2456,8 @@ helm install "$namespace" "${ma_chart_dir}" \
   $EXTRA_VALUES_FLAGS \
   --set stageName="${STAGE}" \
   --set aws.region="${AWS_CFN_REGION}" \
-  --set aws.account="${AWS_ACCOUNT}" \
+  --set-string aws.account="${AWS_ACCOUNT}" \
+  --set aws.eksClusterName="${MIGRATIONS_EKS_CLUSTER_NAME}" \
   --set defaultBucketConfiguration.snapshotRoleArn="${SNAPSHOT_ROLE}" \
   $IMAGE_FLAGS \
   $TLS_HELM_FLAGS \

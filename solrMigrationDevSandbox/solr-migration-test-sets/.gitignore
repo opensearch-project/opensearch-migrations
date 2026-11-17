@@ -1,0 +1,4 @@
+# Solr collection backups written by the BACKUP API (bind-mounted at /backups)
+backups/
+# Directory ready to be synced to S3
+s3_upload/

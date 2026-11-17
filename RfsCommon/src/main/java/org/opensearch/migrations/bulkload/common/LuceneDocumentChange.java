@@ -28,4 +28,13 @@ public class LuceneDocumentChange {
 
     // The operation type for reindexing this document
     public final DocumentChangeType operation;
+
+    // The snapshot's _version doc value, when available. A delta deletion does not
+    // have a version: the previous snapshot only contains the pre-deletion version.
+    public final Long version;
+
+    public LuceneDocumentChange(int luceneDocNumber, String id, String type, byte[] source,
+                                String routing, DocumentChangeType operation) {
+        this(luceneDocNumber, id, type, source, routing, operation, null);
+    }
 }

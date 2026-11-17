@@ -1,0 +1,382 @@
+package org.opensearch.migrations.trafficcapture.kafkaoffloader;
+
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
+
+import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
+import org.opensearch.migrations.trafficcapture.kafkaoffloader.tracing.CapturePublishingMetrics;
+
+import org.apache.kafka.clients.consumer.MockConsumer;
+import org.apache.kafka.clients.consumer.OffsetResetStrategy;
+import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.errors.TimeoutException;
+import org.junit.jupiter.api.Test;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+class CaptureKafkaMembershipTest {
+    private static final String TOPIC = "traffic";
+    private static final String ACTIVATION_ID = "activation";
+    private static final CapturePublishingMetrics NOOP_METRICS =
+        new CapturePublishingMetrics(io.opentelemetry.api.OpenTelemetry.noop().getMeter("test"));
+
+    @Test
+    void replacementAssignmentChangesOnlyNewConnectionRouting() {
+        var consumer = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
+        var routingState = new CaptureRoutingState(ACTIVATION_ID, 3);
+        var publisher = new InMemoryRoutingGenerationPublisher(routingState);
+        var membership = membership(routingState, consumer, publisher);
+        var partition0 = new TopicPartition(TOPIC, 0);
+        var partition1 = new TopicPartition(TOPIC, 1);
+        var partition2 = new TopicPartition(TOPIC, 2);
+        consumer.assign(List.of(partition0, partition1));
+
+        membership.onPartitionsAssigned(List.of(partition0, partition1));
+        var existingConnection = routingState.routeNewConnection("existing");
+        var existingWriter = existingConnection.writerNodeId();
+        var existingPartition = existingConnection.partition();
+
+        membership.onPartitionsRevoked(List.of(partition0, partition1));
+        consumer.assign(List.of(partition2));
+        membership.onPartitionsAssigned(List.of(partition2));
+        var newConnection = routingState.routeNewConnection("new");
+
+        assertEquals("activation:1", existingWriter);
+        assertTrue(Set.of(0, 1).contains(existingPartition));
+        assertEquals(existingWriter, existingConnection.writerNodeId());
+        assertEquals(existingPartition, existingConnection.partition());
+        assertEquals("activation:2", newConnection.writerNodeId());
+        assertEquals(2, newConnection.partition());
+        assertEquals(
+            List.of(List.of(0, 1), List.of(2)),
+            publisher.initializedRoutingGenerations()
+        );
+    }
+
+    @Test
+    @org.junit.jupiter.api.parallel.ResourceLock("CaptureKafkaMembership")
+    void assignmentTransitionEmitsMetricAndOperationalEvent() {
+        var messages = new ArrayList<String>();
+        var appender = new org.apache.logging.log4j.core.appender.AbstractAppender(
+            "capture-membership-test",
+            null,
+            org.apache.logging.log4j.core.layout.PatternLayout.createDefaultLayout(),
+            false,
+            org.apache.logging.log4j.core.config.Property.EMPTY_ARRAY
+        ) {
+            @Override
+            public void append(org.apache.logging.log4j.core.LogEvent event) {
+                messages.add(event.getMessage().getFormattedMessage());
+            }
+        };
+        var logger = (org.apache.logging.log4j.core.Logger)
+            org.apache.logging.log4j.LogManager.getLogger(CaptureKafkaMembership.class);
+        appender.start();
+        logger.addAppender(appender);
+        try (var telemetry = new InMemoryInstrumentationBundle(false, true)) {
+            var metrics = new CapturePublishingMetrics(
+                telemetry.openTelemetrySdk.getMeter("captureProxy")
+            );
+            var consumer = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
+            var routingState = new CaptureRoutingState(ACTIVATION_ID, 2);
+            var publisher = new InMemoryRoutingGenerationPublisher(routingState);
+            var membership = new CaptureKafkaMembership(
+                consumer,
+                TOPIC,
+                routingState,
+                publisher,
+                metrics,
+                () -> {},
+                ignored -> {},
+                ignored -> {}
+            );
+            var partitions = List.of(
+                new TopicPartition(TOPIC, 0),
+                new TopicPartition(TOPIC, 1)
+            );
+            consumer.assign(partitions);
+
+            membership.onPartitionsAssigned(partitions);
+
+            assertEquals(
+                1,
+                InMemoryInstrumentationBundle.getMetricValueOrZero(
+                    telemetry.getFinishedMetrics(),
+                    CapturePublishingMetrics.MetricNames.ROUTING_TRANSITIONS
+                )
+            );
+            assertTrue(messages.stream().anyMatch(message ->
+                message.startsWith("event=capture_assignment_received ")
+                    && message.contains("topic=traffic")
+                    && message.contains("assignedPartitions=[0, 1]")
+            ));
+            membership.close();
+        } finally {
+            logger.removeAppender(appender);
+            appender.stop();
+        }
+    }
+
+    @Test
+    void emptyAssignmentAfterRevocationKeepsLastUsableAssignment() {
+        var consumer = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
+        var routingState = new CaptureRoutingState(ACTIVATION_ID, 2);
+        var publisher = new InMemoryRoutingGenerationPublisher(routingState);
+        var membership = membership(routingState, consumer, publisher);
+        var partition0 = new TopicPartition(TOPIC, 0);
+        var partition1 = new TopicPartition(TOPIC, 1);
+        consumer.assign(List.of(partition0, partition1));
+
+        membership.onPartitionsAssigned(List.of(partition0, partition1));
+        membership.onPartitionsRevoked(List.of(partition0, partition1));
+        consumer.assign(List.of());
+        membership.onPartitionsAssigned(List.of());
+
+        var routed = routingState.routeNewConnection("after-empty-assignment");
+        assertEquals("activation:1", routed.writerNodeId());
+        assertTrue(Set.of(0, 1).contains(routed.partition()));
+        assertEquals(List.of(0, 1), routingState.activeRoutingPartitions());
+        assertEquals(
+            List.of(List.of(0, 1)),
+            publisher.initializedRoutingGenerations()
+        );
+    }
+
+    @Test
+    void lostPartitionsKeepLastUsableAssignmentUntilKafkaSuppliesAReplacement() {
+        var consumer = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
+        var routingState = new CaptureRoutingState(ACTIVATION_ID, 3);
+        var publisher = new InMemoryRoutingGenerationPublisher(routingState);
+        var membership = membership(routingState, consumer, publisher);
+        var partition0 = new TopicPartition(TOPIC, 0);
+        var partition1 = new TopicPartition(TOPIC, 1);
+        var partition2 = new TopicPartition(TOPIC, 2);
+        consumer.assign(List.of(partition0, partition1));
+
+        membership.onPartitionsAssigned(List.of(partition0, partition1));
+        membership.onPartitionsLost(List.of(partition0, partition1));
+
+        var whileLost = routingState.routeNewConnection("while-lost");
+        assertEquals("activation:1", whileLost.writerNodeId());
+        assertTrue(Set.of(0, 1).contains(whileLost.partition()));
+
+        consumer.assign(List.of(partition2));
+        membership.onPartitionsAssigned(List.of(partition2));
+
+        var afterReplacement = routingState.routeNewConnection("after-replacement");
+        assertEquals("activation:2", afterReplacement.writerNodeId());
+        assertEquals(2, afterReplacement.partition());
+    }
+
+    @Test
+    void pollFailureAfterInitialAssignmentKeepsLastUsableAssignment() throws Exception {
+        var consumer = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
+        var routingState = new CaptureRoutingState(ACTIVATION_ID, 1);
+        var publisher = new InMemoryRoutingGenerationPublisher(routingState);
+        var membershipFailure = new AtomicReference<Throwable>();
+        var initialRoutingReady = new CountDownLatch(1);
+        var partition = new TopicPartition(TOPIC, 0);
+        consumer.updateBeginningOffsets(Map.of(partition, 0L));
+        consumer.schedulePollTask(() -> consumer.rebalance(List.of(partition)));
+        consumer.schedulePollTask(() -> {
+            throw new IllegalStateException("membership failed");
+        });
+        var membership = new CaptureKafkaMembership(
+            consumer,
+            TOPIC,
+            routingState,
+            publisher,
+            NOOP_METRICS,
+            initialRoutingReady::countDown,
+            membershipFailure::set,
+            ignored -> {}
+        );
+
+        membership.start();
+
+        assertTrue(initialRoutingReady.await(1, TimeUnit.SECONDS));
+        awaitConsumerClose(consumer);
+        assertEquals(0, routingState.routeNewConnection("after-poll-failure").partition());
+        assertNull(membershipFailure.get());
+        assertNull(publisher.failure());
+        membership.close();
+    }
+
+    @Test
+    void retriablePollFailureKeepsLastAssignmentAndAcceptsAReplacement() throws Exception {
+        var consumer = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
+        var routingState = new CaptureRoutingState(ACTIVATION_ID, 2);
+        var publisher = new InMemoryRoutingGenerationPublisher(routingState);
+        var membershipFailure = new AtomicReference<Throwable>();
+        var initialRoutingReady = new CountDownLatch(1);
+        var partition0 = new TopicPartition(TOPIC, 0);
+        var partition1 = new TopicPartition(TOPIC, 1);
+        consumer.updateBeginningOffsets(Map.of(partition0, 0L, partition1, 0L));
+        consumer.schedulePollTask(() -> consumer.rebalance(List.of(partition0)));
+        consumer.schedulePollTask(() -> {
+            throw new TimeoutException("coordinator temporarily unavailable");
+        });
+        consumer.schedulePollTask(() -> consumer.rebalance(List.of(partition1)));
+        var membership = new CaptureKafkaMembership(
+            consumer,
+            TOPIC,
+            routingState,
+            publisher,
+            NOOP_METRICS,
+            initialRoutingReady::countDown,
+            membershipFailure::set,
+            ignored -> {}
+        );
+
+        membership.start();
+
+        assertTrue(initialRoutingReady.await(1, TimeUnit.SECONDS));
+        awaitWriter(routingState, "activation:2");
+        assertEquals(List.of(1), routingState.activeRoutingPartitions());
+        assertEquals(1, routingState.routeNewConnection("after-retry").partition());
+        assertNull(membershipFailure.get());
+        assertNull(publisher.failure());
+        membership.close();
+    }
+
+    @Test
+    void pollFailureBeforeAnyUsableAssignmentReportsStartupFailure() throws Exception {
+        var consumer = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
+        var routingState = new CaptureRoutingState(ACTIVATION_ID, 1);
+        var membershipFailure = new AtomicReference<Throwable>();
+        var failureReported = new CountDownLatch(1);
+        consumer.schedulePollTask(() -> {
+            throw new IllegalStateException("membership failed before assignment");
+        });
+        var membership = new CaptureKafkaMembership(
+            consumer,
+            TOPIC,
+            routingState,
+            new InMemoryRoutingGenerationPublisher(routingState),
+            NOOP_METRICS,
+            () -> {},
+            failure -> {
+                membershipFailure.set(failure);
+                failureReported.countDown();
+            },
+            ignored -> {}
+        );
+
+        membership.start();
+
+        assertTrue(failureReported.await(1, TimeUnit.SECONDS));
+        assertEquals("membership failed before assignment", membershipFailure.get().getMessage());
+        assertThrows(
+            IllegalStateException.class,
+            () -> routingState.routeNewConnection("without-an-assignment")
+        );
+        membership.close();
+    }
+
+    @Test
+    void closeBeforeStartClosesTheConsumer() {
+        var consumer = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
+        var routingState = new CaptureRoutingState(ACTIVATION_ID, 1);
+        var membership = membership(
+            routingState,
+            consumer,
+            new InMemoryRoutingGenerationPublisher(routingState)
+        );
+
+        membership.close();
+
+        assertTrue(consumer.closed());
+    }
+
+    private static CaptureKafkaMembership membership(
+        CaptureRoutingState routingState,
+        MockConsumer<String, byte[]> consumer,
+        CaptureRoutingGenerationPublisher publisher
+    ) {
+        return new CaptureKafkaMembership(
+            consumer,
+            TOPIC,
+            routingState,
+            publisher,
+            NOOP_METRICS,
+            () -> {},
+            ignored -> {},
+            ignored -> {}
+        );
+    }
+
+    private static void awaitConsumerClose(MockConsumer<String, byte[]> consumer)
+        throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
+        while (!consumer.closed() && System.nanoTime() < deadline) {
+            Thread.sleep(1);
+        }
+        assertTrue(consumer.closed());
+    }
+
+    private static void awaitWriter(CaptureRoutingState routingState, String expectedWriter)
+        throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
+        while (!expectedWriter.equals(routingState.currentWriterNodeId())
+            && System.nanoTime() < deadline) {
+            Thread.sleep(1);
+        }
+        assertEquals(expectedWriter, routingState.currentWriterNodeId());
+    }
+
+    private static final class InMemoryRoutingGenerationPublisher
+        implements CaptureRoutingGenerationPublisher {
+        private static final Duration EXPIRATION_INTERVAL = Duration.ofSeconds(30);
+
+        private final CaptureRoutingState routingState;
+        private final List<List<Integer>> initializedRoutingGenerations = new ArrayList<>();
+        private final AtomicReference<Throwable> failure = new AtomicReference<>();
+        private long brokerTime = 1_000;
+
+        private InMemoryRoutingGenerationPublisher(CaptureRoutingState routingState) {
+            this.routingState = routingState;
+        }
+
+        @Override
+        public CompletableFuture<String> initializeRoutingGeneration(
+            Collection<Integer> partitions
+        ) {
+            var partitionSnapshot = List.copyOf(partitions);
+            initializedRoutingGenerations.add(partitionSnapshot);
+            var generation = routingState.prepareRoutingGeneration(partitionSnapshot);
+            for (var writerPartition : generation.writerPartitions()) {
+                routingState.acceptHeartbeatLogAppendTime(
+                    writerPartition,
+                    brokerTime++,
+                    EXPIRATION_INTERVAL
+                );
+            }
+            routingState.activateRoutingGeneration(generation);
+            return CompletableFuture.completedFuture(generation.writerNodeId());
+        }
+
+        @Override
+        public void stopAfterFailure(Throwable failure) {
+            this.failure.compareAndSet(null, failure);
+        }
+
+        private List<List<Integer>> initializedRoutingGenerations() {
+            return List.copyOf(initializedRoutingGenerations);
+        }
+
+        private Throwable failure() {
+            return failure.get();
+        }
+    }
+}

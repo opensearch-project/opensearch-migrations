@@ -21,6 +21,7 @@ From the root directory of the repo, run a CLI command like so:
   --s3-repo-uri s3://your-s3-uri \
   --s3-region us-fake-1 \
   --lucene-dir /tmp/lucene_files \
+  --disable-failed-document-stream \
   --target-host http://hostname:9200" \
   || { exit_code=$?; [[ $exit_code -ne 3 ]] && echo "Command failed with exit code $exit_code. Consider rerunning the command."; }
 ```
@@ -36,6 +37,7 @@ From the root directory of the repo, run a CLI command like so:
   --snapshot-name reindex-from-snapshot \
   --snapshot-local-dir /snapshot \
   --lucene-dir /tmp/lucene_files \
+  --disable-failed-document-stream \
   --target-host http://hostname:9200" \
   || { exit_code=$?; [[ $exit_code -ne 3 ]] && echo "Command failed with exit code $exit_code. Consider rerunning the command."; }
 ```
@@ -51,6 +53,7 @@ If your target cluster has basic auth enabled on it, you can supply those creden
   --s3-repo-uri s3://your-s3-uri \
   --s3-region us-fake-1 \
   --lucene-dir /tmp/lucene_files \
+  --disable-failed-document-stream \
   --target-host http://hostname:9200 \
   --target-username <user> \
   --target-password <pass>" \
@@ -80,9 +83,14 @@ To see the default shard size, use the `--help` CLI option:
 | --s3-repo-uri                     | The S3 URI of the snapshot repo, like: s3://my-bucket/dir1/dir2                                                                                          |
 | --s3-region                       | The AWS Region the S3 bucket is in, like: us-east-2                                                                                                      |
 | --lucene-dir                      | The absolute path to the directory where we'll put the Lucene docs                                                                                       |
+| --failed-document-stream-s3-bucket | S3 bucket where documents that can't be written are recorded. This or `--disable-failed-document-stream` is required                                  |
+| --disable-failed-document-stream  | Run without a failed document stream. This or `--failed-document-stream-s3-bucket` is required                                                             |
 | --index-allowlist                 | Optional. List of index names to migrate (e.g. 'logs_2024_01, logs_2024_02'). Default: all non-system indices (e.g. those not starting with '.')         |
 | --max-shard-size-bytes            | Optional. The maximum shard size, in bytes, to allow when performing the document migration. Default: 80 * 1024 * 1024 * 1024 (80 GB)                    |
 | --initial-lease-duration          | Optional. The time that the first attempt to migrate a shard's documents should take. Default: PT10M                                                     |
+| --max-lease-duration              | Optional. Upper bound on a shard's lease, which otherwise doubles each time the shard is picked up again after its lease expired. Default: P1D  |
+| --bulk-response-timeout           | Optional. How long each bulk request waits for its response once sent before it's retried as unanswered. Just over the 300 s idle timeout common to load balancers in front of a cluster, so behind one a stuck bulk gets a 504 first. Default: PT310S |
+| --max-document-size-bytes         | Optional. Document bodies bigger than this after transformation (or without a transform) are recorded in the failed document stream instead of being sent. Default: 0 (no limit)              |
 | --otel-trace-collector-endpoint   | Optional. Endpoint (host:port or URL) for the OpenTelemetry Collector to which traces should be forwarded. Omit to disable trace export                  |
 | --otel-metrics-collector-endpoint | Optional. Endpoint (host:port or URL) for the OpenTelemetry Collector to which metrics should be forwarded. Omit to disable metric export                |
 | --target-host                     | The target host and port (e.g. http://localhost:9200)                                                                                                    |
@@ -90,7 +98,8 @@ To see the default shard size, use the `--help` CLI option:
 | --target-password                 | The password for target cluster authentication                                                                                                           |
 | --target-aws-region               | The AWS region for the target cluster. Required if using SigV4 authentication                                                                            |
 | --target-aws-service-signing-name | The AWS service signing name (e.g. 'es' for Amazon OpenSearch Service, 'aoss' for Amazon OpenSearch Serverless). Required if using SigV4 authentication  |
-| --documents-size-per-bulk-request | Optional. The maximum aggregate document size to be used in bulk requests in bytes. Default: 10 MiB                                                      |
+| --collection-routing              | Optional. JSON object mapping source indices to Serverless collections, e.g. '{"staticCollectionRouting": [{"sourceIndex": "shared-config", "collection": "common"}], "regexCollectionRouting": [{"sourceIndex": "(.+)-\\d{4}", "collection": "$1"}]}'. Requires SigV4 auth with service `aoss` |
+| --documents-size-per-bulk-request | Optional. Maximum bulk request body size in bytes, including action metadata and newlines. A document exceeding the limit by itself is sent alone. 5–15 MB works well; keep it at or under the largest request the target accepts: its `http.max_content_length`, or a smaller limit set in front of it. Default: 10 MiB |
 | --allowed-doc-exception-types     | Optional. Comma-separated list of document-level exception types to treat as successful operations. Enables idempotent migrations by allowing specific errors (e.g., 'version_conflict_engine_exception') to be treated as success. Default: none |
 
 ## Advanced Arguments
@@ -101,7 +110,7 @@ These arguments should be carefully considered before setting, can include exper
 |-----------------------------|:---------------------------------------------------------------------------------------------------------------------|
 | --disable-compression  | Flag to disable request compression for target cluster. Default: false                                               |
 | --documents-per-bulk-request | The number of documents to be included within each bulk request sent. Default: no max (controlled by documents size) |
-| --max-connections           | The maximum number of connections to simultaneously used to communicate to the target. Default: 10                   |
+| --max-connections           | `M`, the most bulk requests in flight to the target at once (and so the most connections used for them). The in-flight limit starts at 1 and stays within [1/32, `M`], pacing requests below 1; see [The in-flight limit](../RFS/docs/BULK_TRAFFIC_CONTROL.md#the-in-flight-limit). Default: 10 |
 | --target-insecure           | Flag to allow untrusted SSL certificates for target cluster. Default: false                                          |
 | --coordinator-host          | The coordinator cluster host and port (e.g. http://localhost:9200). When provided, work coordination uses this cluster instead of the target cluster |
 | --coordinator-username      | Username for coordinator cluster basic authentication                                                                |
@@ -171,6 +180,8 @@ Common RFS worker outcomes:
 | `0` | Worker completed its current unit of work and exited normally. |
 | `2` | Worker exited from lease-timeout/handoff flow (`PROCESS_TIMED_OUT_EXIT_CODE`). This is expected in lease handoff scenarios. |
 | `3` | No work left (`NO_WORK_LEFT_EXIT_CODE`). |
+| `4` | Work exists but every item is leased to another worker (`NO_WORK_AVAILABLE_EXIT_CODE`). Keeps Kubernetes from restarting the pod in a tight loop. |
+| `5` | The snapshot couldn't be read: its repository, index or shard metadata, or a blob (`SNAPSHOT_READ_FAILED_EXIT_CODE`). Not retriable; the reason, path and context are logged at ERROR first. |
 
 In orchestrated runs (Argo/ECS/K8s), treat `2` as a recoverable handoff signal rather than terminal data-loss failure.
 
@@ -183,11 +194,153 @@ If a transformation causes exceptions on the target, either from existing docs o
   --snapshot-name reindex-from-snapshot \
   --snapshot-local-dir /snapshot \
   --lucene-dir /tmp/lucene_files \
+  --disable-failed-document-stream \
   --target-host http://hostname:9200 \
   --allowed-doc-exception-types version_conflict_engine_exception"
 ```
 
-This will prevent the migration from retrying indefinitely when encountering documents that already exist on the target cluster. The migration will treat these conflicts as successful operations and proceed with the remaining documents.
+The migration will treat these conflicts as successful operations instead of recording them as non-retryable document failures.
+
+### Document versioning
+
+RFS uses target-managed internal versioning by default. Bulk actions omit both
+`version` and `version_type`: a document at version 7 in the snapshot starts at
+version 1 on an empty target. Repeated writes replace the content and increment
+the target version, including when restoring an older snapshot.
+
+RFS always reads the Lucene `_version` for indexed documents and exposes it to
+transformations as `source_metadata._version`. Reading it does not enable external
+versioning. The default path sends the original source bytes without parsing the
+body into a Map.
+
+External versioning is opt-in and accepts only a version greater than the target's
+current version. Equal-version retries and attempts to replace newer target versions
+produce `version_conflict_engine_exception`. These follow the normal non-retryable
+document failure path, including failed-document records when configured.
+To explicitly treat conflicts as successful operations, use
+`--allowed-doc-exception-types version_conflict_engine_exception`. No versioning
+mode automatically suppresses these failures.
+
+`version_type` is a per-request concurrency policy, not persistent document
+metadata. The snapshot's `_version` cannot reveal whether source writes used
+`internal`, `external`, or `external_gte`. When external versioning is enabled, RFS
+preserves the number regardless of how it was assigned. Ordinary ingestion after
+backfill continues to increment the target version: a normal write after a
+preserved version 7 becomes version 8.
+
+The external modifier requires a snapshot version, a write version selected by an
+earlier transformation, or a configured application version field. When RFS uses
+server-generated IDs, it omits both the source ID and the explicit version.
+Delete operations do not inherit snapshot versions: a delta snapshot contains
+the previous document's version, not the deletion's version. Snapshot version
+preservation applies to index operations; transformations producing create-only operations
+must remove the explicit version. The bundled data-stream backing-index
+transformation does this when it selects `op_type: "create"`.
+
+The optional built-in Java modifier supports all three policies:
+
+| `versionType` | Behavior |
+|---|---|
+| `internal` | Remove `version` and `version_type`; the target assigns or increments its own version. |
+| `external` | Preserve the selected version; only higher versions overwrite. |
+| `external_gte` | Preserve the selected version; equal or higher versions overwrite. |
+
+#### Native Java versioning
+
+`BulkVersioningTransformerProvider` is bundled in the standard image. To opt into
+preserving snapshot versions with strict greater-than comparison, pass this inline
+startup argument:
+
+```shell
+--doc-transformer-config '[{"BulkVersioningTransformerProvider":{"versionType":"external"}}]'
+```
+
+For equal-version replay, explicitly choose `external_gte`:
+
+```shell
+--doc-transformer-config '[{"BulkVersioningTransformerProvider":{"versionType":"external_gte"}}]'
+```
+
+This permits replacing different target content at the same version; older
+versions still conflict. Allowlisting a conflict suppresses its failure record
+without applying the rejected write.
+
+No modifier is needed for the default internal behavior. To remove versioning
+added by an earlier transformation, use:
+
+```shell
+--doc-transformer-config '[{"BulkVersioningTransformerProvider":{"versionType":"internal"}}]'
+```
+
+New target documents start at version 1. Existing documents increment
+their current version; internal mode does not reset existing counters. The modifier
+removes both `version` and `version_type`: OpenSearch rejects an explicit snapshot
+version with internal versioning in bulk index requests, including when `version_type` is omitted.
+Explicit `if_seq_no` and `if_primary_term` checks are preserved.
+
+Keep the default internal mode when rolling back to an older snapshot and for
+experimental delta restores that can delete and reindex the same document ID.
+Delta comparison operates on Lucene segments, so updates or segment merges can
+produce such pairs. The target deletion advances the version, which can cause
+the subsequent index operation to conflict under either external policy.
+Internal mode restores the content using target-managed versions. Allowlisting
+these conflicts does not restore a document whose index operation was rejected.
+
+Declaring the modifier without `versionType` selects `external`; the modifier
+itself is never applied by default. Unknown version types are rejected.
+
+In either external mode, changing `versionType` preserves the selected action
+version, including a value selected by an earlier transformation. If absent, it
+falls back to the original snapshot version, allowing internal mode to be followed
+by an external mode. Metadata changes do not parse document bodies. A chain composed entirely
+of native `BulkOperationTransformer` implementations retains the source bytes through
+metadata changes, serialization, and retries. Adding a JavaScript or other JSON
+transformer uses the existing JSON path, in the configured order.
+
+#### Application version fields
+
+In either external mode, the modifier can replace the selected write version with a
+field from `_source`:
+
+```shell
+--doc-transformer-config '[{"BulkVersioningTransformerProvider":{"versionType":"external_gte","versionField":"ext_version"}}]'
+```
+
+A string names a literal field, including any dots in its name. For a nested
+field, use an array such as `"versionField": ["metadata", "revision"]`.
+Selecting an application field parses the body but preserves its contents.
+Missing or invalid values fail the transformation. `versionField` is ignored in
+internal mode.
+
+Versions must be integers or decimal strings from 0 through
+`9223372036854775807` (`Long.MAX_VALUE`). The Java provider preserves the full
+range, including integer values above JavaScript's precision limit.
+Floating-point values and out-of-range strings such as `"92233720368547758070"`
+are rejected. Bulk requests always write the version as a JSON integer.
+
+Custom JSON transformations can read the original `source_metadata._version`.
+`operation.version` is present only after a transformation selects a write version.
+Both use decimal strings to preserve 64-bit precision. Keep these strings intact
+when using JavaScript; conversion to `Number` can lose precision. Source metadata
+is never emitted in bulk requests.
+
+When preserving `Long.MAX_VALUE`, there is no higher valid version and a subsequent
+internal increment can overflow. The default internal mode starts new target
+documents at version 1 regardless of the snapshot version.
+
+Version preservation does not order independent source and target write
+histories. An old snapshot document at version 100 can overwrite a newly
+ingested target document at version 1. Plan backfill and live-ingestion ordering
+accordingly.
+
+The native provider has a JUnit end-to-end test under the normal `test` task.
+With Docker available, it creates a real OpenSearch snapshot and migrates it twice
+using `external_gte`, verifying exact versions and no failed-document records.
+The test is skipped when Docker is unavailable:
+
+```shell
+./gradlew :DocumentsFromSnapshotMigration:test --tests '*ExternalVersioningMigrationTest.nativeJavaTransformationReplaysSnapshot'
+```
 
 ### Supported Exception Types
 
@@ -196,3 +349,49 @@ Common exception types that can be allowlisted:
 - Other OpenSearch/Elasticsearch document-level exception types as needed
 
 **Note:** Use this feature carefully. Allowlisting exceptions means those errors will be silently treated as success, which may mask legitimate issues if used incorrectly.
+
+## Logging
+
+Log levels come from environment variables read by `log4j2.properties`. In a workflow, set them with
+`documentBackfillConfig.logLevels`; see [Turning up logging](../docs/turningUpLogging.md). Set the maximum
+request or response body included in each trace entry with `documentBackfillConfig.bulkRequestTraceMaxBytes`
+or `--bulk-request-trace-max-bytes`; `0` logs complete bodies.
+
+| Variable                       | Default | Controls                                                                 |
+|--------------------------------|---------|--------------------------------------------------------------------------|
+| `MIGRATIONS_ROOT_LOG_LEVEL`    | `info`  | Everything not listed below, including Netty and the AWS SDK.            |
+| `FAILED_REQUESTS_LOGGER_LEVEL` | `info`  | The `FailedRequestsLogger` file of bulk requests that ran out of retries. |
+| `BULK_REQUEST_TRACE_LOG_LEVEL` | `off`   | The `BulkRequestTrace` logger (below).                                   |
+
+### Tracing bulk requests
+
+`BULK_REQUEST_TRACE_LOG_LEVEL=trace` logs every bulk attempt as JSON on the console: attempt number, index,
+operation count, request size before and after gzip, and the NDJSON request body (before gzip); then the status, latency, and response
+body, or the exception when no response came back. It's off by default and costs nothing while off. It has its
+own logger so that it can be turned on without tracing the root logger, which would also trace Netty and the
+AWS SDK.
+
+**The trace contains document contents and can grow rapidly.** Turn it on only where the logs may hold the
+migrated data, use `bulkRequestTraceMaxBytes` to bound each body, and turn it off again when you're done.
+
+## How bulk writes are paced
+
+A worker writes as fast as the target accepts and backs off when it doesn't: an adaptive limit on requests in
+flight, jittered retry waits, a shared retry budget, and splitting a failing batch to find a document responsible.
+Throttles and failures that many requests see never fail a document; a document that fails on its own is recorded in
+the failed document stream after a few retries, and nothing slows a flood of such failures. Every rule, setting,
+metric and log line, and the contract for failed-document records, are specified in
+[Bulk Traffic Control and Failure Handling in RFS](../RFS/docs/BULK_TRAFFIC_CONTROL.md).
+
+Once a minute, while it has bulk activity, each worker logs a summary of its bulk traffic, at WARN while documents
+are waiting on the target and at INFO otherwise
+([example and metrics](../RFS/docs/BULK_TRAFFIC_CONTROL.md#metrics-and-logs)). Per-work-item totals are in the
+committed metrics (`metrics.flowControl`).
+
+## Committed metrics
+
+Document Backfill commits source/target operations, request costs, terminal failures, and work-item
+duration with each checkpoint, plus whole-shard snapshot counts on completion. Sum the committed ranges to measure completed
+work, and use snapshot counts to validate the target even while the source keeps
+ingesting. See [committed metrics](../docs/committedMetrics.md) for the published structure, existing coordinator archives, aggregation rules,
+and full/delta target comparison requirements.

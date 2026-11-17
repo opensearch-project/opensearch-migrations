@@ -86,6 +86,11 @@ class SegmentTermIndexTest {
      * hook was called, so tests can assert single-build behavior.
      */
     private static final class StubReader implements LuceneLeafReader {
+        @Override
+        public long countLiveDocumentsWithTermPrefix(String fieldName, String prefix) {
+            throw new UnsupportedOperationException();
+        }
+
         final Map<String, StreamingMultiTermPostings> multi;
         final Map<String, StreamingFieldPostings> positional;
         final Map<String, Map<Integer, Long>> numeric;

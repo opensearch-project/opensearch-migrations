@@ -167,7 +167,8 @@ public class EnvVarParameterPuller {
             // return alternates without the prefix/suffix for credentials because we have ECS related
             // tasks setting environment variables without prefixes.
             (!prefix.isEmpty() || !suffix.isEmpty()) &&
-                ArgNameConstants.POSSIBLE_CREDENTIALS_ARG_FLAG_NAMES.matcher(argName).matches() ?
+                (ArgNameConstants.POSSIBLE_CREDENTIALS_ARG_FLAG_NAMES.matcher(argName).matches()
+                    || ArgNameConstants.AZURE_STORAGE_CREDENTIAL_ARGS.contains(argName)) ?
                 Stream.of(envCase) : Stream.empty()).collect(Collectors.toList());
     }
 

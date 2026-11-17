@@ -10,12 +10,16 @@ export interface FieldMeta {
     checksumFor?: ChecksumDependency[];
     /** Change restriction category for VAP generation. Omit for 'safe'. */
     changeRestriction?: 'impossible' | 'gated';
+    /** With changeRestriction 'gated': only an increase needs approval; a decrease applies immediately. */
+    gatedOnIncreaseOnly?: boolean;
 }
 
 declare module "zod" {
     interface ZodType {
         checksumFor(...deps: ChecksumDependency[]): this;
         changeRestriction(restriction: 'impossible' | 'gated'): this;
+        /** Gated, but only for an increase; decreasing the (numeric) value is safe. */
+        gatedOnIncrease(): this;
     }
 }
 
@@ -27,6 +31,11 @@ z.ZodType.prototype.checksumFor = function(...deps: ChecksumDependency[]) {
 z.ZodType.prototype.changeRestriction = function(restriction: 'impossible' | 'gated') {
     const existing = (this.meta() ?? {}) as FieldMeta;
     return this.meta({ ...existing, changeRestriction: restriction });
+};
+
+z.ZodType.prototype.gatedOnIncrease = function() {
+    const existing = (this.meta() ?? {}) as FieldMeta;
+    return this.meta({ ...existing, changeRestriction: 'gated', gatedOnIncreaseOnly: true });
 };
 
 const REQUEST_TRANSFORMER_SUFFIX = " Request transformers modify each captured HTTP request before it is replayed to the target cluster.";
@@ -59,6 +68,48 @@ function validateMinPodReplicas(
             code: z.ZodIssueCode.custom,
             message: `minPodReplicas (${data.minPodReplicas}) must be less than or equal to podReplicas (${data.podReplicas}).`,
             path: ["minPodReplicas"]
+        });
+    }
+}
+
+export const LOG_LEVEL = z.enum(["off", "fatal", "error", "warn", "info", "debug", "trace", "all"]);
+
+const ROOT_LOG_LEVEL_DESC = "Level for the root logger (MIGRATIONS_ROOT_LOG_LEVEL), which covers everything without " +
+    "its own setting below, including Netty and the AWS SDK. Defaults to 'info'.";
+
+const LOG_LEVELS_DESC_SUFFIX = " Changing these rolls the pods. For per-logger control beyond these, use " +
+    "loggingConfigurationOverrideConfigMap.";
+
+function rootLogLevelOption(component: string) {
+    return z.object({
+        root: LOG_LEVEL.optional().describe(ROOT_LOG_LEVEL_DESC),
+    }).optional()
+        .describe(`Log levels for the ${component}.` + LOG_LEVELS_DESC_SUFFIX);
+}
+
+export const ISO_DURATION_PATTERN = /^[-+]?P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?)?$/;
+
+/** Seconds in an ISO 8601 duration matching {@link ISO_DURATION_PATTERN}, or undefined if it doesn't match. */
+export function isoDurationSeconds(duration: string): number | undefined {
+    const match = ISO_DURATION_PATTERN.exec(duration);
+    if (!match) return undefined;
+    const [days, hours, minutes, seconds] = match.slice(1).map(part => part === undefined ? 0 : Number(part));
+    const total = ((days * 24 + hours) * 60 + minutes) * 60 + seconds;
+    return duration.startsWith("-") ? -total : total;
+}
+
+function validateMaxLeaseDuration(
+    ctx: z.RefinementCtx,
+    data: {initialLeaseDuration?: string, maxLeaseDuration?: string}
+) {
+    if (data.initialLeaseDuration === undefined || data.maxLeaseDuration === undefined) return;
+    const initial = isoDurationSeconds(data.initialLeaseDuration);
+    const max = isoDurationSeconds(data.maxLeaseDuration);
+    if (initial !== undefined && max !== undefined && max < initial) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `maxLeaseDuration (${data.maxLeaseDuration}) must be at least initialLeaseDuration (${data.initialLeaseDuration}).`,
+            path: ["maxLeaseDuration"]
         });
     }
 }
@@ -165,27 +216,53 @@ function validateOptionalDefaultConsistency<T extends z.ZodTypeAny>(
 
 export const OPTIONAL_STORAGE_ENDPOINT_PATTERN = /^(?:(?:https?|localstacks?):\/\/[^/]+\/?)?$/;
 
-// Provider-agnostic repository config. The URI scheme (s3:// or gs://) determines the backend.
-// S3 bucket names: 3-63 chars; GCS bucket names: up to 220 chars including dotted segments.
+// An assumable IAM role ARN in any partition (aws, aws-cn, aws-us-gov, aws-iso-b, ...), with an optional
+// IAM path (role/service-role/Name). Only roles can be assumed, so users, groups, and policies are rejected.
+export const S3_ROLE_ARN_PATTERN = /^(arn:aws(-[a-z]+)*:iam::\d{12}:role(\/[\w+=,.@-]+)*\/[\w+=,.@-]+)?$/;
+
+// Name lengths: S3 bucket 3-63, GCS bucket 3-222 (dotted names), Azure account 3-24, Azure container 3-63.
+const S3_BUCKET_PATTERN = "[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]";
+const GCS_BUCKET_PATTERN = "[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]";
+const AZURE_ACCOUNT_PATTERN = "[a-z0-9]{3,24}";
+// The lookahead bounds the container's length; the rest rules out leading, trailing and repeated hyphens.
+const AZURE_CONTAINER_PATTERN = "(?=[a-z0-9-]{3,63}(?:\\/|$))[a-z0-9]+(?:-[a-z0-9]+)*";
+const REPO_SUBPATH_PATTERN = "(\\/[a-zA-Z0-9!\\-_.*'()/]*)?";
+const REPO_PATH_URI_PATTERN = new RegExp(
+    `^(?:s3:\\/\\/${S3_BUCKET_PATTERN}|gs:\\/\\/${GCS_BUCKET_PATTERN}` +
+    `|azure:\\/\\/${AZURE_ACCOUNT_PATTERN}\\/${AZURE_CONTAINER_PATTERN})${REPO_SUBPATH_PATTERN}$`);
+
 export const REPO_CONFIG = z.object({
-    repoPathUri: z.string().regex(/^(?:s3:\/\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|gs:\/\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9])(\/[a-zA-Z0-9!\-_.*'()/]*)?$/)
-        .describe("Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH' or 'gs://BUCKET_NAME/OPTIONAL_PATH'. " +
-            "The scheme determines the backend. The bucket must already exist and be accessible from the source cluster. " +
-            "For GCS, the source cluster must have the `repository-gcs` plugin installed with a configured client."),
+    repoPathUri: z.string().regex(REPO_PATH_URI_PATTERN)
+        .describe("Repository URI in the format 's3://BUCKET_NAME/OPTIONAL_PATH', 'gs://BUCKET_NAME/OPTIONAL_PATH', " +
+            "or 'azure://STORAGE_ACCOUNT/CONTAINER/OPTIONAL_PATH'. " +
+            "The scheme determines the backend. The bucket or container must already exist and be accessible from the source cluster. " +
+            "For GCS, the source cluster must have the `repository-gcs` plugin installed with a configured client. " +
+            "For Azure Blob Storage, the source cluster must have the `repository-azure` plugin installed with a configured client."),
     awsRegion: z.string().default("").optional()
         .describe("AWS region where the S3 bucket resides (e.g. 'us-east-2'). Required for s3:// URIs; ignored otherwise."),
     endpoint: z.string().regex(OPTIONAL_STORAGE_ENDPOINT_PATTERN).default("").optional()
         .describe("Override the storage endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. " +
             "LocalStack endpoints are automatically resolved to IP addresses during config transformation. " +
-            "Used for S3 (LocalStack) or GCS (fake-gcs-server) testing."),
-    s3RoleArn: z.string().regex(/^(arn:aws:iam::\d{12}:(user|role|group|policy)\/[a-zA-Z0-9+=,.@_-]+)?$/).default("").optional()
-        .describe("IAM role ARN that the source cluster will assume to read/write snapshots to S3. " +
-            "Used for s3:// URIs only; ignored for gs://. " +
-            "Leave empty if the cluster's own IAM role already has S3 access.")
+            "Used for S3 (LocalStack), GCS (fake-gcs-server), or Azure (Azurite) testing. " +
+            "Honored by the tools that read a snapshot repository directly, for every scheme. " +
+            "Snapshot creation registers the repository on the cluster instead, and only repository-s3 " +
+            "has a repository-level endpoint setting, so creation ignores this for gs:// and azure://."),
+    s3RoleArn: z.string().regex(S3_ROLE_ARN_PATTERN).default("").optional()
+        .describe("IAM role ARN that the source cluster will assume to read/write snapshots to S3 " +
+            "(e.g. 'arn:aws:iam::123456789012:role/service-role/SnapshotRole'). " +
+            "Used for s3:// URIs only; ignored for gs:// and azure://. " +
+            "Leave empty if the cluster's own IAM role already has S3 access."),
+    azureCredentialsSecretName: z.string().regex(/^(?:[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*)?$/).default("").optional()
+        .describe("Name of a Kubernetes Secret holding either an 'accountKey' or a 'sasToken' key, used by the " +
+            "migration tools to read an azure:// repository. Used for azure:// URIs only; ignored otherwise. " +
+            "Leave empty to use the ambient Azure identity.")
 }).describe("Configuration for a snapshot repository used by the source cluster. " +
-    "The URI scheme in repoPathUri determines whether the backend is S3 or GCS. " +
+    "The URI scheme in repoPathUri determines whether the backend is S3, GCS, or Azure Blob Storage. " +
     "For GCS, authentication is expected to be provided to the source cluster out-of-band " +
-    "(e.g. via a service-account key loaded into the cluster keystore, or via Workload Identity).");
+    "(e.g. via a service-account key loaded into the cluster keystore, or via Workload Identity). " +
+    "For Azure Blob Storage, the source cluster likewise expects an account key or SAS token in its " +
+    "keystore, while the migration tools' own Azure reader authenticates separately, from " +
+    "azureCredentialsSecretName when set and otherwise from the ambient Azure identity.");
 
 export const PORT_NUMBER_PATTERN = "(?:[1-9]\\d{0,3}|[1-5]\\d{4}|6[0-4]\\d{3}|65[0-4]\\d{2}|655[0-2]\\d|6553[0-5])";
 export const OPTIONAL_PORT_PATTERN = `(?::${PORT_NUMBER_PATTERN})?`;
@@ -291,6 +368,12 @@ function hasTransformPipelineEntries(value: unknown): boolean {
 
 function hasConfiguredString(value: unknown): boolean {
     return typeof value === "string" && value.trim().length > 0;
+}
+
+function hasRequestTransform(config: z.infer<typeof USER_REPLAYER_OPTIONS> | undefined): boolean {
+    return (config?.requestTransforms?.length ?? 0) > 0
+        || [config?.transformerConfig, config?.transformerConfigEncoded, config?.transformerConfigFile]
+            .some(hasConfiguredString);
 }
 
 function validatePipelineRawConfigConflict(
@@ -461,7 +544,7 @@ export const KAFKA_AUTO_CREATE_AUTH_CONFIG = z.discriminatedUnion("type", [
 ]);
 
 export const DEFAULT_KAFKA_TOPIC_SPEC_OVERRIDES = {
-    partitions: 1,
+    partitions: 2,
     replicas: 3,
     config: {
         "retention.ms": 604800000,
@@ -512,28 +595,9 @@ const DEFAULT_AUTO_CREATE_KAFKA = {
             size: "2Gi",
             deleteClaim: true,
         },
-        template: {
-            pod: {
-                // Spread brokers one-per-node so a single node disruption can only take
-                // one broker. ScheduleAnyway keeps this soft so <3-node dev clusters still
-                // schedule instead of wedging Pending.
-                topologySpreadConstraints: [
-                    {
-                        maxSkew: 1,
-                        topologyKey: "kubernetes.io/hostname",
-                        whenUnsatisfiable: "ScheduleAnyway",
-                        labelSelector: {
-                            matchExpressions: [
-                                {
-                                    key: "strimzi.io/name",
-                                    operator: "Exists",
-                                },
-                            ],
-                        },
-                    },
-                ],
-            },
-        },
+        // Zone and host spread are not defaults here: the workflow generates them from the
+        // deployment's workloadZoneSpread setting unless template.pod.topologySpreadConstraints is
+        // set explicitly in these overrides, in which case that list is used as given.
     },
     topicSpecOverrides: {
         ...DEFAULT_KAFKA_TOPIC_SPEC_OVERRIDES
@@ -643,6 +707,7 @@ export const USER_PROXY_WORKFLOW_OPTIONS = withScalableServiceValidation(z.objec
     ).shape,
     loggingConfigurationOverrideConfigMap: z.string().default("").optional()
         .describe(LOGGING_CONFIG_OVERRIDE_DESC),
+    logLevels: rootLogLevelOption("capture proxy"),
     serviceType: z.enum(["LoadBalancer", "ClusterIP"]).default("LoadBalancer").optional()
         .describe("Expert setting controlling how the capture proxy Kubernetes Service is exposed. " +
             "'LoadBalancer' provisions a cloud/load-balancer-backed Service and waits for load balancer ingress before the proxy is Ready. " +
@@ -667,7 +732,8 @@ export const USER_PROXY_PROCESS_OPTIONS = withOtelExportOptions(z.object({
         .checksumFor('snapshot', 'replayer')
         .changeRestriction('gated'),
     destinationConnectionPoolSize: z.number().default(0).optional()
-        .describe("Maximum number of persistent connections to the destination (source) cluster. 0 means unlimited connection pooling."),
+        .describe("Number of warm destination connections maintained per Netty worker thread. " +
+            "0 disables the warm pool and opens destination connections on demand."),
     destinationConnectionPoolTimeout: z.string()
         .regex(/^[-+]?P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?)?$/)
         .default("PT30S").optional()
@@ -685,8 +751,9 @@ export const USER_PROXY_PROCESS_OPTIONS = withOtelExportOptions(z.object({
         .describe("When true, the proxy forwards traffic to the source cluster without capturing it to Kafka. Useful for TLS termination or routing without traffic recording.")
         .checksumFor('snapshot', 'replayer')
         .changeRestriction('gated'),
-    numThreads: z.number().default(1).optional()
-        .describe("Number of Netty worker threads for the proxy to handle concurrent connections."),
+    numThreads: z.number().default(0).optional()
+        .describe("Number of Netty worker threads for the proxy to handle concurrent connections. " +
+            "0 uses Netty's processor-aware default."),
     tls: PROXY_TLS_CONFIG.optional()
         .describe("TLS certificate configuration for HTTPS termination at the proxy. When configured, the proxy serves HTTPS and the TLS secret is mounted at /etc/proxy-tls/.")
         .changeRestriction('gated'),
@@ -729,6 +796,7 @@ export const USER_REPLAYER_WORKFLOW_OPTIONS = withScalableServiceValidation(z.ob
         .describe(JVM_ARGS_DESC),
     loggingConfigurationOverrideConfigMap: z.string().default("").optional()
         .describe(LOGGING_CONFIG_OVERRIDE_DESC),
+    logLevels: rootLogLevelOption("traffic replayer"),
     useLocalStack: z.boolean().default(false).optional()
         .describe("[Internal] Mount local test AWS credentials for LocalStack-backed tuple S3 output. Workflow-only testing hook; not passed to the replayer process and not intended for production use."),
     resources: z.preprocess((v) => deepmerge(DEFAULT_RESOURCES.REPLAYER, (v ?? {})), RESOURCE_REQUIREMENTS)
@@ -739,6 +807,26 @@ export const USER_REPLAYER_WORKFLOW_OPTIONS = withScalableServiceValidation(z.ob
 }))
     .describe("Kubernetes deployment-level options for the traffic replayer.");
 
+export const TUPLE_OUTPUT_CONFIG = z.discriminatedUnion("type", [
+    z.object({
+        type: z.literal("s3")
+            .describe("Persist replay result tuples to S3."),
+        bucket: z.string().trim().min(1)
+            .describe("S3 bucket where replay result tuples are recorded."),
+        prefix: z.string().default("tuples/").optional()
+            .describe("S3 key prefix for tuple objects. Defaults to 'tuples/'."),
+        region: z.string().trim().min(1)
+            .describe("AWS region for the S3 bucket. Must be set explicitly for tuple output."),
+        endpoint: z.string().regex(new RegExp(OPTIONAL_HTTP_ENDPOINT_PATTERN)).default("").optional()
+            .describe("Optional S3 endpoint override (for example, LocalStack). Must be an HTTP(S) URL."),
+    }).strict(),
+    z.object({
+        type: z.literal("disabled")
+            .describe("Run without persisting replay result tuples to S3. Tuples continue to use the configured tuple logger."),
+    }).strict(),
+]).describe("Optional destination for replay result tuples. Select S3 storage or explicitly disable S3 " +
+    "persistence. Omit tupleOutput to use the configured tuple logger.");
+
 export const USER_REPLAYER_PROCESS_OPTIONS = withOtelExportOptions(z.object({
     kafkaTrafficEnableMSKAuth: z.boolean().default(false).optional()
         .describe("Enable SASL/IAM authentication for the replayer's Kafka consumer when connecting to Amazon MSK. Uses the pod's IAM role via EKS Pod Identity.")
@@ -746,12 +834,43 @@ export const USER_REPLAYER_PROCESS_OPTIONS = withOtelExportOptions(z.object({
     kafkaTrafficPropertyFile: z.string().optional()
         .describe("[Expert] Path to a Java properties file with additional or overridden Kafka consumer configuration. The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default.")
         .changeRestriction('impossible'),
-    lookaheadTimeSeconds: z.number().default(400).optional()
-        .describe("Number of seconds of captured traffic to buffer ahead of the current replay position. Must be strictly greater than observedPacketConnectionTimeout. Larger values improve throughput but increase memory usage."),
-    maxConcurrentRequests: z.number().default(10000).optional()
-        .describe("Maximum number of HTTP requests that can be in-flight simultaneously to the target cluster. Limits concurrency to prevent overwhelming the target."),
-    numClientThreads: z.number().default(0).optional()
-        .describe("Number of threads used to send replayed requests to the target. 0 uses the Netty event loop (typically number of available processors)."),
+    maxConcurrentRequests: z.number().int().min(1).optional()
+        .describe("Maximum number of target HTTP requests that can be in flight simultaneously."),
+    numClientThreads: z.number().int().nonnegative().default(0).optional()
+        .describe("Number of target Netty event-loop threads. 0 uses Netty's default of 2 times the available processors."),
+    cancellationGraceMs: z.number().int().nonnegative().default(1000).optional()
+        .describe("Milliseconds allowed for generation-revocation cancellation before force. This does not bound orderly shutdown."),
+    kafkaQuietWindowMs: z.number().int().min(1).default(60000).optional()
+        .describe("Milliseconds Kafka consumer-group membership must stop growing before partitions are rebalanced across new replayers. " +
+            "Replacements for departed replayers are filled immediately. Also the delay before the first assignment after the whole " +
+            "replayer fleet starts. Must be greater than cancellationGraceMs."),
+    targetRetryMaxDelayMs: z.number().int().min(100).default(30000).optional()
+        .describe("Upper bound in milliseconds on one request's jittered exponential backoff between target attempts."),
+    targetRetryBudgetRatio: z.number().nonnegative().default(0.2).optional()
+        .describe("Sustained target retries allowed per first attempt across each replayer process. Retries beyond the budget wait for it, " +
+            "so retry load stays proportional to the replayed load."),
+    targetRetryBudgetFloorPerSecond: z.number()
+        .refine(value => value > 0, "targetRetryBudgetFloorPerSecond must be positive")
+        .default(50).optional()
+        .describe("Target retries per second always allowed in each replayer process, so a process whose requests are all retrying still makes progress."),
+    targetConnectionInitialRate: z.number().nonnegative()
+        .refine(value => value === 0 || (value >= 10 && value <= 1000000), "targetConnectionInitialRate must be 0 or between 10 and 1000000")
+        .default(200).optional()
+        .describe("Starting allowance, in new target connections per second, for each replayer process's adaptive connection limiter. " +
+            "The allowance halves when connects or TLS handshakes fail and grows while they succeed. 0 disables the limiter."),
+    catchUpFactor: z.number().nonnegative()
+        .refine(value => value === 0 || value > 1, "catchUpFactor must be 0 or greater than 1")
+        .default(2).optional()
+        .describe("How many times faster than the normal schedule a newly assigned partition replays work that is already overdue. " +
+            "0 sends overdue work immediately."),
+    heartbeatExpirationIntervalSeconds: z.number().int().min(1).default(30).optional()
+        .describe("Broker-time heartbeat expiration interval E in seconds."),
+    maximumBackwardSkewSeconds: z.number().int().nonnegative().default(5).optional()
+        .describe("Maximum permitted Kafka broker timestamp regression S in seconds."),
+    sourceResponseRetryWindowSeconds: z.number().int().min(1).default(5).optional()
+        .describe("Broker-time source-response retry window W in seconds."),
+    readyRequestsBufferPerThread: z.number().int().min(1).default(2).optional()
+        .describe("Retry-ready request buffer target P for each target Netty event-loop thread."),
     nonRetryableDocExceptionTypes: z.array(z.string()).optional()
         .describe("List of document-level exception types that should not be retried during bulk replay. " +
             "These errors still count as failures in the output but are not retried because they are " +
@@ -759,17 +878,16 @@ export const USER_REPLAYER_PROCESS_OPTIONS = withOtelExportOptions(z.object({
             "When omitted, defaults to a built-in set including version_conflict_engine_exception, " +
             "mapper_parsing_exception, strict_dynamic_mapping_exception, and others. " +
             "Set explicitly to override the defaults entirely (not additive). " +
+            "An item is not retried if its error type or any of its caused_by types is in the list. " +
             "Common values: version_conflict_engine_exception, mapper_parsing_exception, " +
             "illegal_argument_exception, resource_already_exists_exception."),
-    observedPacketConnectionTimeout: z.number().default(360).optional()
-        .describe("Seconds of inactivity on a captured connection before assuming it was terminated in the original traffic stream. Must be strictly less than lookaheadTimeSeconds."),
     ...OTEL_EXPORT_OPTIONS,
-    quiescentPeriodMs: z.number().default(5000).optional()
-        .describe("Milliseconds to delay the first request on a resumed connection after a Kafka partition reassignment. Prevents request bursts during rebalancing."),
     removeAuthHeader: z.boolean().default(false).optional()
         .describe("Remove the Authorization header from replayed requests without replacing it. Useful when the target uses a different auth mechanism (e.g. SigV4) configured separately.")
         .changeRestriction('gated'),
-    speedupFactor: z.number().default(1.1).optional()
+    speedupFactor: z.number()
+        .refine(value => value > 0, "speedupFactor must be positive")
+        .default(1.1).optional()
         .describe("Multiplier to accelerate replay timing relative to the original captured traffic. 1.0 = real-time, 2.0 = double speed."),
     targetServerResponseTimeoutSeconds: z.number().default(150).optional()
         .describe("Maximum seconds to wait for a response from the target cluster before timing out a replayed request."),
@@ -797,17 +915,7 @@ export const USER_REPLAYER_PROCESS_OPTIONS = withOtelExportOptions(z.object({
     tupleTransforms: TRANSFORM_PIPELINE.optional()
         .describe("Tuple transform pipeline. Generates the existing tupleTransformerConfig inline JSON option.")
         .changeRestriction('gated'),
-    tupleS3Bucket: z.string().optional()
-        .describe("S3 bucket for tuple output. When set, tuples are written directly to S3.")
-        .changeRestriction('gated'),
-    tupleS3Region: z.string().optional()
-        .describe("AWS region for the tuple S3 bucket. Required when tupleS3Bucket is set.")
-        .changeRestriction('gated'),
-    tupleS3Prefix: z.string().default("tuples/").optional()
-        .describe("S3 key prefix for tuple objects.")
-        .changeRestriction('gated'),
-    tupleS3Endpoint: z.string().regex(new RegExp(OPTIONAL_HTTP_ENDPOINT_PATTERN)).default("").optional()
-        .describe("Custom S3 endpoint URL for tuple output.")
+    tupleOutput: TUPLE_OUTPUT_CONFIG.optional()
         .changeRestriction('gated'),
     tupleMaxBufferSeconds: z.number().default(60).optional()
         .describe("Maximum seconds before rotating/uploading a tuple file to S3.")
@@ -840,22 +948,6 @@ export const USER_REPLAYER_OPTIONS = withOtelExportOptions(z.object({
         "tupleTransformerConfigBase64",
         "tupleTransformerConfigFile"
     ]);
-    if (hasConfiguredString(data.tupleS3Bucket) && !hasConfiguredString(data.tupleS3Region)) {
-        ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            message: "'tupleS3Region' is required when 'tupleS3Bucket' is configured.",
-            path: ["tupleS3Region"]
-        });
-    }
-
-    if (data.lookaheadTimeSeconds !== undefined && data.observedPacketConnectionTimeout !== undefined
-        && data.lookaheadTimeSeconds <= data.observedPacketConnectionTimeout) {
-        ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            message: `lookaheadTimeSeconds (${data.lookaheadTimeSeconds}) must be strictly greater than observedPacketConnectionTimeout (${data.observedPacketConnectionTimeout})`,
-            path: ['lookaheadTimeSeconds']
-        });
-    }
 }));
 
 // Internal (glue-layer) field: the config transformer folds the user-facing Solr
@@ -936,6 +1028,7 @@ export const USER_METADATA_WORKFLOW_OPTIONS = z.object({
         .describe(JVM_ARGS_DESC),
     loggingConfigurationOverrideConfigMap: z.string().default("").optional()
         .describe(LOGGING_CONFIG_OVERRIDE_DESC),
+    logLevels: rootLogLevelOption("metadata migration"),
     resources: z.preprocess(
         (v) => deepmerge(
             DEFAULT_RESOURCES.JAVA_MIGRATION_CONSOLE_CLI,
@@ -977,12 +1070,20 @@ export const USER_METADATA_PROCESS_OPTIONS = withOtelExportOptions(z.object({
     ...OTEL_EXPORT_OPTIONS,
     output: z.enum(["HUMAN_READABLE", "JSON"]).default("HUMAN_READABLE").optional()
         .describe("Output format for the metadata migration evaluation report. 'HUMAN_READABLE' for formatted text, 'JSON' for machine-parseable output."),
+    // Same restriction as metadataTransforms, which config lowering turns into these fields: they are what reaches
+    // the SnapshotMigration resource, so they carry the restriction the admission policy enforces.
     transformerConfigBase64: z.string().default("").optional()
-        .describe("Base64-encoded JSON transformer configuration." + METADATA_TRANSFORMER_SUFFIX),
+        .describe("Base64-encoded JSON transformer configuration." + METADATA_TRANSFORMER_SUFFIX)
+        .checksumFor('snapshot', 'replayer')
+        .changeRestriction('impossible'),
     transformerConfig: z.string().optional()
-        .describe("Inline JSON transformer configuration. Keys are transformer names and values are their configuration." + METADATA_TRANSFORMER_SUFFIX),
+        .describe("Inline JSON transformer configuration. Keys are transformer names and values are their configuration." + METADATA_TRANSFORMER_SUFFIX)
+        .checksumFor('snapshot', 'replayer')
+        .changeRestriction('impossible'),
     transformerConfigFile: z.string().optional()
-        .describe("Path to a JSON file containing transformer configuration." + METADATA_TRANSFORMER_SUFFIX + EXPERT_FILE_SUFFIX),
+        .describe("Path to a JSON file containing transformer configuration." + METADATA_TRANSFORMER_SUFFIX + EXPERT_FILE_SUFFIX)
+        .checksumFor('snapshot', 'replayer')
+        .changeRestriction('impossible'),
     metadataTransforms: TRANSFORM_PIPELINE.optional()
         .describe("Metadata transform pipeline. Generates the existing transformerConfig inline JSON option.")
         .checksumFor('snapshot', 'replayer')
@@ -1023,6 +1124,15 @@ export const USER_RFS_WORKFLOW_OPTIONS = withScalableServiceValidation(z.object(
         .describe(JVM_ARGS_DESC),
     loggingConfigurationOverrideConfigMap: z.string().default("").optional()
         .describe(LOGGING_CONFIG_OVERRIDE_DESC),
+    logLevels: z.object({
+        root: LOG_LEVEL.optional().describe(ROOT_LOG_LEVEL_DESC),
+        bulkRequestTrace: LOG_LEVEL.optional()
+            .describe("Level for the BulkRequestTrace logger (BULK_REQUEST_TRACE_LOG_LEVEL). 'trace' logs every bulk " +
+                "request and response, including document contents. Defaults to 'off'."),
+        failedRequests: LOG_LEVEL.optional()
+            .describe("Level for the pod-local FailedRequestsLogger file (FAILED_REQUESTS_LOGGER_LEVEL). Defaults to 'warn'."),
+    }).optional()
+        .describe("Log levels for the RFS workers." + LOG_LEVELS_DESC_SUFFIX),
     skipApproval: z.boolean().optional()
         .describe("When true, skips the manual approval gate after the document backfill completes. Useful for automated pipelines where human approval is not needed."),
     useTargetClusterForWorkCoordination: z.boolean().default(false)
@@ -1046,6 +1156,32 @@ export const USER_RFS_WORKFLOW_OPTIONS = withScalableServiceValidation(z.object(
         .default(DEFAULT_RESOURCES.RFS),
 }))
     .describe("Kubernetes deployment-level options for the Reindex From Snapshot (RFS) document backfill.");
+
+export const FAILED_DOCUMENT_STREAM_CONFIG = z.discriminatedUnion("type", [
+    z.object({
+        type: z.literal("s3")
+            .describe("Persist terminal document failures to S3."),
+        bucket: z.string().trim().min(1)
+            .describe("S3 bucket where documents that can't be written are recorded."),
+        prefix: z.string().default("rfs-failed-document-stream/").optional()
+            .describe("S3 key prefix. Each RFS run writes under <prefix>/session=<workflow-uid>/. " +
+                "Defaults to 'rfs-failed-document-stream/'."),
+        region: z.string().optional()
+            .describe("AWS region for the S3 bucket. Resolved before submission from this value, the snapshot " +
+                "repository, or the deployment default."),
+        endpoint: z.string().optional()
+            .describe("Optional S3 endpoint override (for example, LocalStack). Resolved before submission from " +
+                "this value, the snapshot repository, or the deployment default."),
+        maxBufferBytes: z.number().default(67108864).optional()
+            .describe("Maximum uncompressed bytes buffered in memory per target index before rotating to a new " +
+                "S3 object. Defaults to 67108864 (64 MiB)."),
+    }).strict(),
+    z.object({
+        type: z.literal("disabled")
+            .describe("Run without recording terminal document failures."),
+    }).strict(),
+]).describe("Required destination for terminal document failures. Select S3 storage or explicitly disable " +
+    "the failed document stream.");
 
 export const USER_RFS_PROCESS_OPTIONS = withOtelExportOptions(z.object({
     indexAllowlist: z.array(z.string()).default([]).optional()
@@ -1079,17 +1215,53 @@ export const USER_RFS_PROCESS_OPTIONS = withOtelExportOptions(z.object({
     documentsPerBulkRequest: z.number().default(0x7fffffff).optional()
         .describe("Maximum number of documents per bulk indexing request to the target cluster. Lower values reduce per-request latency but increase overhead."),
     documentsSizePerBulkRequest: z.number().default(10*1024*1024).optional()
-        .describe("Maximum aggregate document size in bytes per bulk indexing request. Individual documents larger than this limit are sent as single-document requests."),
+        .describe("Maximum aggregate document size in bytes per bulk indexing request. Individual documents larger than this limit are sent as single-document requests. " +
+            "5–15 MB works well; keep it at or under the largest request the target accepts: its http.max_content_length, " +
+            "or a smaller limit set in front of it."),
+    bulkRequestTraceMaxBytes: z.number().int().nonnegative().default(1024*1024).optional()
+        .describe("Maximum request or response body bytes included in each BulkRequestTrace log entry. " +
+            "Set to 0 to log complete bodies. The trace contains document contents and can produce logs rapidly. " +
+            "Default: 1048576 (1 MiB)."),
+    maxDocumentSizeBytes: z.number().int().min(1).optional()
+        .describe("Documents bigger than this many bytes are not sent to the target. They are recorded in the failed " +
+            "document stream with failureType 'document_too_large' and the backfill moves past them. The limit applies " +
+            "to each document body after transformation, or to the original document body when no transform is " +
+            "configured. It excludes bulk action metadata and NDJSON separators, so leave room for that overhead " +
+            "under the target's request limit. Unset means no limit.")
+        .checksumFor('replayer')
+        .changeRestriction('impossible'),
     initialLeaseDuration: z.string()
-        .regex(/^[-+]?P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?)?$/)
+        .regex(ISO_DURATION_PATTERN)
         .default("PT1H").optional()
         .describe("[Expert] ISO 8601 duration for the initial work item lease in the coordination store (e.g. 'PT1H' = 1 hour, 'PT10M' = 10 minutes). " +
             "If a worker fails to complete a shard within this duration, the lease expires and another worker can pick it up, doubling the lease duration on each retry. " +
-            "Increase for very large shards (>200GB) to reduce the number of re-downloads per shard needed to complete the migration.")
-        .changeRestriction('gated'),
+            "Increase for very large shards (>200GB) to reduce the number of re-downloads per shard needed to complete the migration. " +
+            "Safe to change on a running migration: it only affects leases granted after the change."),
+    maxLeaseDuration: z.string()
+        .regex(ISO_DURATION_PATTERN)
+        .default("P1D").optional()
+        .describe("[Expert] ISO 8601 upper bound on a work item lease (e.g. 'P1D' = 1 day). The lease doubles each time " +
+            "a shard is picked up again after its lease expired; once the doubled lease would reach this value, it stays " +
+            "at this value. Must be at least initialLeaseDuration."),
+    bulkResponseTimeout: z.string()
+        .regex(ISO_DURATION_PATTERN)
+        .refine(d => (isoDurationSeconds(d) ?? 0) > 0, {message: "bulkResponseTimeout must be positive"})
+        .default("PT310S").optional()
+        .describe("[Expert] ISO 8601 duration each bulk request waits for its response once sent, before it is retried as " +
+            "a request that got no response. The target keeps working on a bulk it has received, so a retry adds a second " +
+            "copy of the work; this should outlast the slowest bulk the target completes. The default is just over the " +
+            "300 s idle timeout common to load balancers in front of a cluster, so behind one a stuck bulk is answered " +
+            "with a 504 first. " +
+            "Work coordination and other requests keep their shorter timeout."),
     maxConnections: z.number().default(10).optional()
-        .describe("Maximum number of concurrent HTTP connections from each RFS worker to the target cluster for bulk indexing.")
-        .changeRestriction('gated'),
+        .describe("M, the most bulk requests each RFS worker may have in flight to the target at once (and so the most " +
+            "connections it uses for them). The worker's limit L starts at 1: each success while L is in use adds 1 " +
+            "(1/L above the threshold), each throttle (429, rejected execution, response timeout) multiplies it by a " +
+            "random 0.5-0.7, " +
+            "and it stays within [1/32, M]; below 1 the worker paces its one request. So M is the ceiling, not what a " +
+            "worker always uses. " +
+            "On a running migration, lowering it applies immediately; raising it adds load to the target and needs approval.")
+        .gatedOnIncrease(),
     maxShardSizeBytes: z.number().default(80*1024*1024*1024).optional()
         .describe("Expected maximum shard size in bytes. Used to auto-calculate ephemeral storage requirements as ceil(2.5 * maxShardSizeBytes). Set this to match your largest shard to ensure sufficient disk space for Lucene segment processing.")
         .changeRestriction('gated'),
@@ -1132,25 +1304,8 @@ export const USER_RFS_PROCESS_OPTIONS = withOtelExportOptions(z.object({
             "so results can be inconsistent. Use only when reconstruction from doc_values and stored fields is insufficient.")
         .checksumFor('replayer')
         .changeRestriction('impossible'),
-    failedDocumentStreamS3Prefix: z.string().default("rfs-failed-document-stream/").optional()
-        .describe("S3 key prefix for the failed document stream where terminal document failures are persisted. " +
-            "Each RFS run writes under <prefix>/session=<workflow-uid>/. " +
-            "Defaults to 'rfs-failed-document-stream/'."),
-    failedDocumentStreamS3Bucket: z.string().optional()
-        .describe("S3 bucket for the failed document stream, and the switch that enables it. Omit it and terminal " +
-            "document failures are not recorded; there is no separate enable flag and no default bucket."),
-    failedDocumentStreamS3Region: z.string().optional()
-        .describe("AWS region for the failed document stream S3 bucket. Resolved by the config processor before " +
-            "submission (user value, else the snapshot repo's region, else the deployment default). " +
-            "Ignored without a bucket."),
-    failedDocumentStreamS3Endpoint: z.string().optional()
-        .describe("Optional S3 endpoint override for failed document stream uploads (e.g. LocalStack). Resolved by " +
-            "the config processor (user value, else the snapshot repo's endpoint, else the deployment default). " +
-            "Ignored without a bucket."),
-    failedDocumentStreamMaxBufferBytes: z.number().default(67108864).optional()
-        .describe("Maximum uncompressed bytes buffered in memory per target index before the failed document stream rotates " +
-            "to a new S3 object. Bounds heap use when a shard produces a very large number of terminal " +
-            "failures. Default 67108864 (64 MiB)."),
+    failedDocumentStream: FAILED_DOCUMENT_STREAM_CONFIG
+        .changeRestriction('gated'),
     positionGapStopword: z.string().default("a").optional()
         .describe("Token used to fill skipped Lucene positions when reconstructing analyzed-text fields from postings. " +
             "ES preserves position increments for stop-word-filtered tokens (e.g. 'i like the tree' with stopword 'the' indexes " +
@@ -1191,6 +1346,7 @@ export const USER_RFS_OPTIONS = withOtelExportOptions(z.object({
 })
     .superRefine((data, ctx) => {
         validateMinPodReplicas(ctx, data);
+        validateMaxLeaseDuration(ctx, data);
         validatePipelineRawConfigConflict(ctx, data, "documentTransforms", [
             "docTransformerConfig",
             "docTransformerConfigBase64",
@@ -1316,11 +1472,17 @@ export const CLUSTER_CONFIG = z.object({
 export const TARGET_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
     endpoint:  z.string().regex(new RegExp(HTTP_ENDPOINT_PATTERN))
         .describe("HTTP(S) endpoint URL for the target cluster (e.g. 'https://target-cluster:9200/'). Required for target clusters."),
+    collectionRouted: z.boolean().optional()
+        .describe("Set to true when the endpoint is an OpenSearch Serverless per-account endpoint (<account-id>.aoss.<region>.on.aws), " +
+            "which selects the collection from a request header. Requires SigV4 auth with service 'aoss', and every snapshot migration " +
+            "to this target must define staticCollectionRouting or regexCollectionRouting. " +
+            "A replayer to this target needs a request transform that adds the x-amz-aoss-collection-name header. " +
+            "Migration console cluster commands don't send the collection header, so most of them don't work against this target."),
 }).describe("Connection configuration for a target OpenSearch cluster. Extends the base cluster config with a required endpoint.");
 
 export const SOURCE_CLUSTER_REPOS_RECORD =
     z.record(z.string(), REPO_CONFIG)
-    .describe("Map of snapshot repository names to their backing-store configurations. Keys are the repository names as registered in the source cluster. Each value's repoPathUri scheme determines the backend (s3:// or gs://).");
+    .describe("Map of snapshot repository names to their backing-store configurations. Keys are the repository names as registered in the source cluster. Each value's repoPathUri scheme determines the backend (s3://, gs://, or azure://).");
 
 export const CAPTURE_CONFIG = z.object({
     kafka: z.string().regex(K8S_NAMING_PATTERN).default("default").optional()
@@ -1687,6 +1849,25 @@ export const NORMALIZED_COMPLETE_SNAPSHOT_CONFIG = z.object({
         .describe("Resolved name of the snapshot to use for migration.")
 }).describe("A fully resolved snapshot configuration with a concrete snapshot name.");
 
+export const STATIC_COLLECTION_ROUTING = z.array(z.object({
+    sourceIndex: z.string().regex(/\S/, "must not be blank")
+        .describe("Exact source index name."),
+    collection: z.string().regex(/\S/, "must not be blank")
+        .describe("OpenSearch Serverless collection name, used as is."),
+}).describe("Routes one source index to one OpenSearch Serverless collection."))
+    .describe("Exact source index to collection mappings for a collection-routed target. A static match wins over every regex entry. " +
+        "Each sourceIndex may appear only once.");
+
+export const REGEX_COLLECTION_ROUTING = z.array(z.object({
+    sourceIndex: z.string().regex(/\S/, "must not be blank")
+        .describe("Java regular expression that must match the whole source index name (e.g. '(.+)-\\d{4}')."),
+    collection: z.string().regex(/\S/, "must not be blank")
+        .describe("Collection name replacement pattern, which may reference the regex's capture groups by number or name (e.g. '$1' or '${tenant}')."),
+}).describe("Routes source indices that match a regex to an OpenSearch Serverless collection."))
+    .describe("Ordered regex mappings for a collection-routed target, used when no static entry matches. The first regex that matches " +
+        "the whole index name wins. Patterns and group references are validated with JavaScript's regex engine, which " +
+        "rejects Java-only syntax such as (?i), a++ and (?>a), and then fully by Java when the migration starts.");
+
 export const USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG = z.object({
     label: z.string().regex(/^[a-zA-Z][a-zA-Z0-9]*/).default("").optional()
         .describe("Unique label for this migration within its snapshot group. Auto-generated as 'migration-<index>' if not specified. Must start with a letter and contain only alphanumeric characters."),
@@ -1694,6 +1875,13 @@ export const USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG = z.object({
         .describe("Configuration for migrating index metadata (mappings, settings, templates) from the snapshot to the target. Omit to skip metadata migration."),
     documentBackfillConfig: USER_RFS_OPTIONS.optional()
         .describe("Configuration for backfilling documents from the snapshot to the target using Reindex From Snapshot. Omit to skip document backfill."),
+    staticCollectionRouting: STATIC_COLLECTION_ROUTING.optional()
+        .describe("Exact source index to OpenSearch Serverless collection mappings. With regexCollectionRouting, needs at least one entry " +
+            "when the target is collectionRouted and is not allowed otherwise. Shared by metadata migration and document backfill " +
+            "so an index's metadata and documents reach the same collection. Templates aren't migrated to collection-routed targets."),
+    regexCollectionRouting: REGEX_COLLECTION_ROUTING.optional()
+        .describe("Ordered regex source index to OpenSearch Serverless collection mappings, used when no static entry matches. " +
+            "Same rules as staticCollectionRouting."),
 }).describe("Configuration for a single migration pass from a snapshot. At least one of metadataMigrationConfig or documentBackfillConfig must be provided.").refine(data =>
         data.metadataMigrationConfig !== undefined ||
         data.documentBackfillConfig !== undefined,
@@ -1739,6 +1927,119 @@ export const SOURCE_CLUSTERS_MAP = z.record(z.string(), SOURCE_CLUSTER_CONFIG)
     .describe("Map of source cluster names to their configurations. Keys are used as labels throughout the migration workflow.");
 export const TARGET_CLUSTERS_MAP = z.record(z.string(), TARGET_CLUSTER_CONFIG)
     .describe("Map of target cluster names to their configurations. Keys are used as labels and must be referenced by snapshotMigrationConfigs and traffic replayers.");
+
+// Keep in sync with REPLACEMENT_TOKEN in ServerlessCollectionRouting.java. In order: an escaped character, ${name},
+// $n, then the incomplete forms ${, $ and a trailing backslash.
+const COLLECTION_REPLACEMENT_TOKEN = /\\.|\$\{([^}]*)}|\$(\d)|\$\{|\$|\\/gs;
+
+/** Returns why a regex route's collection can't work with its pattern, or undefined when it can. */
+function collectionReplacementProblem(collection: string, groupCount: number, groupNames: string[]): string | undefined {
+    for (const [token, groupName, groupNumber] of collection.matchAll(COLLECTION_REPLACEMENT_TOKEN)) {
+        if (groupName !== undefined) {
+            if (!groupNames.includes(groupName)) {
+                return `references undefined group '${groupName}'`;
+            }
+        } else if (groupNumber !== undefined) {
+            if (Number(groupNumber) > groupCount) {
+                return `references undefined group ${groupNumber}`;
+            }
+        } else if (token === "${") {
+            return "has an unclosed '${'";
+        } else if (token === "$") {
+            return "has '$' that is not a group reference";
+        } else if (token === "\\") {
+            return "ends with an unescaped backslash";
+        }
+    }
+    return undefined;
+}
+
+function validateRegexRoute(
+    route: z.infer<typeof REGEX_COLLECTION_ROUTING>[number],
+    routePath: (string | number)[],
+    ctx: z.RefinementCtx
+) {
+    let compiled: RegExp;
+    try {
+        compiled = new RegExp(route.sourceIndex);
+    } catch {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `regexCollectionRouting sourceIndex '${route.sourceIndex}' is not a valid regular expression. ` +
+                `This check uses JavaScript's engine, so it also rejects Java-only syntax such as (?i), a++ and (?>a).`,
+            path: [...routePath, 'sourceIndex']
+        });
+        return;
+    }
+    // An empty alternative always matches, which exposes the groups without needing an index name that fits the pattern
+    const groups = new RegExp(`${compiled.source}|`).exec("")!;
+    const problem = collectionReplacementProblem(route.collection, groups.length - 1, Object.keys(groups.groups ?? {}));
+    if (problem !== undefined) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `Collection '${route.collection}' for regex '${route.sourceIndex}' in regexCollectionRouting ${problem}.`,
+            path: [...routePath, 'collection']
+        });
+    }
+}
+
+function validateCollectionRouting(
+    targetCluster: z.infer<typeof TARGET_CLUSTER_CONFIG> | undefined,
+    mc: z.infer<typeof NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG>,
+    i: number,
+    ctx: z.RefinementCtx
+) {
+    if (!targetCluster) {
+        return;
+    }
+    const routed = targetCluster.collectionRouted === true;
+    if (routed) {
+        const sigv4 = HTTP_AUTH_SIGV4.safeParse(targetCluster.authConfig);
+        if (!sigv4.success || sigv4.data.sigv4.service !== "aoss") {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: `Target '${mc.toTarget}' is collectionRouted, which requires sigv4 authConfig with service 'aoss'.`,
+                path: ['targetClusters', mc.toTarget, 'authConfig']
+            });
+        }
+    }
+    for (const [snapName, migrations] of Object.entries(mc.perSnapshotConfig)) {
+        migrations.forEach((migration, j) => {
+            const entryPath = ['snapshotMigrationConfigs', i, 'perSnapshotConfig', snapName, j];
+            const staticRoutes = migration.staticCollectionRouting;
+            const regexRoutes = migration.regexCollectionRouting;
+            const hasRoutingField = staticRoutes !== undefined || regexRoutes !== undefined;
+            const routeCount = (staticRoutes?.length ?? 0) + (regexRoutes?.length ?? 0);
+            if (routed && routeCount === 0) {
+                ctx.addIssue({
+                    code: z.ZodIssueCode.custom,
+                    message: `Target '${mc.toTarget}' is collectionRouted, so perSnapshotConfig['${snapName}'][${j}] needs at least one ` +
+                        `staticCollectionRouting or regexCollectionRouting entry.`,
+                    path: [...entryPath, 'staticCollectionRouting']
+                });
+            } else if (!routed && hasRoutingField) {
+                ctx.addIssue({
+                    code: z.ZodIssueCode.custom,
+                    message: `perSnapshotConfig['${snapName}'][${j}] sets collection routing, but target '${mc.toTarget}' is not collectionRouted.`,
+                    path: [...entryPath, staticRoutes !== undefined ? 'staticCollectionRouting' : 'regexCollectionRouting']
+                });
+            }
+            const seen = new Set<string>();
+            (staticRoutes ?? []).forEach((route, k) => {
+                if (seen.has(route.sourceIndex)) {
+                    ctx.addIssue({
+                        code: z.ZodIssueCode.custom,
+                        message: `staticCollectionRouting lists source index '${route.sourceIndex}' more than once.`,
+                        path: [...entryPath, 'staticCollectionRouting', k, 'sourceIndex']
+                    });
+                }
+                seen.add(route.sourceIndex);
+            });
+            (regexRoutes ?? []).forEach((route, k) =>
+                validateRegexRoute(route, [...entryPath, 'regexCollectionRouting', k], ctx));
+        });
+    }
+}
 
 export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
 (
@@ -1790,6 +2091,8 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
                 });
             }
 
+            validateCollectionRouting(data.targetClusters[mc.toTarget], mc, i, ctx);
+
             if (mc.perSnapshotConfig) {
                 const sourceCluster = data.sourceClusters[mc.fromSource];
                 const availableSnapshots = snapshotInfoEntries(sourceCluster?.snapshotInfo);
@@ -1809,6 +2112,47 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
             const proxies = data.traffic.proxies ?? {};
             const s3Sources = data.traffic.s3Sources ?? {};
             const kafkaClusters = data.kafkaClusterConfiguration ?? {};
+            const reportedTimestampRequirements = new Set<string>();
+            const validateWorkflowManagedTimestampType = (
+                kafkaClusterName: string,
+                requiredTimestampType: "LogAppendTime" | "CreateTime",
+                topicKind: string
+            ) => {
+                const kafkaCluster = kafkaClusters[kafkaClusterName];
+                if (!kafkaCluster || !("autoCreate" in kafkaCluster)) {
+                    return;
+                }
+                const topicConfig = kafkaCluster.autoCreate.topicSpecOverrides?.config;
+                const configuredTimestampType =
+                    topicConfig !== null
+                    && typeof topicConfig === "object"
+                    && !Array.isArray(topicConfig)
+                        ? topicConfig["message.timestamp.type"]
+                        : undefined;
+                if (configuredTimestampType === undefined
+                    || configuredTimestampType === requiredTimestampType) {
+                    return;
+                }
+
+                const requirementKey = `${kafkaClusterName}\0${requiredTimestampType}`;
+                if (reportedTimestampRequirements.has(requirementKey)) {
+                    return;
+                }
+                reportedTimestampRequirements.add(requirementKey);
+                ctx.addIssue({
+                    code: z.ZodIssueCode.custom,
+                    message: `Workflow-managed ${topicKind} on Kafka cluster '${kafkaClusterName}' require `
+                        + `'message.timestamp.type' to be '${requiredTimestampType}'.`,
+                    path: [
+                        "kafkaClusterConfiguration",
+                        kafkaClusterName,
+                        "autoCreate",
+                        "topicSpecOverrides",
+                        "config",
+                        "message.timestamp.type",
+                    ],
+                });
+            };
             for (const [proxyName, proxyConfig] of Object.entries(proxies)) {
                 if (!(proxyConfig.source in data.sourceClusters)) {
                     ctx.addIssue({
@@ -1825,6 +2169,37 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
                         path: ['traffic', 'proxies', proxyName, 'kafka']
                     });
                 }
+
+                if (proxyConfig.proxyConfig.noCapture !== true) {
+                    const effectiveKafkaRef = kafkaRef ?? "default";
+                    validateWorkflowManagedTimestampType(
+                        effectiveKafkaRef,
+                        "LogAppendTime",
+                        "live capture topics"
+                    );
+                    const kafkaCluster = kafkaClusters[effectiveKafkaRef];
+                    const partitionCount = kafkaCluster && 'autoCreate' in kafkaCluster
+                        ? kafkaCluster.autoCreate.topicSpecOverrides?.partitions
+                        : Object.keys(kafkaClusters).length === 0
+                            ? DEFAULT_KAFKA_TOPIC_SPEC_OVERRIDES.partitions
+                            : undefined;
+                    const proxyCount = proxyConfig.proxyConfig.podReplicas ?? 1;
+                    const requiredPartitionCount = proxyCount > 0 ? proxyCount + 1 : 1;
+                    if (typeof partitionCount === "number" && partitionCount < requiredPartitionCount) {
+                        const topicName = proxyConfig.kafkaTopic || proxyName;
+                        ctx.addIssue({
+                            code: z.ZodIssueCode.custom,
+                            message: `Kafka topic '${topicName}' on cluster '${effectiveKafkaRef}' has ${partitionCount} partition(s), but capture proxy '${proxyName}' with ${proxyCount} pod replica(s) requires at least ${requiredPartitionCount} partition(s) so a rolling update always has a spare writer partition.`,
+                            path: [
+                                'kafkaClusterConfiguration',
+                                effectiveKafkaRef,
+                                'autoCreate',
+                                'topicSpecOverrides',
+                                'partitions'
+                            ]
+                        });
+                    }
+                }
             }
             for (const [s3Name, s3Config] of Object.entries(s3Sources)) {
                 const kafkaRef = s3Config.kafka;
@@ -1835,6 +2210,11 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
                         path: ['traffic', 's3Sources', s3Name, 'kafka']
                     });
                 }
+                validateWorkflowManagedTimestampType(
+                    kafkaRef ?? "default",
+                    "CreateTime",
+                    "BYOC import topics"
+                );
             }
 
             for (const [replayerName, rc] of Object.entries(data.traffic.replayers)) {
@@ -1855,6 +2235,15 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
                             path: ['traffic', 'replayers', replayerName, 'dependsOnSnapshotMigrations', j, 'source']
                         });
                     }
+                }
+
+                if (data.targetClusters[rc.toTarget]?.collectionRouted && !hasRequestTransform(rc.replayerConfig)) {
+                    ctx.addIssue({
+                        code: z.ZodIssueCode.custom,
+                        message: `Replayer '${replayerName}' targets '${rc.toTarget}', which is collectionRouted, so it needs ` +
+                            `a request transform that adds the x-amz-aoss-collection-name header to each request.`,
+                        path: ['traffic', 'replayers', replayerName, 'toTarget']
+                    });
                 }
 
                 // When the target has sigv4 or basic auth, the workflow auto-derives the replayer's auth

@@ -1,14 +1,18 @@
 package org.opensearch.migrations.bulkload.common;
 
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import org.opensearch.migrations.Flavor;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.http.CompressionMode;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.common.http.HttpResponse;
+import org.opensearch.migrations.bulkload.pipeline.model.Document;
 import org.opensearch.migrations.reindexer.FailedRequestsLogger;
 
 import com.fasterxml.jackson.core.StreamReadFeature;
@@ -17,18 +21,30 @@ import com.fasterxml.jackson.databind.json.JsonMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.Mock.Strictness;
 import org.mockito.junit.jupiter.MockitoExtension;
 import reactor.core.publisher.Mono;
 import reactor.util.retry.Retry;
 
+import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
@@ -84,6 +100,39 @@ class OpenSearchClientFactoryTest {
     FailedRequestsLogger failedRequestLogger;
 
     OpenSearchClientFactory openSearchClientFactory;
+
+    @ParameterizedTest
+    @CsvSource({
+        "ES 5.6,  1, 1024, 3",
+        "ES 6.8,  1, 1024, 3",
+        "OS 2.11, 1, 1024, 3",
+        "ES 5.6,  100, 64, 3",
+        "ES 6.8,  100, 64, 3",
+        "OS 2.11, 100, 64, 3",
+        "ES 5.6,  100, 1024, 1",
+        "ES 6.8,  100, 1024, 1",
+        "OS 2.11, 100, 1024, 1"
+    })
+    void constructsClientsWithExplicitBulkLimits(String version, int maxDocs, long maxBytes, int expectedRequests) {
+        doReturn(Version.fromString(version)).when(openSearchClientFactory).getClusterVersion();
+        when(connectionContext.isDisableCompression()).thenReturn(true);
+        when(restClient.postAsyncBytes(any(), any(), any(), any()))
+            .thenReturn(Mono.just(new HttpResponse(200, "OK", Map.of(), "{\"errors\":false,\"items\":[]}")));
+        var docs = List.of(
+            new Document("a", "{}".getBytes(StandardCharsets.UTF_8), Document.Operation.UPSERT, Map.of(), Map.of()),
+            new Document("b", "{}".getBytes(StandardCharsets.UTF_8), Document.Operation.UPSERT, Map.of(), Map.of()),
+            new Document("c", "{}".getBytes(StandardCharsets.UTF_8), Document.Operation.UPSERT, Map.of(), Map.of()));
+
+        var client = openSearchClientFactory.determineVersionAndCreate(maxDocs, maxBytes);
+        var response = client.sendBulkRequestRaw("idx", docs, null, false, DocumentExceptionAllowlist.empty()).block();
+
+        assertEquals(expectedRequests, response.requests.total());
+        var requests = ArgumentCaptor.forClass(byte[].class);
+        verify(restClient, times(expectedRequests)).postAsyncBytes(any(), requests.capture(), any(), any());
+        assertTrue(requests.getAllValues().stream().allMatch(bytes -> bytes.length <= maxBytes));
+        assertTrue(requests.getAllValues().stream()
+            .allMatch(bytes -> new String(bytes, StandardCharsets.UTF_8).lines().count() / 2 <= maxDocs));
+    }
 
     @BeforeEach
     void beforeTest() {
@@ -292,5 +341,186 @@ class OpenSearchClientFactoryTest {
         verify(restClient, times(1)).getConnectionContext();
         verify(restClient, times(1)).getAsync("", null);
         verifyNoMoreInteractions(restClient);
+    }
+
+    private static final String SETTINGS_PATH = "_cluster/settings?include_defaults=true";
+
+    /** Answers the n-th (1-based) request to {@code path} with {@code statusForAttempt(n)}, or 200 with {@code okBody}. */
+    private AtomicInteger answer(String path, java.util.function.IntUnaryOperator statusForAttempt, String okBody) {
+        var attempts = new AtomicInteger();
+        when(restClient.getAsync(path, null)).thenReturn(Mono.defer(() -> {
+            int status = statusForAttempt.applyAsInt(attempts.incrementAndGet());
+            return Mono.just(new HttpResponse(status, "", Map.of(), status == 200 ? okBody : "{}"));
+        }));
+        return attempts;
+    }
+
+    @ParameterizedTest
+    @CsvSource({"408", "429", "503"})
+    void versionDetectionRetriesTransientStatuses(int status) {
+        var attempts = answer("", n -> n == 1 ? status : 200, ROOT_RESPONSE_OS_1_0_0);
+
+        assertThat(openSearchClientFactory.getClusterVersion(), equalTo(Version.fromString("OS 1.0.0")));
+        assertEquals(2, attempts.get());
+    }
+
+    @ParameterizedTest
+    @CsvSource({"400", "401", "403"})
+    void versionDetectionDoesNotRetryConfigurationErrors(int status) {
+        var attempts = answer("", n -> status, ROOT_RESPONSE_OS_1_0_0);
+        when(restClient.getAsync("solr/admin/info/system?wt=json", null))
+            .thenReturn(Mono.just(new HttpResponse(404, "", Map.of(), "")));
+
+        org.junit.jupiter.api.Assertions.assertThrows(ClusterVersionDetector.UnexpectedStatusCode.class,
+            () -> openSearchClientFactory.getClusterVersion());
+        assertEquals(1, attempts.get());
+    }
+
+    @Test
+    void versionDetectionStillFailsWhenThrottlingOutlastsItsRetries() {
+        var attempts = answer("", n -> 429, ROOT_RESPONSE_OS_1_0_0);
+        when(restClient.getAsync("solr/admin/info/system?wt=json", null))
+            .thenReturn(Mono.just(new HttpResponse(404, "", Map.of(), "")));
+
+        org.junit.jupiter.api.Assertions.assertThrows(ClusterVersionDetector.UnexpectedStatusCode.class,
+            () -> openSearchClientFactory.getClusterVersion());
+        assertEquals(3, attempts.get());
+    }
+
+    @ParameterizedTest
+    @CsvSource({"408", "429", "503"})
+    void compressionCheckRetriesTransientStatuses(int status) {
+        setupOkResponse(restClient, "", ROOT_RESPONSE_OS_1_0_0);
+        var attempts = answer(SETTINGS_PATH, n -> n == 1 ? status : 200, CLUSTER_SETTINGS_COMPRESSION_ENABLED);
+
+        openSearchClientFactory.determineVersionAndCreate();
+
+        assertEquals(CompressionMode.GZIP_BODY_COMPRESSION, openSearchClientFactory.getCompressionMode());
+        assertEquals(2, attempts.get());
+    }
+
+    @ParameterizedTest
+    @CsvSource({"401, 1", "403, 1", "404, 1", "429, 3"})
+    void compressionCheckWarnsNamingTheStatusWhenItFallsBackToUncompressed(int status, int expectedAttempts) {
+        setupOkResponse(restClient, "", ROOT_RESPONSE_OS_1_0_0);
+        var attempts = answer(SETTINGS_PATH, n -> status, CLUSTER_SETTINGS_COMPRESSION_ENABLED);
+
+        try (var logs = new org.opensearch.migrations.testutils.CloseableLogSetup(
+            OpenSearchClientFactory.class.getName())) {
+            openSearchClientFactory.determineVersionAndCreate();
+
+            assertEquals(CompressionMode.UNCOMPRESSED, openSearchClientFactory.getCompressionMode());
+            assertEquals(expectedAttempts, attempts.get());
+            assertTrue(logs.getCapturedLogEvents().stream().anyMatch(e -> e.getMessage().contains("uncompressed")
+                    && e.getMessage().contains("status " + status)),
+                "log events: " + logs.getLogEvents());
+        }
+    }
+
+    @Test
+    void getClusterVersion_collectionRoutedTarget_skipsRootRequest() {
+        when(connectionContext.isCollectionRouted()).thenReturn(true);
+
+        var version = openSearchClientFactory.getClusterVersion();
+
+        assertEquals(Flavor.AMAZON_SERVERLESS_OPENSEARCH, version.getFlavor());
+        verifyNoInteractions(restClient);
+    }
+
+    @Test
+    void detectServerlessCollectionType_sendsCollectionHeader() {
+        when(connectionContext.isCollectionRouted()).thenReturn(true);
+        var error = "{\"error\":\"KNN features not supported on TIMESERIES collection type\"}";
+        when(restClient.putAsync(anyString(), anyString(),
+            eq(Map.of("x-amz-aoss-collection-name", List.of("logs"))), isNull()))
+            .thenReturn(Mono.just(new HttpResponse(400, "", Map.of(), error)));
+
+        assertEquals(ServerlessCollectionType.TIMESERIES, openSearchClientFactory.detectServerlessCollectionType("logs"));
+    }
+
+    @Test
+    void detectServerlessCollectionType_routedCollection_retriesUndeterminedProbe() {
+        when(connectionContext.isCollectionRouted()).thenReturn(true);
+        openSearchClientFactory.collectionTypeProbeRetryDelay = Duration.ZERO;
+        var error = "{\"error\":\"KNN features not supported on SEARCH collection type\"}";
+        when(restClient.putAsync(anyString(), anyString(), eq(Map.of("x-amz-aoss-collection-name", List.of("docs"))), isNull()))
+            .thenReturn(Mono.error(new RuntimeException("connection reset")))
+            .thenReturn(Mono.just(new HttpResponse(403, "Forbidden", Map.of(), "{\"message\":\"denied\"}")))
+            .thenReturn(Mono.just(new HttpResponse(400, "", Map.of(), error)));
+
+        assertEquals(ServerlessCollectionType.SEARCH, openSearchClientFactory.detectServerlessCollectionType("docs"));
+        verify(restClient, times(3)).putAsync(anyString(), anyString(), eq(Map.of("x-amz-aoss-collection-name", List.of("docs"))), isNull());
+    }
+
+    @Test
+    void detectServerlessCollectionType_routedCollection_failsWhenTypeStaysUndetermined() {
+        when(connectionContext.isCollectionRouted()).thenReturn(true);
+        openSearchClientFactory.collectionTypeProbeRetryDelay = Duration.ZERO;
+        when(restClient.putAsync(anyString(), anyString(), eq(Map.of("x-amz-aoss-collection-name", List.of("docs"))), isNull()))
+            .thenReturn(Mono.error(new RuntimeException("connection reset")));
+
+        var thrown = assertThrows(OpenSearchClientFactory.UndeterminedCollectionTypeException.class,
+            () -> openSearchClientFactory.detectServerlessCollectionType("docs"));
+
+        assertThat(thrown.getMessage(), containsString("'docs'"));
+        verify(restClient, times(OpenSearchClientFactory.COLLECTION_TYPE_PROBE_ATTEMPTS))
+            .putAsync(anyString(), anyString(), eq(Map.of("x-amz-aoss-collection-name", List.of("docs"))), isNull());
+    }
+
+    @Test
+    void detectServerlessCollectionType_routedCollection_interruptedRetryRestoresInterrupt() {
+        when(connectionContext.isCollectionRouted()).thenReturn(true);
+        openSearchClientFactory.collectionTypeProbeRetryDelay = Duration.ofMillis(1);
+        when(restClient.putAsync(anyString(), anyString(), eq(Map.of("x-amz-aoss-collection-name", List.of("docs"))), isNull()))
+            .thenReturn(Mono.error(new RuntimeException("connection reset")));
+
+        Thread.currentThread().interrupt();
+        try {
+            assertThrows(IllegalStateException.class, () -> openSearchClientFactory.detectServerlessCollectionType("docs"));
+            assertTrue(Thread.currentThread().isInterrupted());
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
+    @Test
+    void clientsFromOneFactoryShareOneRetryBudget() {
+        setupOkResponse(restClient, "", ROOT_RESPONSE_OS_1_0_0);
+        setupOkResponse(restClient, SETTINGS_PATH, CLUSTER_SETTINGS_COMPRESSION_ENABLED);
+
+        var first = openSearchClientFactory.determineVersionAndCreate();
+        var second = openSearchClientFactory.determineVersionAndCreate();
+
+        org.junit.jupiter.api.Assertions.assertSame(first.getBulkRetryBudget(), second.getBulkRetryBudget());
+        // The test factory has no connection limit, so it installs no in-flight limit.
+        org.junit.jupiter.api.Assertions.assertNull(first.getBulkInFlightLimit());
+        var otherFactory = new OpenSearchClientFactory(connectionContext);
+        otherFactory.client = restClient;
+        org.junit.jupiter.api.Assertions.assertNotSame(first.getBulkRetryBudget(),
+            otherFactory.determineVersionAndCreate().getBulkRetryBudget());
+    }
+
+    @Test
+    void clientsFromOneFactoryShareAnInFlightLimitBoundedByMaxConnections() {
+        setupOkResponse(restClient, "", ROOT_RESPONSE_OS_1_0_0);
+        setupOkResponse(restClient, SETTINGS_PATH, CLUSTER_SETTINGS_COMPRESSION_ENABLED);
+        var factory = new OpenSearchClientFactory(connectionContext, 7);
+        factory.client = restClient;
+
+        var first = factory.determineVersionAndCreate();
+        var second = factory.determineVersionAndCreate();
+
+        org.junit.jupiter.api.Assertions.assertSame(first.getBulkInFlightLimit(), second.getBulkInFlightLimit());
+        assertEquals(7, first.getBulkInFlightLimit().max());
+    }
+
+    @Test
+    void detectServerlessCollectionType_endpointCollection_keepsNoneWhenUndetermined() {
+        when(connectionContext.isCollectionRouted()).thenReturn(true);
+        when(restClient.putAsync(anyString(), anyString(), isNull()))
+            .thenReturn(Mono.error(new RuntimeException("connection reset")));
+
+        assertEquals(ServerlessCollectionType.NONE, openSearchClientFactory.detectServerlessCollectionType());
+        verify(restClient, times(1)).putAsync(anyString(), anyString(), isNull());
     }
 }

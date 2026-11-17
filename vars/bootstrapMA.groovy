@@ -88,7 +88,8 @@ def call(Map config = [:]) {
         helmValuesFlag = "--helm-values '${pwd()}/${workloadValuesFile}'"
     }
 
-    sh """
+    try {
+        sh """
         ${bootstrap.script} \
           ${deployFlag} \
           --stack-name "${stackName}" \
@@ -107,8 +108,23 @@ def call(Map config = [:]) {
           --kubectl-context "${kubectlContext}" \
           --region ${region} \
           2>&1 | { set +x; while IFS= read -r line; do printf '%s | %s\\n' "\$(date '+%H:%M:%S')" "\$line"; done; }; exit \${PIPESTATUS[0]}
-    """
+        """
+    } catch (Exception bootstrapError) {
+        // CFN/EKS may already exist even when image building or Helm installation
+        // fails. Preserve their exports so eksPostCleanup can run EKS teardown
+        // before deleting the stack, rather than skipping it without a cluster name.
+        try {
+            recordExports(stackName, region)
+        } catch (Exception exportsError) {
+            echo "bootstrapMA: Could not recover stack exports after bootstrap failure: ${exportsError.message}"
+        }
+        throw bootstrapError
+    }
 
+    recordExports(stackName, region)
+}
+
+def recordExports(String stackName, String region) {
     def exportsMap = parseCfnExports(stackName: stackName, region: region)
     env.registryEndpoint = exportsMap['MIGRATIONS_ECR_REGISTRY']
     env.eksClusterName = exportsMap['MIGRATIONS_EKS_CLUSTER_NAME']

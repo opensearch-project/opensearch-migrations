@@ -6,6 +6,7 @@ plugins {
 
 dependencies {
     implementation project(':TrafficCapture:captureOffloader')
+    implementation project(':TrafficCapture:captureProtobufs')
     implementation project(':coreUtilities')
     implementation libs.protobuf.java
     api            libs.netty.buffer

@@ -49,7 +49,7 @@ public class AddCompressionEncodingTest extends InstrumentationTest {
                 .build(),
             null,
             testPacketCapture,
-            rootContext.getTestConnectionRequestContext(0)
+            rootContext.getTestConnectionRequestContext(0).createTransformationContext()
         );
 
         final var payloadPartSize = 511;

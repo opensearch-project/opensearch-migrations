@@ -200,8 +200,8 @@ public interface WireCaptureContexts extends IWireCaptureContexts {
         }
 
         @Override
-        public RequestContext.MetricInstruments getMetrics() {
-            return getRootInstrumentationScope().requestInstruments;
+        public MetricInstruments getMetrics() {
+            return getRootInstrumentationScope().blockingInstruments;
         }
     }
 
@@ -223,7 +223,7 @@ public interface WireCaptureContexts extends IWireCaptureContexts {
 
         public static class MetricInstruments extends CommonScopedMetricInstruments {
             private MetricInstruments(Meter meter, String activityName) {
-                super(meter, activityName);
+                super(meter, activityName, LONG_DURATION_BUCKETS_MS);
             }
         }
 
@@ -232,8 +232,8 @@ public interface WireCaptureContexts extends IWireCaptureContexts {
         }
 
         @Override
-        public RequestContext.MetricInstruments getMetrics() {
-            return getRootInstrumentationScope().requestInstruments;
+        public MetricInstruments getMetrics() {
+            return getRootInstrumentationScope().waitingForResponseInstruments;
         }
     }
 

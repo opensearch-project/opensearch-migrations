@@ -3,6 +3,8 @@ package org.opensearch.migrations.bulkload.workcoordination;
 import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Map;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 import org.opensearch.migrations.bulkload.tracing.IWorkCoordinationContexts;
@@ -31,6 +33,15 @@ public class ScopedWorkCoordinator {
         WorkItemGetter workItemIdSupplier,
         IWorkCoordinator.WorkAcquisitionOutcomeVisitor<T> visitor,
         Supplier<IWorkCoordinationContexts.ICompleteWorkItemContext> contextSupplier
+    ) throws IOException, InterruptedException {
+        return ensurePhaseCompletion(workItemIdSupplier, visitor, contextSupplier, null);
+    }
+
+    public <T> T ensurePhaseCompletion(
+        WorkItemGetter workItemIdSupplier,
+        IWorkCoordinator.WorkAcquisitionOutcomeVisitor<T> visitor,
+        Supplier<IWorkCoordinationContexts.ICompleteWorkItemContext> contextSupplier,
+        Function<IWorkCoordinator.WorkItemAndDuration.WorkItem, Map<String, Object>> metricsSupplier
     ) throws IOException, InterruptedException {
         var acquisitionResult = workItemIdSupplier.tryAcquire(workCoordinator);
         return acquisitionResult.visit(new IWorkCoordinator.WorkAcquisitionOutcomeVisitor<T>() {
@@ -66,7 +77,12 @@ public class ScopedWorkCoordinator {
                     T result = visitor.onAcquiredWork(workItem);
                     long duration = System.currentTimeMillis() - startTime;
                     log.info("Finished onAcquiredWork for work item: {} in {} ms", workItemId, duration);
-                    workCoordinator.completeWorkItem(workItemId, contextSupplier);
+                    if (metricsSupplier == null) {
+                        workCoordinator.completeWorkItem(workItemId, contextSupplier);
+                    } else {
+                        workCoordinator.completeWorkItem(
+                            workItemId, metricsSupplier.apply(workItem.getWorkItem()), contextSupplier);
+                    }
                     log.info("Marked work item {} as completed and released lease", workItemId);
                     leaseExpireTrigger.markWorkAsCompleted(workItemId);
                     return result;

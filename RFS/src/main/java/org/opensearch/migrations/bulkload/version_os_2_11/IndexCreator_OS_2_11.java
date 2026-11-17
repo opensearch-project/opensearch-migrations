@@ -3,11 +3,13 @@ package org.opensearch.migrations.bulkload.version_os_2_11;
 import java.util.Map;
 
 import org.opensearch.migrations.AwarenessAttributeSettings;
+import org.opensearch.migrations.Flavor;
 import org.opensearch.migrations.MigrationMode;
 import org.opensearch.migrations.bulkload.common.IncompatibleReplicaCountException;
 import org.opensearch.migrations.bulkload.common.InvalidResponse;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.common.RfsException;
+import org.opensearch.migrations.bulkload.common.SourceInternalIndexSettings;
 import org.opensearch.migrations.bulkload.models.IndexMetadata;
 import org.opensearch.migrations.metadata.CreationResult;
 import org.opensearch.migrations.metadata.CreationResult.CreationFailureType;
@@ -16,6 +18,7 @@ import org.opensearch.migrations.metadata.IndexCreator;
 import org.opensearch.migrations.metadata.tracing.IMetadataMigrationContexts.ICreateIndexContext;
 import org.opensearch.migrations.parsing.ObjectNodeUtils;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.AllArgsConstructor;
@@ -25,6 +28,7 @@ import lombok.extern.slf4j.Slf4j;
 @AllArgsConstructor
 public class IndexCreator_OS_2_11 implements IndexCreator {
     private static final ObjectMapper mapper = new ObjectMapper();
+    private static final String KNN_ENGINE = "engine";
 
     /**
      * Maps top-level index metadata fields from the snapshot to their corresponding
@@ -37,6 +41,11 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
 
     protected final OpenSearchClient client;
 
+    @Override
+    public IndexCreator forCollection(String serverlessCollection) {
+        return new IndexCreator_OS_2_11(client.forCollection(serverlessCollection));
+    }
+
     public CreationResult create(
         IndexMetadata index,
         MigrationMode mode,
@@ -47,6 +56,14 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
         IndexMetadataData_OS_2_11 indexMetadata = new IndexMetadataData_OS_2_11(index.getRawJson(), index.getId(), index.getName());
 
         ObjectNode settings = indexMetadata.getSettings();
+        var removedInternalSettings = SourceInternalIndexSettings.strip(settings);
+        if (!removedInternalSettings.isEmpty()) {
+            log.atDebug()
+                .setMessage("Removed source-internal settings from index '{}': {}")
+                .addArgument(index.getName())
+                .addArgument(removedInternalSettings)
+                .log();
+        }
 
         ObjectNode mappings = (ObjectNode) indexMetadata.getMappings();
         if (mappings != null) {
@@ -61,19 +78,29 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
         // but the create index API expects them as settings. Without this mapping,
         // the target gets different defaults (e.g., routing_num_shards), causing issues
         // like documents with custom routing landing on different shards.
+        // OpenSearch Serverless picks its own shard count and rejects a routing shard count
+        // below it, so these fields are not copied for Serverless targets.
         var rawJson = index.getRawJson();
-        METADATA_TO_SETTINGS.forEach((metadataField, settingName) -> {
-            var value = rawJson.path(metadataField);
-            if (!value.isMissingNode()) {
-                settings.set(settingName, value);
-                log.atDebug()
-                    .setMessage("Copied metadata field '{}' as setting '{}' = {}")
-                    .addArgument(metadataField)
-                    .addArgument(settingName)
-                    .addArgument(value)
-                    .log();
-            }
-        });
+        if (isServerlessTarget()) {
+            log.atDebug()
+                .setMessage("Target is OpenSearch Serverless, not copying metadata fields {} into settings for index '{}'")
+                .addArgument(METADATA_TO_SETTINGS.keySet())
+                .addArgument(index.getName())
+                .log();
+        } else {
+            METADATA_TO_SETTINGS.forEach((metadataField, settingName) -> {
+                var value = rawJson.path(metadataField);
+                if (!value.isMissingNode()) {
+                    settings.set(settingName, value);
+                    log.atDebug()
+                        .setMessage("Copied metadata field '{}' as setting '{}' = {}")
+                        .addArgument(metadataField)
+                        .addArgument(settingName)
+                        .addArgument(value)
+                        .log();
+                }
+            });
+        }
 
         // Assemble the request body
         ObjectNode body = mapper.createObjectNode();
@@ -91,6 +118,28 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
             result.exception(e);
         }
         return result.build();
+    }
+
+    static int removeKnnVectorEngines(JsonNode node) {
+        if (node == null || !node.isContainerNode()) {
+            return 0;
+        }
+        var removed = 0;
+        if (node instanceof ObjectNode field
+            && "knn_vector".equals(field.path("type").asText())
+            && field.get("method") instanceof ObjectNode method
+            && method.remove(KNN_ENGINE) != null) {
+            removed++;
+        }
+        for (var child : (Iterable<JsonNode>) node::elements) {
+            removed += removeKnnVectorEngines(child);
+        }
+        return removed;
+    }
+
+    private boolean isServerlessTarget() {
+        var targetVersion = client.getClusterVersion();
+        return targetVersion != null && targetVersion.getFlavor() == Flavor.AMAZON_SERVERLESS_OPENSEARCH;
     }
 
     private void checkForReplicaCountIncompatibility(ObjectNode settings, AwarenessAttributeSettings awarenessAttributeSettings) throws IncompatibleReplicaCountException {
@@ -220,6 +269,17 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
             }
 
             log.info("Reattempting creation of index '{}' after removing unsupported mapping parameters: {}", indexName, unsupportedMappingParams);
+            return;
+        }
+
+        if (invalidResponse.isUnsupportedKnnEngine()) {
+            var removed = removeKnnVectorEngines(mappings);
+            if (removed == 0) {
+                log.debug("Target rejected the knn engine parameter, but index '{}' has no knn_vector method.engine to remove", indexName);
+                throw invalidResponse;
+            }
+            log.info("Reattempting creation of index '{}' after removing method.engine from {} knn_vector field(s); the target chooses the engine",
+                indexName, removed);
             return;
         }
 

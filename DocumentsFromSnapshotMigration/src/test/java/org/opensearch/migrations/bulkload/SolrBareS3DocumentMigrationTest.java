@@ -251,6 +251,7 @@ public class SolrBareS3DocumentMigrationTest {
         String classpath = System.getProperty("java.class.path");
         String javaExecutable = Paths.get(System.getProperty("java.home"), "bin", "java").toString();
         var args = new ArrayList<>(List.of(
+            "--disable-failed-document-stream",
             "--snapshot-name", snapshotName,
             "--source-version", "SOLR_" + version.tag(),
             "--s3-repo-uri", "s3://" + BUCKET_NAME,

@@ -120,6 +120,26 @@ pub fn get_ecr_credentials(region: &str) -> std::result::Result<(String, String)
     })
 }
 
+/// The ECR calls the image mirror makes. The orchestrator goes through this so its tests can stub
+/// ECR instead of reaching AWS with whatever credentials the environment holds.
+pub trait EcrApi {
+    fn credentials(&self, region: &str) -> std::result::Result<(String, String), String>;
+    fn create_repository(&self, repo_name: &str, region: &str) -> std::result::Result<(), String>;
+}
+
+/// [`EcrApi`] through the AWS SDK.
+pub struct SdkEcr;
+
+impl EcrApi for SdkEcr {
+    fn credentials(&self, region: &str) -> std::result::Result<(String, String), String> {
+        get_ecr_credentials(region)
+    }
+
+    fn create_repository(&self, repo_name: &str, region: &str) -> std::result::Result<(), String> {
+        create_repository(repo_name, region)
+    }
+}
+
 /// Map one standard-alphabet base64 character to its 6-bit value. `=` padding
 /// and line breaks return `None` (skip); anything else is an error.
 fn base64_sextet(c: u8) -> std::result::Result<Option<u8>, &'static str> {

@@ -1,5 +1,8 @@
 package org.opensearch.migrations.tracing;
 
+import io.opentelemetry.sdk.metrics.data.MetricData;
+import io.opentelemetry.sdk.testing.exporter.InMemoryMetricReader;
+import io.opentelemetry.semconv.ServiceAttributes;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
@@ -69,5 +72,41 @@ class RootOtelContextTest {
             IllegalArgumentException.class,
             () -> RootOtelContext.normalizeOtlpEndpoint("http://", "metrics")
         );
+    }
+
+    @Test
+    void differentInstanceNamesProduceDistinctMetricResources() {
+        var firstMetric = collectMetric("proxy-one");
+        var secondMetric = collectMetric("proxy-two");
+
+        Assertions.assertNotEquals(firstMetric.getResource(), secondMetric.getResource());
+        Assertions.assertEquals(
+            "capture",
+            firstMetric.getResource().getAttribute(ServiceAttributes.SERVICE_NAME)
+        );
+        Assertions.assertEquals(
+            "proxy-one",
+            firstMetric.getResource().getAttribute(ServiceAttributes.SERVICE_INSTANCE_ID)
+        );
+        Assertions.assertEquals(
+            "proxy-two",
+            secondMetric.getResource().getAttribute(ServiceAttributes.SERVICE_INSTANCE_ID)
+        );
+    }
+
+    private static MetricData collectMetric(String instanceName) {
+        var metricReader = InMemoryMetricReader.create();
+        try (var openTelemetry = RootOtelContext.buildOpenTelemetryForCollectors(
+            new OtelCollectorEndpoints(null, "collector:4317"),
+            "capture",
+            instanceName,
+            endpoint -> metricReader
+        )) {
+            openTelemetry.getMeter("test").counterBuilder("requests").build().add(1);
+            return metricReader.collectAllMetrics().stream()
+                .filter(metric -> metric.getName().equals("requests"))
+                .findFirst()
+                .orElseThrow();
+        }
     }
 }

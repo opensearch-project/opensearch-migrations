@@ -1,0 +1,511 @@
+diff --git a/internal/controller/common.go b/internal/controller/common.go
+index b5b1e77..37998d7 100644
+--- a/internal/controller/common.go
++++ b/internal/controller/common.go
+@@ -30,8 +30,17 @@ const (
+ // It may take some time to retrieve inspect output so indicate with boolean if it's ready
+ // and use returnErr only for errors that require a change of behaviour. All other errors
+ // should just be logged.
+-func inspectTestRun(ctx context.Context, log logr.Logger, k6 *v1alpha1.TestRun, c client.Client) (
+-	inspectOutput cloud.InspectOutput, ready bool, returnErr error) {
++type localInspectResult struct {
++	Success bool   `json:"success"`
++	MaxVUs  uint64 `json:"maxVUs"`
++}
++
++func completedInitializerPod(
++	ctx context.Context,
++	log logr.Logger,
++	k6 *v1alpha1.TestRun,
++	c client.Client,
++) (pod *corev1.Pod, ready bool, returnErr error) {
+ 	var (
+ 		listOpts = &client.ListOptions{
+ 			Namespace: k6.NamespacedName().Namespace,
+@@ -66,6 +75,64 @@ func inspectTestRun(ctx context.Context, log logr.Logger, k6 *v1alpha1.TestRun,
+ 		return
+ 	}
+ 
++	return &podList.Items[0], true, nil
++}
++
++func localInspectOutputFromPod(pod *corev1.Pod) (cloud.InspectOutput, error) {
++	var inspectOutput cloud.InspectOutput
++	for _, status := range pod.Status.ContainerStatuses {
++		if status.Name != "k6" {
++			continue
++		}
++		if status.State.Terminated == nil {
++			return inspectOutput, errors.New("initializer k6 container has no terminated state")
++		}
++
++		message := strings.TrimSpace(status.State.Terminated.Message)
++		if message == "" {
++			return inspectOutput, errors.New("initializer k6 container has no termination message")
++		}
++
++		var result localInspectResult
++		if err := json.Unmarshal([]byte(message), &result); err != nil {
++			return inspectOutput, fmt.Errorf("invalid initializer termination message: %w", err)
++		}
++		if !result.Success {
++			return inspectOutput, errors.New("initializer termination message did not report success")
++		}
++
++		inspectOutput.MaxVUs = result.MaxVUs
++		return inspectOutput, nil
++	}
++
++	return inspectOutput, errors.New("initializer pod has no k6 container status")
++}
++
++func inspectLocalTestRun(ctx context.Context, log logr.Logger, k6 *v1alpha1.TestRun, c client.Client) (
++	inspectOutput cloud.InspectOutput, ready bool, returnErr error,
++) {
++	pod, ready, err := completedInitializerPod(ctx, log, k6, c)
++	if err != nil || !ready {
++		return inspectOutput, ready, err
++	}
++
++	inspectOutput, err = localInspectOutputFromPod(pod)
++	if err != nil {
++		log.Error(err, "unable to read local inspect result from initializer pod status")
++		return inspectOutput, false, err
++	}
++
++	return inspectOutput, true, nil
++}
++
++func inspectCloudTestRun(ctx context.Context, log logr.Logger, k6 *v1alpha1.TestRun, c client.Client) (
++	inspectOutput cloud.InspectOutput, ready bool, returnErr error,
++) {
++	pod, ready, err := completedInitializerPod(ctx, log, k6, c)
++	if err != nil || !ready {
++		return inspectOutput, ready, err
++	}
++
+ 	// Here we need to get the output of the pod
+ 	// pods/log is not currently supported by controller-runtime client and it is officially
+ 	// recommended to use REST client instead:
+@@ -86,7 +153,7 @@ func inspectTestRun(ctx context.Context, log logr.Logger, k6 *v1alpha1.TestRun,
+ 		returnErr = err
+ 		return
+ 	}
+-	req := clientset.CoreV1().Pods(k6.NamespacedName().Namespace).GetLogs(podList.Items[0].Name, &corev1.PodLogOptions{
++	req := clientset.CoreV1().Pods(k6.NamespacedName().Namespace).GetLogs(pod.Name, &corev1.PodLogOptions{
+ 		Container: "k6",
+ 	})
+ 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*60)
+diff --git a/internal/controller/common_test.go b/internal/controller/common_test.go
+new file mode 100644
+index 0000000..b9c101d
+--- /dev/null
++++ b/internal/controller/common_test.go
+@@ -0,0 +1,106 @@
++package controllers
++
++import (
++	"context"
++	"testing"
++
++	"github.com/go-logr/logr"
++	"github.com/grafana/k6-operator/api/v1alpha1"
++	corev1 "k8s.io/api/core/v1"
++	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
++	"sigs.k8s.io/controller-runtime/pkg/client/fake"
++)
++
++func initializerPodWithTerminationMessage(message string) *corev1.Pod {
++	return &corev1.Pod{
++		Status: corev1.PodStatus{
++			ContainerStatuses: []corev1.ContainerStatus{
++				{
++					Name: "k6",
++					State: corev1.ContainerState{
++						Terminated: &corev1.ContainerStateTerminated{Message: message},
++					},
++				},
++			},
++		},
++	}
++}
++
++func TestLocalInspectOutputFromPod(t *testing.T) {
++	output, err := localInspectOutputFromPod(
++		initializerPodWithTerminationMessage(`{"success":true,"maxVUs":131072}`),
++	)
++	if err != nil {
++		t.Fatalf("localInspectOutputFromPod errored: %v", err)
++	}
++	if output.MaxVUs != 131072 {
++		t.Fatalf("MaxVUs = %d, want 131072", output.MaxVUs)
++	}
++}
++
++func TestInspectLocalTestRunReadsOnlyThePodObject(t *testing.T) {
++	pod := initializerPodWithTerminationMessage(`{"success":true,"maxVUs":2048}`)
++	pod.ObjectMeta = metav1.ObjectMeta{
++		Name:      "test-initializer-abc",
++		Namespace: "test",
++		Labels: map[string]string{
++			"app":      "k6",
++			"k6_cr":    "test",
++			"job-name": "test-initializer",
++		},
++	}
++	pod.Status.Phase = corev1.PodSucceeded
++	k6 := &v1alpha1.TestRun{ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "test"}}
++	client := fake.NewClientBuilder().WithObjects(pod).Build()
++
++	output, ready, err := inspectLocalTestRun(context.Background(), logr.Discard(), k6, client)
++	if err != nil {
++		t.Fatalf("inspectLocalTestRun errored: %v", err)
++	}
++	if !ready {
++		t.Fatal("inspectLocalTestRun did not report a ready result")
++	}
++	if output.MaxVUs != 2048 {
++		t.Fatalf("MaxVUs = %d, want 2048", output.MaxVUs)
++	}
++}
++
++func TestLocalInspectOutputFromPodErrors(t *testing.T) {
++	tests := []struct {
++		name string
++		pod  *corev1.Pod
++	}{
++		{
++			name: "missing k6 container",
++			pod: &corev1.Pod{Status: corev1.PodStatus{
++				ContainerStatuses: []corev1.ContainerStatus{{Name: "other"}},
++			}},
++		},
++		{
++			name: "container not terminated",
++			pod: &corev1.Pod{Status: corev1.PodStatus{
++				ContainerStatuses: []corev1.ContainerStatus{{Name: "k6"}},
++			}},
++		},
++		{
++			name: "empty message",
++			pod:  initializerPodWithTerminationMessage(""),
++		},
++		{
++			name: "malformed json",
++			pod:  initializerPodWithTerminationMessage(`{"success":`),
++		},
++		{
++			name: "unsuccessful result",
++			pod:  initializerPodWithTerminationMessage(`{"success":false,"maxVUs":10}`),
++		},
++	}
++
++	for _, test := range tests {
++		t.Run(test.name, func(t *testing.T) {
++			if _, err := localInspectOutputFromPod(test.pod); err == nil {
++				t.Fatal("localInspectOutputFromPod unexpectedly succeeded")
++			}
++		})
++	}
++}
+diff --git a/internal/controller/k6_initialize.go b/internal/controller/k6_initialize.go
+index b8f6352..3996a4c 100644
+--- a/internal/controller/k6_initialize.go
++++ b/internal/controller/k6_initialize.go
+@@ -54,7 +54,13 @@ func RunValidations(ctx context.Context, log logr.Logger, k6 *v1alpha1.TestRun,
+ 	// validation has already happened, so error here can be ignored
+ 	cli, _ := types.ParseCLI(k6.GetSpec().Arguments)
+ 
+-	inspectOutput, inspectReady, err := inspectTestRun(ctx, log, k6, r.Client)
++	var inspectOutput cloud.InspectOutput
++	var inspectReady bool
++	if cli.HasCloudOut {
++		inspectOutput, inspectReady, err = inspectCloudTestRun(ctx, log, k6, r.Client)
++	} else {
++		inspectOutput, inspectReady, err = inspectLocalTestRun(ctx, log, k6, r.Client)
++	}
+ 	if err != nil {
+ 		// Cloud output test run is not created yet at this point, so sending
+ 		// events is possible only for PLZ test run.
+@@ -129,7 +135,7 @@ func RunValidations(ctx context.Context, log logr.Logger, k6 *v1alpha1.TestRun,
+ func SetupCloudTest(ctx context.Context, log logr.Logger, k6 *v1alpha1.TestRun, r *TestRunReconciler) (res ctrl.Result, err error) {
+ 	res = ctrl.Result{RequeueAfter: time.Second * 5}
+ 
+-	inspectOutput, inspectReady, err := inspectTestRun(ctx, log, k6, r.Client)
++	inspectOutput, inspectReady, err := inspectCloudTestRun(ctx, log, k6, r.Client)
+ 	if err != nil {
+ 		// This *shouldn't* fail since it was already done once. Don't requeue.
+ 		// Alternatively: store inspect options in TestRun Status? Get rid off reading logs?
+diff --git a/pkg/resources/jobs/initializer.go b/pkg/resources/jobs/initializer.go
+index 2d4f475..5bebc84 100644
+--- a/pkg/resources/jobs/initializer.go
++++ b/pkg/resources/jobs/initializer.go
+@@ -5,6 +5,7 @@ import (
+ 	"strconv"
+ 
+ 	"github.com/grafana/k6-operator/api/v1alpha1"
++	"github.com/grafana/k6-operator/pkg/types"
+ 	batchv1 "k8s.io/api/batch/v1"
+ 	corev1 "k8s.io/api/core/v1"
+ 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+@@ -31,6 +32,16 @@ func NewInitializerJob(k6 *v1alpha1.TestRun, argLine string) (*batchv1.Job, erro
+ 
+ 	if k6.GetSpec().Initializer == nil {
+ 		k6.GetSpec().Initializer = k6.GetSpec().Runner.DeepCopy()
++	} else {
++		if k6.GetSpec().Initializer.Env == nil {
++			k6.GetSpec().Initializer.Env = append([]corev1.EnvVar(nil), k6.GetSpec().Runner.Env...)
++		}
++		if k6.GetSpec().Initializer.EnvFrom == nil {
++			k6.GetSpec().Initializer.EnvFrom = append(
++				[]corev1.EnvFromSource(nil),
++				k6.GetSpec().Runner.EnvFrom...,
++			)
++		}
+ 	}
+ 
+ 	if k6.GetSpec().Initializer.Image != "" {
+@@ -69,7 +70,11 @@ func NewInitializerJob(k6 *v1alpha1.TestRun, argLine string) (*batchv1.Job, erro
+ 		archiveName = fmt.Sprintf("/tmp/%s.archived.tar", script.Filename)
+ 	)
+ 	istioCommand, istioEnabled := newIstioCommand(k6.GetSpec().Scuttle.Enabled, []string{"sh", "-c"})
+-	command := append(istioCommand, newInitializerCommand(scriptName, archiveName, envVarString, argLine))
++	cli, _ := types.ParseCLI(k6.GetSpec().Arguments)
++	command := append(
++		istioCommand,
++		newInitializerCommand(scriptName, archiveName, envVarString, argLine, cli.HasCloudOut),
++	)
+ 
+ 	env := append(newIstioEnvVar(k6.GetSpec().Scuttle, istioEnabled), k6.GetSpec().Initializer.Env...)
+ 
+@@ -112,16 +117,18 @@ func NewInitializerJob(k6 *v1alpha1.TestRun, argLine string) (*batchv1.Job, erro
+ 					InitContainers:               getInitContainers(k6.GetSpec().Initializer, script),
+ 					Containers: []corev1.Container{
+ 						{
+-							Image:           image,
+-							ImagePullPolicy: k6.GetSpec().Initializer.ImagePullPolicy,
+-							Name:            "k6",
+-							Command:         command,
+-							Env:             env,
+-							Resources:       k6.GetSpec().Initializer.Resources,
+-							VolumeMounts:    volumeMounts,
+-							EnvFrom:         k6.GetSpec().Initializer.EnvFrom,
+-							Ports:           ports,
+-							SecurityContext: &k6.GetSpec().Initializer.ContainerSecurityContext,
++							Image:                    image,
++							ImagePullPolicy:          k6.GetSpec().Initializer.ImagePullPolicy,
++							Name:                     "k6",
++							Command:                  command,
++							Env:                      env,
++							Resources:                k6.GetSpec().Initializer.Resources,
++							VolumeMounts:             volumeMounts,
++							EnvFrom:                  k6.GetSpec().Initializer.EnvFrom,
++							Ports:                    ports,
++							SecurityContext:          &k6.GetSpec().Initializer.ContainerSecurityContext,
++							TerminationMessagePath:   "/dev/termination-log",
++							TerminationMessagePolicy: corev1.TerminationMessageReadFile,
+ 						},
+ 					},
+ 					Volumes:           volumes,
+@@ -134,7 +141,7 @@ func NewInitializerJob(k6 *v1alpha1.TestRun, argLine string) (*batchv1.Job, erro
+ 	return job, nil
+ }
+ 
+-func newInitializerCommand(scriptName, archiveName, envVarString, argLine string) string {
++func newInitializerCommand(scriptName, archiveName, envVarString, argLine string, cloudOutput bool) string {
+ 	// There can be several scenarios from k6 command here:
+ 	// a) script is correct and `k6 inspect` outputs JSON;
+ 	// b) script is partially incorrect and `k6` outputs a warning log message and
+@@ -154,7 +161,7 @@ func newInitializerCommand(scriptName, archiveName, envVarString, argLine string
+ 	// any other log messages.
+ 	// Related: https://github.com/grafana/k6-docs/issues/877
+ 
+-	return fmt.Sprintf(
++	common := fmt.Sprintf(
+ 		`if ! command -v k6 >/dev/null 2>&1; then
+   echo '%[1]s' >&2
+   exit 127
+@@ -170,8 +177,17 @@ if ! k6 archive %[2]s%[4]s -O %[3]s %[5]s 2> "${logs}"; then
+   cat "${logs}"
+   exit 1
+ fi
++`,
++		initializerMissingK6Message,
++		scriptName,
++		archiveName,
++		envVarString,
++		argLine,
++	)
+ 
+-if ! k6 inspect --execution-requirements %[3]s 2> "${logs}"; then
++	if cloudOutput {
++		return common + fmt.Sprintf(`
++if ! k6 inspect --execution-requirements %[1]s 2> "${logs}"; then
+   cat "${logs}"
+   exit 1
+ fi
+@@ -179,10 +195,28 @@ fi
+ if grep 'level.*error' "${logs}"; then
+   exit 1
+ fi`,
+-		initializerMissingK6Message,
+-		scriptName,
++			archiveName,
++		)
++	}
++
++	return common + fmt.Sprintf(`
++inspect_output=/tmp/k6-inspect.json
++if ! k6 inspect --execution-requirements %[1]s > "${inspect_output}" 2> "${logs}"; then
++  cat "${logs}"
++  exit 1
++fi
++
++if grep 'level.*error' "${logs}"; then
++  exit 1
++fi
++
++max_vus="$(sed -n 's/.*"maxVUs"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "${inspect_output}" | tail -n 1)"
++if [ -z "${max_vus}" ]; then
++  echo "unable to extract maxVUs from k6 inspect output" >&2
++  exit 1
++fi
++
++printf '{"success":true,"maxVUs":%%s}\n' "${max_vus}" > /dev/termination-log`,
+ 		archiveName,
+-		envVarString,
+-		argLine,
+ 	)
+ }
+diff --git a/pkg/resources/jobs/initializer_test.go b/pkg/resources/jobs/initializer_test.go
+index bc442d5..e57ca9f 100644
+--- a/pkg/resources/jobs/initializer_test.go
++++ b/pkg/resources/jobs/initializer_test.go
+@@ -107,6 +107,7 @@ func defaultExpectedJobForInitializer() *batchv1.Job {
+ 									"/tmp/test.js.archived.tar",
+ 									"",
+ 									"--out cloud",
++									true,
+ 								),
+ 							},
+ 							Env: []corev1.EnvVar{},
+@@ -119,10 +120,12 @@ func defaultExpectedJobForInitializer() *batchv1.Job {
+ 									},
+ 								},
+ 							},
+-							Resources:       corev1.ResourceRequirements{},
+-							VolumeMounts:    script.VolumeMount(),
+-							Ports:           []corev1.ContainerPort{{ContainerPort: 6565}},
+-							SecurityContext: &corev1.SecurityContext{},
++							Resources:                corev1.ResourceRequirements{},
++							VolumeMounts:             script.VolumeMount(),
++							Ports:                    []corev1.ContainerPort{{ContainerPort: 6565}},
++							SecurityContext:          &corev1.SecurityContext{},
++							TerminationMessagePath:   "/dev/termination-log",
++							TerminationMessagePolicy: corev1.TerminationMessageReadFile,
+ 						},
+ 					},
+ 					Volumes: script.Volume(),
+@@ -132,6 +135,50 @@ func defaultExpectedJobForInitializer() *batchv1.Job {
+ 	}
+ }
+ 
++func Test_LocalInitializerWritesCompactTerminationResult(t *testing.T) {
++	k6 := defaultTestRunForInitializer()
++	k6.Spec.Arguments = ""
++
++	job, err := NewInitializerJob(k6, "")
++	if err != nil {
++		t.Fatalf("NewInitializerJob errored: %v", err)
++	}
++
++	container := job.Spec.Template.Spec.Containers[0]
++	command := strings.Join(container.Command, " ")
++	for _, want := range []string{
++		`> "${inspect_output}"`,
++		`"maxVUs"`,
++		`tail -n 1`,
++		`{"success":true,"maxVUs":%s}`,
++		`> /dev/termination-log`,
++	} {
++		if !strings.Contains(command, want) {
++			t.Errorf("local initializer command should contain %q, got: %s", want, command)
++		}
++	}
++	if container.TerminationMessagePolicy != corev1.TerminationMessageReadFile {
++		t.Fatalf("unexpected termination message policy: %s", container.TerminationMessagePolicy)
++	}
++}
++
++func Test_CloudInitializerKeepsFullInspectOutputOnStdout(t *testing.T) {
++	k6 := defaultTestRunForInitializer()
++
++	job, err := NewInitializerJob(k6, "--out cloud")
++	if err != nil {
++		t.Fatalf("NewInitializerJob errored: %v", err)
++	}
++
++	command := strings.Join(job.Spec.Template.Spec.Containers[0].Command, " ")
++	if strings.Contains(command, "inspect_output=/tmp/k6-inspect.json") {
++		t.Fatalf("cloud initializer unexpectedly selected compact local output: %s", command)
++	}
++	if strings.Contains(command, "> /dev/termination-log") {
++		t.Fatalf("cloud initializer unexpectedly writes its inspect result to termination status: %s", command)
++	}
++}
++
+ func Test_NewInitializerJob(t *testing.T) {
+ 	tests := []struct {
+ 		name             string
+@@ -210,6 +256,7 @@ func Test_InitializerEnvVarFlags(t *testing.T) {
+ 		setup            func(k6 *v1alpha1.TestRun)
+ 		expectedInCmd    []string
+ 		expectedInEnvVar []string
++		expectedEnvFrom  string
+ 		noEFlag          bool
+ 	}{
+ 		{
+@@ -237,6 +284,28 @@ func Test_InitializerEnvVarFlags(t *testing.T) {
+ 			expectedInCmd:    []string{`-e FOO="bar"`},
+ 			expectedInEnvVar: []string{"FOO"},
+ 		},
++		{
++			name: "explicit initializer inherits runner env",
++			setup: func(k6 *v1alpha1.TestRun) {
++				k6.Spec.Initializer = &v1alpha1.Pod{Image: "custom-k6"}
++				k6.Spec.Runner = v1alpha1.Pod{
++					Env: []corev1.EnvVar{
++						{Name: "RATE", Value: "160000"},
++						{Name: "DURATION", Value: "2h"},
++					},
++					EnvFrom: []corev1.EnvFromSource{
++						{
++							SecretRef: &corev1.SecretEnvSource{
++								LocalObjectReference: corev1.LocalObjectReference{Name: "auth"},
++							},
++						},
++					},
++				}
++			},
++			expectedInCmd:    []string{`-e RATE="160000"`, `-e DURATION="2h"`},
++			expectedInEnvVar: []string{"RATE", "DURATION"},
++			expectedEnvFrom:  "auth",
++		},
+ 		{
+ 			name:    "no env vars",
+ 			setup:   func(k6 *v1alpha1.TestRun) {},
+@@ -305,6 +374,14 @@ func Test_InitializerEnvVarFlags(t *testing.T) {
+ 					t.Errorf("command should NOT contain `-e`, got: %s", cmd)
+ 				}
+ 			}
++
++			if tt.expectedEnvFrom != "" {
++				envFrom := job.Spec.Template.Spec.Containers[0].EnvFrom
++				if len(envFrom) != 1 || envFrom[0].SecretRef == nil ||
++					envFrom[0].SecretRef.Name != tt.expectedEnvFrom {
++					t.Errorf("container envFrom should inherit secret %q, got: %v", tt.expectedEnvFrom, envFrom)
++				}
++			}
+ 		})
+ 	}
+ }

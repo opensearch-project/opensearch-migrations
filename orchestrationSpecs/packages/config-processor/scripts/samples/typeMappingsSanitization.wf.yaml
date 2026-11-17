@@ -1,17 +1,20 @@
 sourceClusters:
-  prod-solr:
+  prodSolr:
     version: "SOLR 8.11.4"
     endpoint: "https://solr.example.com:8983"
 
 targetClusters:
-  prod-os:
+  prodOs:
     endpoint: "https://target.example.com:9200"
+
+snapshotMigrationConfigs: []
 
 traffic:
   proxies:
     capture:
-      source: prod-solr
+      source: prodSolr
       proxyConfig:
+        listenPort: 9201
         tls:
           mode: certManager
           issuerRef:
@@ -25,7 +28,7 @@ traffic:
   replayers:
     replay:
       fromCapturedTraffic: capture
-      toTarget: prod-os
+      toTarget: prodOs
       replayerConfig:
         requestTransforms:
           - transformName: TypeMappingSanitizationTransformerProvider

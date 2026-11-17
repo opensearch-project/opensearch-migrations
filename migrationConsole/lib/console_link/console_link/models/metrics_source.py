@@ -263,7 +263,10 @@ class PrometheusMetricsSource(MetricsSource):
         r = requests.get(
             f"{self.endpoint}/api/v1/query_range",
             params={  # type: ignore
-                "query": f'{metric}{{exported_job="{prometheus_component_names(component)}"}}',
+                "query": (
+                    "sum without (exported_instance, service_instance_id, instance, pod)"
+                    f'({metric}{{exported_job="{prometheus_component_names(component)}"}})'
+                ),
                 "start": start_time.timestamp(),
                 "end": end_time.timestamp(),
                 "step": period_in_seconds,

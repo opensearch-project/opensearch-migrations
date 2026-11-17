@@ -1,0 +1,48 @@
+{
+  "sourceClusters": {
+    "source": {
+      "version": "ES 7.10.2",
+      "endpoint": "https://my-domain.cn-northwest-1.es.amazonaws.com.cn",
+      "authConfig": {
+        "sigv4": {
+          "region": "cn-northwest-1"
+        }
+      },
+      "snapshotInfo": {
+        "repos": {
+          "default": {
+            "awsRegion": "cn-northwest-1",
+            "repoPathUri": "s3://my-snapshot-bucket/snapshots",
+            "s3RoleArn": "arn:aws-cn:iam::123456789012:role/SnapshotRole"
+          }
+        },
+        "snapshots": {
+          "snap1": {
+            "repoName": "default",
+            "config": {
+              "createSnapshotConfig": {}
+            }
+          }
+        }
+      }
+    }
+  },
+  "targetClusters": {
+    "target": {
+      "endpoint": "http://target:9200"
+    }
+  },
+  "snapshotMigrationConfigs": [
+    {
+      "fromSource": "source",
+      "toTarget": "target",
+      "perSnapshotConfig": {
+        "snap1": [
+          {
+            "metadataMigrationConfig": {}
+          }
+        ]
+      }
+    }
+  ]
+}

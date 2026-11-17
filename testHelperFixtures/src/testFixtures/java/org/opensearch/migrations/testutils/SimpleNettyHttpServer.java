@@ -66,6 +66,17 @@ public class SimpleNettyHttpServer implements AutoCloseable {
         return makeNettyServer(useTls, null, r -> makeContext.apply(new RequestToAdapter(r)));
     }
 
+    public static SimpleNettyHttpServer makeServerWithResponses(
+        boolean useTls,
+        Function<HttpRequest, List<SimpleHttpResponse>> makeContexts
+    ) throws Exception {
+        return makeNettyServerWithResponses(
+            useTls,
+            null,
+            r -> makeContexts.apply(new RequestToAdapter(r))
+        );
+    }
+
     public static SimpleNettyHttpServer makeNettyServer(
         boolean useTls,
         Function<FullHttpRequest, SimpleHttpResponse> makeContext
@@ -110,15 +121,44 @@ public class SimpleNettyHttpServer implements AutoCloseable {
         );
     }
 
+    private static SimpleNettyHttpServer makeNettyServerWithResponses(
+        boolean useTls,
+        Duration readTimeout,
+        Function<FullHttpRequest, List<SimpleHttpResponse>> makeContexts
+    ) throws Exception {
+        SSLEngineSupplier sslEngineSupplier = null;
+        if (useTls) {
+            SSLContext javaSslContext = SelfSignedSSLContextBuilder.getSSLContext();
+            sslEngineSupplier = allocator -> {
+                SSLEngine engine = javaSslContext.createSSLEngine();
+                engine.setUseClientMode(false);
+                return engine;
+            };
+        }
+        return makeNettyServerWithSSLResponses(sslEngineSupplier, readTimeout, makeContexts);
+    }
+
     private static SimpleNettyHttpServer makeNettyServerWithSSL(
         SSLEngineSupplier sslEngineSupplier,
         Duration readTimeout,
         Function<FullHttpRequest, SimpleHttpResponse> makeContext
     ) throws PortFinder.ExceededMaxPortAssigmentAttemptException {
+        return makeNettyServerWithSSLResponses(
+            sslEngineSupplier,
+            readTimeout,
+            request -> List.of(makeContext.apply(request))
+        );
+    }
+
+    private static SimpleNettyHttpServer makeNettyServerWithSSLResponses(
+        SSLEngineSupplier sslEngineSupplier,
+        Duration readTimeout,
+        Function<FullHttpRequest, List<SimpleHttpResponse>> makeContexts
+    ) throws PortFinder.ExceededMaxPortAssigmentAttemptException {
         var testServerRef = new AtomicReference<SimpleNettyHttpServer>();
         PortFinder.retryWithNewPortUntilNoThrow(port -> {
             try {
-                testServerRef.set(new SimpleNettyHttpServer(port, readTimeout, makeContext, sslEngineSupplier));
+                testServerRef.set(new SimpleNettyHttpServer(port, readTimeout, makeContexts, sslEngineSupplier));
             } catch (Exception e) {
                 throw Lombok.sneakyThrow(e);
             }
@@ -159,13 +199,8 @@ public class SimpleNettyHttpServer implements AutoCloseable {
         return rval;
     }
 
-    private SimpleChannelInboundHandler<FullHttpRequest> makeHandlerFromResponseContext(
-        Function<HttpRequest, SimpleHttpResponse> responseBuilder) {
-        return makeHandlerFromNettyResponseContext(r -> responseBuilder.apply(new RequestToAdapter(r)));
-    }
-
-    private SimpleChannelInboundHandler<FullHttpRequest> makeHandlerFromNettyResponseContext(
-        Function<FullHttpRequest, SimpleHttpResponse> responseBuilder)
+    private SimpleChannelInboundHandler<FullHttpRequest> makeHandlerFromNettyResponseContexts(
+        Function<FullHttpRequest, List<SimpleHttpResponse>> responseBuilders)
     {
         return new SimpleChannelInboundHandler<>() {
             @Override
@@ -175,22 +210,28 @@ public class SimpleNettyHttpServer implements AutoCloseable {
                         ctx.close();
                         return;
                     }
-                    var specifiedResponse = responseBuilder.apply(req);
-                    var fullResponse = new DefaultFullHttpResponse(
-                        HttpVersion.HTTP_1_1,
-                        HttpResponseStatus.valueOf(specifiedResponse.statusCode, specifiedResponse.statusText),
-                        Unpooled.wrappedBuffer(specifiedResponse.payloadBytes),
-                        convertHeaders(specifiedResponse.headers),
-                        new DefaultHttpHeaders()
-                    );
-                    log.atInfo().setMessage(() -> "writing " + fullResponse).log();
-                    var cf = ctx.writeAndFlush(fullResponse);
-                    log.atInfo().setMessage(() -> "wrote " + fullResponse).log();
-                    cf.addListener(
-                        f -> log.atInfo()
-                            .setMessage(() -> "success=" + f.isSuccess() + " finished writing " + fullResponse)
-                            .log()
-                    );
+                    var responses = responseBuilders.apply(req);
+                    if (responses.isEmpty()) {
+                        throw new IllegalArgumentException("response script must contain a final response");
+                    }
+                    for (var specifiedResponse : responses) {
+                        var fullResponse = new DefaultFullHttpResponse(
+                            HttpVersion.HTTP_1_1,
+                            HttpResponseStatus.valueOf(specifiedResponse.statusCode, specifiedResponse.statusText),
+                            Unpooled.wrappedBuffer(specifiedResponse.payloadBytes),
+                            convertHeaders(specifiedResponse.headers),
+                            new DefaultHttpHeaders()
+                        );
+                        log.atInfo().setMessage(() -> "writing " + fullResponse).log();
+                        var cf = ctx.write(fullResponse);
+                        cf.addListener(
+                            f -> log.atInfo()
+                                .setMessage(() -> "success=" + f.isSuccess()
+                                    + " finished writing " + fullResponse)
+                                .log()
+                        );
+                    }
+                    ctx.flush();
                 } catch (Exception e) {
                     log.atWarn().setCause(e).log("Closing connection due to exception");
                     ctx.close();
@@ -207,7 +248,7 @@ public class SimpleNettyHttpServer implements AutoCloseable {
     SimpleNettyHttpServer(
         int port,
         Duration timeout,
-        Function<FullHttpRequest, SimpleHttpResponse> responseBuilder,
+        Function<FullHttpRequest, List<SimpleHttpResponse>> responseBuilders,
         SSLEngineSupplier sslEngineSupplier
     ) throws Exception {
         this.port = port;
@@ -234,7 +275,7 @@ public class SimpleNettyHttpServer implements AutoCloseable {
                     pipeline.addLast(new HttpObjectAggregator(16 * 1024));
                     pipeline.addLast(new LoggingHandler("C"));
                     pipeline.addLast(new HttpResponseEncoder());
-                    pipeline.addLast(makeHandlerFromNettyResponseContext(responseBuilder));
+                    pipeline.addLast(makeHandlerFromNettyResponseContexts(responseBuilders));
                 }
             });
         serverChannel = b.bind(port).sync().channel();

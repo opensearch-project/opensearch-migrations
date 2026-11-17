@@ -93,7 +93,7 @@ class Test0034CdcOnlyAossTarget(MATestBase):
 
     def post_migration_actions(self):
         logger.info("Waiting for capture-proxy service to be ready...")
-        wait_for_proxy_ready(self.argo_service.namespace)
+        wait_for_proxy_ready(self.argo_service.namespace, workflow_name=self.workflow_name)
         logger.info("Waiting for replayer to join Kafka consumer group...")
         wait_for_replayer_consuming(namespace=self.argo_service.namespace, workflow_name=self.workflow_name)
         log_kafka_consumer_group_state(label="replay-start")
@@ -171,7 +171,10 @@ class Test0041CdcFullE2eAossTarget(MATestBase):
         self.workflow_snapshot_and_migration_config = [{
             "migrations": [{
                 "metadataMigrationConfig": {"indexAllowlist": allowlist},
-                "documentBackfillConfig": {"indexAllowlist": allowlist},
+                "documentBackfillConfig": {
+                    "failedDocumentStream": {"type": "disabled"},
+                    "indexAllowlist": allowlist,
+                },
             }]
         }]
 
@@ -191,7 +194,7 @@ class Test0041CdcFullE2eAossTarget(MATestBase):
 
         # --- Pre-snapshot: generate-data via proxy ---
         logger.info("Waiting for capture-proxy to be ready...")
-        wait_for_proxy_ready(ns, timeout_seconds)
+        wait_for_proxy_ready(ns, timeout_seconds, workflow_name=self.workflow_name)
 
         # Topic-record counts bracket the pre-snapshot generate-data. No consumer
         # group exists yet, so this is the earliest confirmation that the capture

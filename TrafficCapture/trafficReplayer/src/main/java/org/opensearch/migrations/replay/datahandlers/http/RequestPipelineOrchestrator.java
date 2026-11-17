@@ -1,5 +1,7 @@
 package org.opensearch.migrations.replay.datahandlers.http;
 
+
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -191,10 +193,6 @@ public class RequestPipelineOrchestrator<R> {
         pipeline.addLast(new NettyJsonContentStreamToByteBufHandler());
         addLoggingHandler(pipeline, "I");
         addBaselineHandlers(pipeline);
-    }
-
-    List<List<Integer>> getChunkSizes() {
-        return chunkSizes;
     }
 
     void addBaselineHandlers(ChannelPipeline pipeline) {

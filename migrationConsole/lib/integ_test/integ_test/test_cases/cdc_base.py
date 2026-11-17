@@ -6,6 +6,7 @@ import logging
 import subprocess
 import time
 from typing import Optional, Sequence
+from urllib.parse import urlsplit, urlunsplit
 
 from kubernetes import client, config as k8s_config
 from kubernetes.client.rest import ApiException
@@ -23,13 +24,16 @@ logger = logging.getLogger(__name__)
 PROXY_DEPLOYMENT_NAME = "capture-proxy"
 PROXY_RESOURCE_NAME = "capture-proxy"
 PROXY_SERVICE_NAME = "capture-proxy"
-REPLAYER_LABEL_SELECTOR = "app=replayer"
-PROXY_LABEL_SELECTOR = "migrations/proxy=capture-proxy"
-PROXY_ENDPOINT = "https://capture-proxy:9201"
+PROXY_PORT = 9201
+REPLAYER_LABEL_SELECTOR = "migrations.opensearch.org/component=traffic-replayer"
+PROXY_LABEL_SELECTOR = "migrations.opensearch.org/component=capture-proxy"
+PROXY_ENDPOINT = f"https://capture-proxy:{PROXY_PORT}"
 CDC_SOURCE_TARGET_COMBINATIONS = CDC_MIGRATION_COMBINATIONS
 PROXY_READY_TIMEOUT_SECONDS = 3600
 REPLAYER_POD_READY_BUFFER_SECONDS = 20 * 60
 DEFAULT_REPLAYER_POD_READY_TIMEOUT_SECONDS = PROXY_READY_TIMEOUT_SECONDS + REPLAYER_POD_READY_BUFFER_SECONDS
+CONSUMER_GROUP_PROBE_TIMEOUT_SECONDS = 120
+CONSUMER_GROUP_ASSIGNMENT_TIMEOUT_SECONDS = 300
 FAILED_DEPENDENCY_PHASES = {"Error", "Failed"}
 MIGRATION_WORKFLOW_PREFIX = "migration-workflow"
 
@@ -92,12 +96,20 @@ def wait_for_pod_ready(namespace: str, label_selector: str, timeout_seconds: int
     raise TimeoutError(f"No pod with label '{label_selector}' reached Ready within {timeout_seconds}s")
 
 
-def wait_for_proxy_ready(namespace: str, timeout_seconds: int = 1200):
+def wait_for_proxy_ready(
+    namespace: str,
+    timeout_seconds: int = 1200,
+    *,
+    workflow_name: str,
+) -> str:
     """Wait until the CaptureProxy CR is Ready.
 
     The workflow owns pod, Service, endpoint, and load-balancer readiness.
     Tests gate only on the parent CaptureProxy CR status and inspect lower-level
     objects only when collecting diagnostics after an Error or timeout.
+
+    Returns the externally load-balanced HTTPS endpoint when one is present.
+    ClusterIP-only environments such as kind fall back to the service endpoint.
     """
     load_k8s_config()
 
@@ -112,11 +124,17 @@ def wait_for_proxy_ready(namespace: str, timeout_seconds: int = 1200):
                 "captureproxy/%s is Ready: serviceEndpoint=%s loadBalancerEndpoint=%s",
                 PROXY_RESOURCE_NAME, service_endpoint or "<unset>", load_balancer_endpoint or "<unset>",
             )
-            return
+            endpoint = (load_balancer_endpoint or service_endpoint).strip()
+            if not endpoint:
+                raise RuntimeError(
+                    f"captureproxy/{PROXY_RESOURCE_NAME} is Ready but publishes no endpoint"
+                )
+            return _normalize_proxy_endpoint(endpoint, service_endpoint)
         if phase == "Error":
             _dump_proxy_readiness_diagnostics(namespace)
             raise RuntimeError(f"captureproxy/{PROXY_RESOURCE_NAME} entered Error phase: {message}")
         _raise_if_kafka_cluster_error(namespace)
+        _raise_if_argo_workflow_error(namespace, [workflow_name])
 
         elapsed = int(time.monotonic() - (deadline - timeout_seconds))
         logger.info(
@@ -129,6 +147,18 @@ def wait_for_proxy_ready(namespace: str, timeout_seconds: int = 1200):
 
     _dump_proxy_readiness_diagnostics(namespace)
     raise TimeoutError(f"captureproxy/{PROXY_RESOURCE_NAME} did not reach Ready within {timeout_seconds}s")
+
+
+def _normalize_proxy_endpoint(endpoint: str, service_endpoint: str) -> str:
+    """Return an HTTPS proxy URL, adding the service port when the LB omits it."""
+    normalized = endpoint if "://" in endpoint else f"https://{endpoint}"
+    parsed = urlsplit(normalized)
+    if parsed.port is not None:
+        return normalized
+
+    service = service_endpoint if "://" in service_endpoint else f"//{service_endpoint}"
+    service_port = urlsplit(service).port or PROXY_PORT
+    return urlunsplit(parsed._replace(netloc=f"{parsed.netloc}:{service_port}"))
 
 
 def _get_capture_proxy_readiness_status(namespace: str) -> tuple[str, str, str, str]:
@@ -424,7 +454,7 @@ def _dump_argo_workflow_diagnostics(namespace: str) -> None:
 
 def wait_for_replayer_consuming(
     namespace: str,
-    timeout_seconds: int = 120,
+    timeout_seconds: int = CONSUMER_GROUP_ASSIGNMENT_TIMEOUT_SECONDS,
     interval: int = 5,
     pod_ready_timeout_seconds: int = DEFAULT_REPLAYER_POD_READY_TIMEOUT_SECONDS,
     workflow_name: Optional[str] = None,
@@ -456,17 +486,13 @@ def wait_for_replayer_consuming(
         _raise_if_cdc_dependency_error(namespace, [workflow_name] if workflow_name else None,
                                        parked_gate_watcher)
         try:
-            result = subprocess.run(
-                ["kubectl", "logs", "-l", REPLAYER_LABEL_SELECTOR, "-n", namespace, "--tail=100"],
-                capture_output=True, text=True, timeout=15
-            )
-            for line in result.stdout.split("\n"):
-                if "KafkaHeartbeat" in line and "partitions=" in line:
-                    logger.info("Replayer is actively consuming from Kafka")
-                    return
+            if _consumer_group_has_active_assignment():
+                logger.info("Replayer has an active Kafka consumer-group assignment")
+                return
         except Exception as e:
-            logger.debug("Replayer log check failed: %s", e)
+            logger.debug("Replayer consumer-group check failed: %s", e)
         time.sleep(interval)
+    _emit_describe_snapshot("replayer-readiness-timeout", None, 30)
     log_replayer_diagnostics(namespace)
     raise TimeoutError(
         f"Replayer did not join Kafka consumer group within {timeout_seconds}s. "
@@ -492,6 +518,75 @@ def log_replayer_diagnostics(namespace: str):
                 logger.info("%s stderr:\n%s", command, result.stderr.strip())
         except Exception as e:
             logger.info("Failed to collect replayer diagnostics for kubectl %s: %s", " ".join(args), e)
+
+
+def _heartbeat_reports_progress(line: str) -> bool:
+    required_summary_fields = (
+        "generation=",
+        "partitions=",
+        "inflight=",
+        "commitHead=",
+        "commitTail=",
+        "queueSize=",
+        "polls=",
+        "emptyPolls=",
+        "commits=",
+        "readyToCommit=",
+        "pendingCommitPartitions=",
+        "recordsRead=",
+        "recordsCommitted=",
+    )
+    if "KafkaHeartbeat" not in line:
+        return False
+    heartbeat_message = line.split("KafkaHeartbeat", 1)[1]
+    partition_states_marker = " partitionStates="
+    if partition_states_marker not in heartbeat_message:
+        return False
+    summary, partition_states_and_shutdown = heartbeat_message.split(partition_states_marker, 1)
+    has_summary_fields = all(field in summary for field in required_summary_fields)
+    has_shutdown_field = " shutdown=" in partition_states_and_shutdown
+    if not has_summary_fields or not has_shutdown_field:
+        return False
+    for token in summary.split():
+        if token.startswith("recordsRead="):
+            try:
+                return int(token.removeprefix("recordsRead=").rstrip(",")) > 0
+            except ValueError:
+                return False
+    return False
+
+
+def assert_replayer_heartbeat_logging(namespace: str, timeout_seconds: int = 45,
+                                      interval_seconds: float = 2.0) -> None:
+    """Require the deployed replayer to emit its periodic progress contract.
+
+    This is an observability assertion only. Readiness and drain use Kafka's
+    consumer-group state and never depend on this log.
+    """
+    deadline = time.monotonic() + timeout_seconds
+    last_logs = ""
+    while time.monotonic() < deadline:
+        try:
+            result = subprocess.run(
+                ["kubectl", "logs", "-l", REPLAYER_LABEL_SELECTOR, "-n", namespace, "--since=90s"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            last_logs = result.stdout or ""
+            if result.returncode == 0 and any(
+                _heartbeat_reports_progress(line) for line in last_logs.splitlines()
+            ):
+                logger.info("Observed deployed KafkaHeartbeat progress contract")
+                return
+        except Exception as e:  # noqa: BLE001 - preserve diagnostics on an assertion path
+            logger.debug("Replayer heartbeat log check failed: %s", e)
+        time.sleep(interval_seconds)
+    log_replayer_diagnostics(namespace)
+    raise AssertionError(
+        f"Replayer did not emit a KafkaHeartbeat progress line within {timeout_seconds}s. "
+        f"Last captured logs:\n{last_logs[-4000:]}"
+    )
 
 
 def _dump_kafka_readiness_diagnostics(namespace: str) -> None:
@@ -541,8 +636,10 @@ def run_generate_data(cluster: str, index_name: str, num_docs: int):
     logger.info("generate-data output: %s", result.stdout.strip())
 
 
-def _run_describe_consumer_group(group_name: Optional[str],
-                                 probe_timeout_seconds: int = 15) -> Optional[str]:
+def _run_describe_consumer_group(
+    group_name: Optional[str],
+    probe_timeout_seconds: int = CONSUMER_GROUP_PROBE_TIMEOUT_SECONDS,
+) -> Optional[str]:
     """Run `console kafka describe-consumer-group` and return its stdout, or
     None if the group does not exist / the command failed / timed out.
 
@@ -568,7 +665,7 @@ def _iter_native_describe_rows(describe_output: str):
     """Yield column-name -> token dicts for each data row of the native
     `kafka-consumer-groups.sh --describe` table embedded in describe_output.
 
-    The augmented `PARTITION TIME LAG` section is skipped because it has its
+    The augmented `REPLAY WATERMARK` section is skipped because it has its
     own header. We anchor on the native header row (`GROUP TOPIC PARTITION
     CURRENT-OFFSET LOG-END-OFFSET LAG ...`) and split subsequent non-blank
     rows by whitespace; rows shorter than the header are ignored.
@@ -584,7 +681,7 @@ def _iter_native_describe_rows(describe_output: str):
             if tokens[0] == "GROUP" and "PARTITION" in tokens and "CURRENT-OFFSET" in tokens:
                 header_indices = {tok: i for i, tok in enumerate(tokens)}
             continue
-        # Skip the augmented "PARTITION TIME LAG" sub-table: its header starts
+        # Skip the augmented "REPLAY WATERMARK" sub-table: its header starts
         # with TOPIC, not GROUP, so we drop the native header on a blank line
         # (above) and refuse to parse rows under a non-native header here.
         if "GROUP" not in header_indices:
@@ -594,15 +691,32 @@ def _iter_native_describe_rows(describe_output: str):
         yield {col: tokens[idx] for col, idx in header_indices.items()}
 
 
-def _consumer_group_max_lag(group_name: Optional[str] = None,
-                            probe_timeout_seconds: int = 15) -> Optional[int]:
+def _consumer_group_has_active_assignment(
+    group_name: Optional[str] = None,
+    probe_timeout_seconds: int = CONSUMER_GROUP_PROBE_TIMEOUT_SECONDS,
+) -> bool:
+    """Return whether Kafka reports at least one partition assigned to a live consumer."""
+    out = _run_describe_consumer_group(group_name, probe_timeout_seconds)
+    if out is None:
+        return False
+    return any(
+        row.get("PARTITION", "-") not in ("", "-") and
+        row.get("CONSUMER-ID", "-") not in ("", "-")
+        for row in _iter_native_describe_rows(out)
+    )
+
+
+def _consumer_group_max_lag(
+    group_name: Optional[str] = None,
+    probe_timeout_seconds: int = CONSUMER_GROUP_PROBE_TIMEOUT_SECONDS,
+) -> Optional[int]:
     """Return the maximum LAG across all partitions in the consumer-group
     describe table, or None if the group is missing / the describe failed /
     no parseable LAG values are present.
 
     A row whose LAG is `-` (no committed offset yet) is treated as unbounded
     lag and forces the function to return None — callers will keep polling
-    until at least one commit lands.
+    until at least one replayer commit lands.
     """
     out = _run_describe_consumer_group(group_name, probe_timeout_seconds)
     if out is None:
@@ -623,6 +737,47 @@ def _consumer_group_max_lag(group_name: Optional[str] = None,
     return max_lag if saw_row else None
 
 
+def _consumer_group_offsets(
+    group_name: Optional[str] = None,
+    probe_timeout_seconds: int = CONSUMER_GROUP_PROBE_TIMEOUT_SECONDS,
+) -> Optional[dict]:
+    """Return {(topic, partition): (committed offset or None, log-end offset)} from the describe
+    table, or None if the group is missing, the describe failed, or no row parses.
+
+    A committed offset of `-` (nothing committed yet) maps to None.
+    """
+    out = _run_describe_consumer_group(group_name, probe_timeout_seconds)
+    if out is None:
+        return None
+    offsets = {}
+    for row in _iter_native_describe_rows(out):
+        try:
+            key = (row.get("TOPIC", ""), int(row.get("PARTITION", "-")))
+            end = int(row.get("LOG-END-OFFSET", "-"))
+        except ValueError:
+            return None
+        current_token = row.get("CURRENT-OFFSET", "-")
+        try:
+            current = None if current_token in ("-", "") else int(current_token)
+        except ValueError:
+            return None
+        offsets[key] = (current, end)
+    return offsets or None
+
+
+def _behind_snapshot(snapshot: dict, offsets: dict) -> Optional[int]:
+    """Largest number of records, on any partition, between its committed offset and its
+    log-end offset at snapshot time. None while any snapshot partition is missing or uncommitted.
+    """
+    worst = 0
+    for key, (_, snapshot_end) in snapshot.items():
+        current = offsets.get(key, (None, None))[0]
+        if current is None:
+            return None
+        worst = max(worst, snapshot_end - current)
+    return worst
+
+
 class ReplayLagDrainTimeout(AssertionError):
     """Raised when the replayer consumer-group fails to drain to the requested
     max-lag threshold within the configured timeout.
@@ -636,11 +791,15 @@ def _wait_for_consumer_group_caught_up(group_name: Optional[str], label: str,
                                        max_allowed_lag: int,
                                        timeout_seconds: int,
                                        interval_seconds: float = 3.0) -> tuple:
-    """Bounded poll until the group's max per-partition LAG drops to <=
-    `max_allowed_lag`. Returns (succeeded: bool, last_observed: Optional[int]).
+    """Bounded poll until every partition has committed to within `max_allowed_lag` records of the
+    log-end offset it had when the wait began. Returns (succeeded: bool, last_observed: Optional[int]),
+    where last_observed is that largest remaining gap.
 
-    LAG=`-` on any partition (no commit yet) keeps the wait polling — the
-    time-lag table is uninformative until at least one auto-commit lands.
+    Records produced after the wait begins do not count. Capture proxies keep appending heartbeat
+    records for as long as they run, so live LAG never settles on an otherwise drained replay; what
+    matters is that everything already captured when the check started has been committed.
+
+    An uncommitted partition (`-`) keeps the wait polling until at least one replayer commit lands.
 
     The replayer's in-order commit constraint (OffsetLifecycleTracker) can
     keep LAG=1 around well after every response landed on the target because
@@ -652,23 +811,35 @@ def _wait_for_consumer_group_caught_up(group_name: Optional[str], label: str,
     deadline = start + timeout_seconds
     attempt = 0
     last_observed: Optional[int] = None
+    snapshot: Optional[dict] = None
     display_name = group_name if group_name is not None else "<workflow-resolved>"
     while time.monotonic() < deadline:
         attempt += 1
-        observed = _consumer_group_max_lag(group_name)
+        offsets = _consumer_group_offsets(group_name)
+        if snapshot is None and offsets is not None:
+            snapshot = offsets
+            logger.info("[%s] Consumer group '%s': waiting for %d partition(s) to commit up to their "
+                        "log-end offsets as of now (%d records in total)",
+                        label, display_name, len(snapshot), sum(end for _, end in snapshot.values()))
+        observed = None if snapshot is None or offsets is None else _behind_snapshot(snapshot, offsets)
+        live_lag = None if offsets is None else max(
+            (end - (current if current is not None else 0) for current, end in offsets.values()), default=None)
         last_observed = observed
         elapsed = int(time.monotonic() - start)
-        # Log the LAG trajectory every poll so a slow/recovering drain (e.g. a
+        # Log the trajectory every poll so a slow/recovering drain (e.g. a
         # replayer pod evicted mid-run, cold-restarting, then re-draining its
         # backlog) is visible as it happens instead of only at success/timeout.
-        logger.info("[%s] Consumer group '%s' max LAG=%s (target <=%d) "
-                    "[probe %d, elapsed=%ds/%ds]",
+        logger.info("[%s] Consumer group '%s' max records behind start-of-check offsets=%s "
+                    "(target <=%d; live max LAG=%s) [probe %d, elapsed=%ds/%ds]",
                     label, display_name,
                     "<unparsed>" if observed is None else observed,
-                    max_allowed_lag, attempt, elapsed, timeout_seconds)
+                    max_allowed_lag,
+                    "<unparsed>" if live_lag is None else live_lag,
+                    attempt, elapsed, timeout_seconds)
         if observed is not None and observed <= max_allowed_lag:
-            logger.info("[%s] Consumer group '%s' drained to LAG=%d (<=%d) after %d probe(s)",
-                        label, display_name, observed, max_allowed_lag, attempt)
+            logger.info("[%s] Consumer group '%s' committed everything captured before the check "
+                        "(within %d record(s)) after %d probe(s)",
+                        label, display_name, max_allowed_lag, attempt)
             return True, observed
         time.sleep(interval_seconds)
     logger.warning(
@@ -716,7 +887,7 @@ def _emit_describe_snapshot(label: str, group_name: Optional[str],
 def log_kafka_consumer_group_state(label: str, group_name: Optional[str] = None,
                                    timeout_seconds: int = 120) -> None:
     """Pure snapshot: run `console kafka describe-consumer-group` and log
-    its output (including the per-partition TIME LAG section). Used for
+    its output (including the per-partition REPLAY WATERMARK section). Used for
     in-progress checkpoints like [replay-start] where the replayer hasn't
     drained yet — no waits, no asserts.
 
@@ -798,8 +969,10 @@ def assert_replay_drained(label: str = "replay-end",
                           describe_timeout_seconds: int = 120,
                           dump_topic: Optional[str] = "capture-proxy",
                           dump_timeout_seconds: int = 300) -> None:
-    """Wait for the replayer consumer-group to drain to max per-partition
-    LAG <=`max_lag`, log the describe snapshot, and raise on timeout.
+    """Wait for the replayer consumer-group to commit, on every partition, to
+    within `max_lag` records of the log-end offset it had when the wait began;
+    log the describe snapshot, and raise on timeout. Records appended after the
+    wait begins (capture-proxy heartbeats, for instance) do not hold it open.
 
     Use at the post-verification checkpoint ([replay-end]). Without this
     assertion, `verify_clusters` happily passes when the target has the

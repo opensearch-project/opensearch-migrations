@@ -27,6 +27,7 @@ RENDERED=$(helm template test "$CHART_DIR" \
   -f "$CHART_DIR/valuesEks.yaml" \
   -f "$VALUES_FILE" \
   --set stageName=verify --set aws.region=us-east-1 --set aws.account=123456789012 \
+  --set-string aws.eksClusterName=verify-cluster \
   2>/dev/null)
 
 # Public registries that should NOT appear in image references

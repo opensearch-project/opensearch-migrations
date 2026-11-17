@@ -68,6 +68,11 @@ The Rust CLI is the operator-oriented entry point. Developers who need to
 build and deploy the currently checked-out source should use
 `aws-bootstrap.sh` directly, as described below.
 
+For an end-to-end walkthrough that builds from source, creates a self-managed
+Elasticsearch source and an Amazon OpenSearch Service domain or Serverless
+collection target, runs a backfill plus capture and replay, and observes it, see
+[Quick start: self-managed Elasticsearch to Amazon OpenSearch](quickstarts/selfManagedEsToAmazonOpenSearch/README.md).
+
 ## Build and deploy the current checkout
 
 The repository's `aws-bootstrap.sh` workflow builds the CloudFormation
@@ -96,7 +101,15 @@ repository root:
 ```
 
 To rebuild and reinstall the current checkout on an existing Migration
-Assistant CloudFormation/EKS deployment:
+Assistant CloudFormation/EKS deployment, first remove the installed release.
+The script only installs: it stops if a release named after `--namespace`
+already exists. `helm uninstall` runs the chart's pre-delete hook, which stops
+and deletes migration workflows and resources and empties the deployment's S3
+bucket, so finish or save anything you need first.
+
+```bash
+helm uninstall ma -n ma
+```
 
 ```bash
 ./deployment/k8s/aws/aws-bootstrap.sh \
@@ -112,7 +125,16 @@ script resolves the correct CloudFormation exports. `--build` and `--version`
 are mutually exclusive. Run `./deployment/k8s/aws/aws-bootstrap.sh --help` for
 the existing-VPC and other deployment options.
 
-## Configuring the general workload NodePool
+The redeployment command also preserves the cluster's current EKS Auto Mode
+`NodeClass`; it does not require `--stack-name` or repeating the original
+`--tags`. The persistent bootstrap `NodePool` is used when present, otherwise
+the script requires one unambiguous in-cluster `NodeClass` reference. A custom
+class's tags are reused for Helm-created EBS and load-balancer resources. The
+script stops before building or installing if the selection is ambiguous,
+missing, or not Ready. An explicit `aws.nodeClassName` in `--helm-values`
+continues to take precedence.
+
+## Configuring workload NodePools
 
 The EKS deployment's main workload pool, `general-work-pool`, can be tuned by
 passing a Helm values override file through `--helm-values`:
@@ -125,15 +147,18 @@ passing a Helm values override file through `--helm-values`:
   --helm-values ./deployment/k8s/aws/examples/nodepool-overrides.yaml
 ```
 
-By default the pool leaves instance selection, including the capacity type,
-to EKS Auto Mode, within the instance types Auto Mode supports. With no
-capacity type, Auto Mode prefers spot over on-demand, and a spot interruption
-stops the migration work on that node; set `capacityTypes: ["on-demand"]` for
-migrations that must not be interrupted. The sample file at
+By default, instance family and size selection remain with EKS Auto Mode.
+Dedicated RFS, Kafka, proxy and replayer pools require On-Demand capacity
+because interruptions affect backfill progress, capture availability and
+replay-rate stability. The shared pool and dedicated k6 pool leave capacity
+type unconstrained, so Auto Mode may select Spot for them. The sample file at
 [`examples/nodepool-overrides.yaml`](./examples/nodepool-overrides.yaml)
-narrows the pool to on-demand c/m/r instances of generation 5 and newer, up to
-`4xlarge`. It sets each of these fields:
+requires On-Demand for every pool and narrows selection to c/m/r instances of
+generation 5 and newer, up to `4xlarge`. It pins the RFS pool to one exact
+benchmark SKU. It demonstrates these fields:
 
+- `workloadsNodePool.mode`
+- `workloadsNodePool.instanceTypes`
 - `workloadsNodePool.architectures`
 - `workloadsNodePool.capacityTypes`
 - `workloadsNodePool.instanceCategories`
@@ -144,15 +169,58 @@ narrows the pool to on-demand c/m/r instances of generation 5 and newer, up to
 - `workloadsNodePool.disruption.consolidationPolicy`
 - `workloadsNodePool.disruption.consolidateAfter`
 
+`workloadsNodePool.mode` selects the data-plane placement model:
+
+- `shared` keeps RFS workers, Kafka, capture proxies, and replayers together on `general-work-pool`.
+- `isolated` gives RFS workers, Kafka, capture proxies, and replayers separate tainted NodePools.
+
+`isolated` is the default for EKS deployments. Set the mode to `shared` to
+consolidate RFS workers, Kafka, capture proxies, and replayers onto `general-work-pool`.
+
+The optional k6 load generator uses a separate tainted pool in both modes.
+Generated pods carry a required node selector as well as the matching
+toleration, so a toleration cannot accidentally allow them to fall back onto
+a different pool.
+
+Isolation does not require `NodePool.spec.limits`. Limits are optional total
+capacity ceilings for cost or quota control. Per-pool limits and instance
+requirements can be set below:
+
+- `workloadsNodePool.dedicatedPools.rfs`
+- `workloadsNodePool.dedicatedPools.kafka`
+- `workloadsNodePool.dedicatedPools.proxy`
+- `workloadsNodePool.dedicatedPools.replayer`
+- `workloadsNodePool.dedicatedPools.k6`
+
+Dedicated pools inherit the shared instance types, architecture, capacity
+type, instance category, minimum generation, instance size, and disruption
+settings unless they override them. RFS, Kafka, proxy and replayer override
+the default capacity type with `["on-demand"]`; any pool can explicitly select
+`["spot"]`, `["on-demand"]`, or another EKS-supported capacity type through
+its own `capacityTypes` value. Their `limits` are independent and empty by
+default.
+
+Set `instanceTypes` to select exact EC2 SKUs, for example
+`instanceTypes: ["c6id.24xlarge"]`. A non-empty `instanceTypes` list replaces
+the architecture, category, generation and size filters for that pool. This
+lets a dedicated pool inherit general selection defaults without those
+defaults excluding its exact SKU.
+
+In `shared` mode, RFS, Kafka, proxies, and replayers necessarily use the
+shared pool's single capacity policy. Set `workloadsNodePool.capacityTypes:
+["on-demand"]` when using shared mode if backfill, proxy, or replay
+interruption is not acceptable.
+
 Values files follow normal Helm merge behavior: map fields merge by key, scalar
 conflicts are resolved by the later source, and list fields replace the full
 default list. For example, overriding `workloadsNodePool.disruption.consolidateAfter`
 alone keeps the default `consolidationPolicy`, while overriding `instanceSizes`
 requires supplying the full desired size list.
 
-The pool has no `limits` by default, so its size is bounded only by the
+The pools have no `limits` by default, so their size is bounded only by the
 account's EC2 vCPU quotas. Set `workloadsNodePool.limits.cpu` and/or
-`workloadsNodePool.limits.memory` to cap it.
+`workloadsNodePool.limits.memory` to cap the shared pool, or set `limits` under
+an individual dedicated pool to cap that pool.
 
 Disruption defaults to `consolidationPolicy: WhenEmpty`, so running migration
 pods are never moved to repack nodes, with `consolidateAfter: 0s`, so empty
@@ -163,11 +231,11 @@ which do move running pods.
 
 To check an override file without deploying, run
 [`examples/check-nodepool-overrides.sh`](./examples/check-nodepool-overrides.sh)
-with it. The script runs `helm lint` and prints the NodePool that would be
+with it. The script runs `helm lint` and prints the NodePools that would be
 rendered. It only needs `helm`. The bootstrap itself checks that each
 `--helm-values` file exists before doing anything else. Once the cluster
-exists, and before it mirrors or builds images, it also renders
-`general-work-pool` from those files and validates it against the cluster's
+exists, and before it mirrors or builds images, it also renders the workload
+NodePools from those files and validates them against the cluster's
 NodePool CRD with a server-side dry run, which catches values EKS would reject
 (for example an invalid `consolidateAfter`). The dry run is skipped with
 `--use-general-node-pool`, which does not create the pool.
@@ -231,6 +299,11 @@ flags. Use `aws-bootstrap.sh` directly when you need that functionality.
     StorageClass so provisioned volumes are tagged;
   - emits load balancer tag annotations for any Service or Ingress the
     chart creates.
+
+On a later `--skip-cfn-deploy` run, the script reads the retained custom
+`NodeClass` and its tags back from the cluster. You do not need to repeat
+`--tags`, and the BuildKit and Migration Assistant `NodePool`s are reconciled
+to the same class.
 
 This requires the cluster IAM role to permit user-defined tags on Auto
 Mode resources. The solution CloudFormation template declares that

@@ -487,7 +487,7 @@ traffic:
       source: prod-es
   replayers:
     replay:
-      fromProxy: capture
+      fromCapturedTraffic: capture
       toTarget: prod-os
       replayerConfig:
         transformsSource: my-transforms

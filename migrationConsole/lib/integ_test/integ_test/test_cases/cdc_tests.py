@@ -5,6 +5,7 @@ from .cdc_base import (
     MATestBase, MigrationType, MATestUserArguments,
     CDC_SOURCE_TARGET_COMBINATIONS, wait_for_replayer_consuming,
     make_proxy_cluster, log_kafka_consumer_group_state, assert_replay_drained,
+    assert_replayer_heartbeat_logging,
 )
 
 logger = logging.getLogger(__name__)
@@ -73,3 +74,4 @@ class Test0031CdcOnlyLiveTraffic(MATestBase):
             )
         finally:
             assert_replay_drained(label="replay-end")
+        assert_replayer_heartbeat_logging(self.argo_service.namespace)

@@ -5,8 +5,22 @@ import java.util.EnumMap;
 import java.util.Objects;
 import java.util.function.LongSupplier;
 
+/**
+ * Limits repeated diagnostic stack traces for failures that occur before a frontside TLS
+ * connection has established a usable client channel. {@link ProxyChannelInitializer} creates one
+ * instance and shares it across its frontside TLS exception handlers, allowing the first occurrence
+ * of a known failure to be logged immediately while suppressing equivalent logs for a bounded
+ * interval. The next log after that interval reports how many occurrences were suppressed.
+ *
+ * <p>This class controls log volume only. It does not identify clients, authenticate them, rate
+ * limit connections, change channel handling, or provide denial-of-service protection. The caller
+ * still applies the normal failure behavior to every occurrence; currently that means closing each
+ * channel whose frontside TLS handshake fails. State is process-local, uses monotonic time, and is
+ * bounded by the fixed set of {@link KnownEvent} values rather than by client address.
+ */
 class UnauthenticatedClientLogDeduper {
 
+    /** Failure categories whose repeated diagnostic logs may be coalesced independently. */
     enum KnownEvent {
         FRONTSIDE_TLS_HANDSHAKE_FAILURE
     }
@@ -30,6 +44,11 @@ class UnauthenticatedClientLogDeduper {
         }
     }
 
+    /**
+     * Records one occurrence and decides whether its diagnostic should be emitted. A logging
+     * decision includes the number of equivalent events suppressed since the previous emitted
+     * diagnostic.
+     */
     synchronized LogDecision recordOccurrence(KnownEvent knownEvent) {
         var eventState = eventStates.get(Objects.requireNonNull(knownEvent));
         var now = nanoTimeSupplier.getAsLong();
@@ -55,6 +74,7 @@ class UnauthenticatedClientLogDeduper {
         }
     }
 
+    /** Immutable instruction returned to the exception handler for one observed event. */
     static class LogDecision {
         private static final LogDecision SUPPRESS = new LogDecision(false, 0);
 

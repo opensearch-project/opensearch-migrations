@@ -151,7 +151,7 @@ class S3FailedDocumentStreamSinkLocalStackTest {
             .sessionId("sess-LS").workerId("worker-1").targetIndex(index).documentId(docId)
             .failureType("mapper_parsing_exception").failureClass(FailureClass.NON_RETRYABLE)
             .timestamp(Instant.parse("2026-05-14T12:00:00Z").toString())
-            .requestItem(req).responseItem(resp)
+            .target(req).responseItem(resp)
             .build();
     }
 }

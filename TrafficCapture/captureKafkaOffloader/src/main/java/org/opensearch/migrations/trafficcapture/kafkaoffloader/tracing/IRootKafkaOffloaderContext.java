@@ -6,6 +6,8 @@ import org.opensearch.migrations.tracing.commoncontexts.IConnectionContext;
 public interface IRootKafkaOffloaderContext extends IInstrumentConstructor {
     KafkaRecordContext.MetricInstruments getKafkaOffloadingInstruments();
 
+    CapturePublishingMetrics getCapturePublishingMetrics();
+
     default KafkaRecordContext createKafkaRecordContext(
         IConnectionContext telemetryContext,
         String topicNameForTraffic,

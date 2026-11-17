@@ -49,13 +49,7 @@ public class Uid {
         return Base64.getUrlEncoder().withoutPadding().encodeToString(idBytes);
     }
 
-    /** Decode an indexed id back to its original form.
-     *  @see <a href="https://github.com/elastic/elasticsearch/blob/6.8/server/src/main/java/org/elasticsearch/index/mapper/Uid.java#L232">org.elasticsearch.index.mapper.Uid#encodeId</a> */
-    public static String decodeId(byte[] idBytes) {
-        return decodeId(idBytes, 0, idBytes.length);
-    }
-
-    /** Decode an indexed id back to its original form.
+    /** Decode an indexed id back to its original form. Callers must preserve the field's offset and length.
      *  @see <a href="https://github.com/elastic/elasticsearch/blob/6.8/server/src/main/java/org/elasticsearch/index/mapper/Uid.java#L232">org.elasticsearch.index.mapper.Uid#encodeId</a> */
     public static String decodeId(byte[] idBytes, int offset, int length) {
         if (length == 0) {

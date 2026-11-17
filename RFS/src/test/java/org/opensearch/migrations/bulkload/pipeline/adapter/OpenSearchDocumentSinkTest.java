@@ -3,25 +3,42 @@ package org.opensearch.migrations.bulkload.pipeline.adapter;
 import java.util.List;
 import java.util.Map;
 
+import org.opensearch.migrations.bulkload.common.CollectionRoutedTarget;
+import org.opensearch.migrations.bulkload.common.DocumentChangeType;
 import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
+import org.opensearch.migrations.bulkload.common.LuceneDocumentChange;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
+import org.opensearch.migrations.bulkload.common.ServerlessCollectionRouting;
+import org.opensearch.migrations.bulkload.common.bulk.BulkOperationSpec;
+import org.opensearch.migrations.bulkload.common.bulk.IndexOp;
+import org.opensearch.migrations.bulkload.pipeline.model.CollectionMetadata;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
+import org.opensearch.migrations.bulkload.transformers.BulkOperationTransformer;
 import org.opensearch.migrations.transform.IJsonTransformer;
+import org.opensearch.migrations.transform.TransformationLoader;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import reactor.core.publisher.Mono;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -36,22 +53,120 @@ class OpenSearchDocumentSinkTest {
         Mono.just(new OpenSearchClient.BulkResponse(200, "", null, "{}"));
 
     @Test
-    void writeBatch_noTransformer_usesRawPath() {
-        when(client.sendBulkRequestRaw(anyString(), anyList(), any(), anyBoolean(), any())).thenReturn(OK);
+    void writeBatch_collectionRouted_sendsCollectionAndDecidesIdsPerCollection() {
+        var tsClient = collectionClient("ts");
+        var searchClient = collectionClient("search");
+        when(tsClient.sendBulkRequestPreparedRaw(anyString(), anyList(), any(), any(), eq(1))).thenReturn(OK);
+        when(searchClient.sendBulkRequestPreparedRaw(anyString(), anyList(), any(), any(), eq(1))).thenReturn(OK);
+        var routing = ServerlessCollectionRouting.fromJson(
+            "{\"regexCollectionRouting\": [{\"sourceIndex\": \"(.+)-\\\\d+\", \"collection\": \"$1\"}]}").orElseThrow();
+        var routedTarget = new CollectionRoutedTarget(routing, collection -> collection.equals("ts"));
+        var sink = new OpenSearchDocumentSink(client, null, false, DocumentExceptionAllowlist.empty(), null, routedTarget);
+        var docs = List.of(doc("d1", "{\"a\":1}"));
+
+        sink.writeBatch("ts-1", docs).block();
+        sink.writeBatch("search-1", docs).block();
+
+        ArgumentCaptor<List<OpenSearchClient.PreparedRawDocument>> tsDocs = ArgumentCaptor.forClass(List.class);
+        ArgumentCaptor<List<OpenSearchClient.PreparedRawDocument>> searchDocs = ArgumentCaptor.forClass(List.class);
+        verify(tsClient).sendBulkRequestPreparedRaw(eq("ts-1"), tsDocs.capture(), isNull(), any(), eq(1));
+        verify(searchClient).sendBulkRequestPreparedRaw(eq("search-1"), searchDocs.capture(), isNull(), any(), eq(1));
+        assertFalse(new String(tsDocs.getValue().get(0).prepared().action()).contains("\"_id\""));
+        assertTrue(new String(searchDocs.getValue().get(0).prepared().action()).contains("\"_id\":\"d1\""));
+        verify(client, never()).sendBulkRequestPreparedRaw(anyString(), anyList(), any(), any(), anyInt());
+    }
+
+    @Test
+    void createCollection_collectionRouted_createsIndexInItsCollection() {
+        var routing = ServerlessCollectionRouting.fromJson(
+            "{\"regexCollectionRouting\": [{\"sourceIndex\": \"(.+)-\\\\d+\", \"collection\": \"$1\"}]}").orElseThrow();
+        var routedTarget = new CollectionRoutedTarget(routing, collection -> false);
+        var sink = new OpenSearchDocumentSink(client, null, false, DocumentExceptionAllowlist.empty(), null, routedTarget);
+        var esClient = collectionClient("es");
+        var solrClient = collectionClient("solr");
+        var plainClient = collectionClient("plain");
+        var mappings = new ObjectMapper().createObjectNode().put("dynamic", true);
+
+        sink.createCollection(new CollectionMetadata("es-1", 1, Map.of(CollectionMetadata.ES_NUMBER_OF_SHARDS, 1))).block();
+        sink.createCollection(new CollectionMetadata("solr-1", 1, Map.of(CollectionMetadata.ES_MAPPINGS, mappings))).block();
+        sink.createCollection(new CollectionMetadata("plain-1", 1, Map.of())).block();
+
+        verify(esClient).createIndex(eq("es-1"), any(), isNull());
+        verify(solrClient).createIndex(eq("solr-1"), any(), isNull());
+        verify(plainClient).createIndex(eq("plain-1"), any(), isNull());
+        verify(client, never()).createIndex(any(), any(), any());
+    }
+
+    @Test
+    void createCollection_notRouted_createsIndexWithoutCollection() {
         var sink = new OpenSearchDocumentSink(client, null, false, DocumentExceptionAllowlist.empty(), null);
-        var docs = List.of(doc("d1", "{\"a\":1}"), doc("d2", "{\"b\":2}"));
+
+        sink.createCollection(new CollectionMetadata("plain-1", 1, Map.of())).block();
+
+        verify(client).createIndex(eq("plain-1"), any(), isNull());
+        verify(client, never()).forCollection(any());
+    }
+
+    @SuppressWarnings("unchecked")
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void writeBatch_collectionRoutedWithRenamingTransformer_routesBySourceIndex(boolean nativeTransformer) {
+        ArgumentCaptor<List<BulkOperationSpec>> captor = ArgumentCaptor.forClass(List.class);
+        var tsClient = collectionClient("ts");
+        var searchClient = collectionClient("search");
+        when(tsClient.sendBulkRequest(anyString(), captor.capture(), any(), anyBoolean(), any(), eq(1))).thenReturn(OK);
+        when(searchClient.sendBulkRequest(anyString(), captor.capture(), any(), anyBoolean(), any(), eq(1))).thenReturn(OK);
+        IJsonTransformer renamer = nativeTransformer
+            ? (BulkOperationTransformer) ops -> {
+                ops.forEach(op -> ((IndexOp) op).getOperation().setIndex("renamed"));
+                return ops;
+            }
+            : input -> {
+                for (var m : (List<Map<String, Object>>) input) {
+                    ((Map<String, Object>) m.get("operation")).put("_index", "renamed");
+                }
+                return input;
+            };
+        var routing = ServerlessCollectionRouting.fromJson(
+            "{\"regexCollectionRouting\": [{\"sourceIndex\": \"(.+)-\\\\d+\", \"collection\": \"$1\"}]}").orElseThrow();
+        var routedTarget = new CollectionRoutedTarget(routing, collection -> collection.equals("ts"));
+        var sink = new OpenSearchDocumentSink(client, () -> renamer, false, DocumentExceptionAllowlist.empty(), null, routedTarget);
+        var docs = List.of(doc("d1", "{\"a\":1}"));
+
+        sink.writeBatch("ts-1", docs).block();
+        sink.writeBatch("search-1", docs).block();
+
+        verify(tsClient).sendBulkRequest(eq("ts-1"), anyList(), isNull(), eq(true), any(), eq(1));
+        verify(searchClient).sendBulkRequest(eq("search-1"), anyList(), isNull(), eq(false), any(), eq(1));
+        verify(client, never()).sendBulkRequest(anyString(), anyList(), any(), anyBoolean(), any(), anyInt());
+        assertEquals(2, captor.getAllValues().size());
+        for (var sent : captor.getAllValues()) {
+            assertEquals("renamed", ((IndexOp) sent.get(0)).getOperation().getIndex());
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void writeBatch_noTransformer_usesRawPath(boolean loadedIdentity) {
+        when(client.sendBulkRequestPreparedRaw(anyString(), anyList(), any(), any(), eq(1))).thenReturn(OK);
+        var sink = new OpenSearchDocumentSink(client,
+            loadedIdentity ? () -> new TransformationLoader().getTransformerFactoryLoader(null) : null,
+            false, DocumentExceptionAllowlist.empty(), null);
+        var versioned = new LuceneAdapter().fromLucene(new LuceneDocumentChange(0, "d1", null,
+            "{\"a\":1}".getBytes(), null, DocumentChangeType.INDEX, 7L));
+        var docs = List.of(versioned, doc("d2", "{\"b\":2}"));
 
         var result = sink.writeBatch("idx", docs).block();
 
         assertNotNull(result);
         assertEquals(2, result.docsInBatch());
-        verify(client).sendBulkRequestRaw(eq("idx"), eq(docs), isNull(), eq(false), any());
-        verify(client, never()).sendBulkRequest(anyString(), anyList(), any(), anyBoolean(), any());
+        verify(client).sendBulkRequestPreparedRaw(eq("idx"), anyList(), isNull(), any(), eq(1));
+        verify(client, never()).sendBulkRequest(anyString(), anyList(), any(), anyBoolean(), any(), anyInt());
     }
 
     @Test
     void writeBatch_withTransformer_usesTransformPath() {
-        when(client.sendBulkRequest(anyString(), anyList(), any(), anyBoolean(), any())).thenReturn(OK);
+        when(client.sendBulkRequest(anyString(), anyList(), any(), anyBoolean(), any(), eq(1))).thenReturn(OK);
 
         IJsonTransformer identity = input -> input;
         var sink = new OpenSearchDocumentSink(client, () -> identity, false, DocumentExceptionAllowlist.empty(), null);
@@ -59,13 +174,13 @@ class OpenSearchDocumentSinkTest {
 
         sink.writeBatch("idx", docs).block();
 
-        verify(client).sendBulkRequest(eq("idx"), anyList(), isNull(), eq(false), any());
+        verify(client).sendBulkRequest(eq("idx"), anyList(), isNull(), eq(false), any(), eq(1));
         verify(client, never()).sendBulkRequestRaw(anyString(), anyList(), any(), anyBoolean(), any());
     }
 
     @Test
     void writeBatch_returnsBatchResultWithCorrectByteCounts() {
-        when(client.sendBulkRequestRaw(anyString(), anyList(), any(), anyBoolean(), any())).thenReturn(OK);
+        when(client.sendBulkRequestPreparedRaw(anyString(), anyList(), any(), any(), eq(1))).thenReturn(OK);
         var sink = new OpenSearchDocumentSink(client, null, false, DocumentExceptionAllowlist.empty(), null);
         byte[] src1 = "{\"x\":1}".getBytes();
         byte[] src2 = "{\"y\":2}".getBytes();
@@ -83,7 +198,7 @@ class OpenSearchDocumentSinkTest {
 
     @Test
     void writeBatch_nullSourceBytes_countsAsZeroBytes() {
-        when(client.sendBulkRequestRaw(anyString(), anyList(), any(), anyBoolean(), any())).thenReturn(OK);
+        when(client.sendBulkRequestPreparedRaw(anyString(), anyList(), any(), any(), eq(1))).thenReturn(OK);
         var sink = new OpenSearchDocumentSink(client, null, false, DocumentExceptionAllowlist.empty(), null);
         var docs = List.of(
             new Document("d1", null, Document.Operation.DELETE, Map.of(), Map.of())
@@ -98,7 +213,7 @@ class OpenSearchDocumentSinkTest {
 
     @Test
     void writeBatch_clientError_propagates() {
-        when(client.sendBulkRequestRaw(anyString(), anyList(), any(), anyBoolean(), any()))
+        when(client.sendBulkRequestPreparedRaw(anyString(), anyList(), any(), any(), eq(1)))
             .thenReturn(Mono.error(new RuntimeException("bulk failed")));
 
         var sink = new OpenSearchDocumentSink(client, null, false, DocumentExceptionAllowlist.empty(), null);
@@ -114,7 +229,7 @@ class OpenSearchDocumentSinkTest {
     @SuppressWarnings("unchecked")
     @Test
     void writeBatch_withTypeMappingTransformer_handlesPolyglotTypes() {
-        when(client.sendBulkRequest(anyString(), anyList(), any(), anyBoolean(), any())).thenReturn(OK);
+        when(client.sendBulkRequest(anyString(), anyList(), any(), anyBoolean(), any(), eq(1))).thenReturn(OK);
 
         // Use the real TypeMappingSanitization transformer (GraalVM/JS-based) which returns
         // PolyglotList/PolyglotMap types that must be normalized to native Java types
@@ -137,13 +252,13 @@ class OpenSearchDocumentSinkTest {
         var result = sink.writeBatch("source_index", docs).block();
 
         assertNotNull(result);
-        verify(client).sendBulkRequest(eq("source_index"), anyList(), isNull(), eq(false), any());
+        verify(client).sendBulkRequest(eq("source_index"), anyList(), isNull(), eq(false), any(), eq(1));
     }
 
     @SuppressWarnings("unchecked")
     @Test
     void writeBatch_transformerModifiesDocs_sendsTransformed() {
-        when(client.sendBulkRequest(anyString(), anyList(), any(), anyBoolean(), any())).thenReturn(OK);
+        when(client.sendBulkRequest(anyString(), anyList(), any(), anyBoolean(), any(), eq(1))).thenReturn(OK);
 
         IJsonTransformer identity = input -> input;
         var sink = new OpenSearchDocumentSink(client, () -> identity, false, DocumentExceptionAllowlist.empty(), null);
@@ -151,7 +266,7 @@ class OpenSearchDocumentSinkTest {
 
         sink.writeBatch("idx", docs).block();
 
-        verify(client).sendBulkRequest(eq("idx"), anyList(), isNull(), eq(false), any());
+        verify(client).sendBulkRequest(eq("idx"), anyList(), isNull(), eq(false), any(), eq(1));
         verify(client, never()).sendBulkRequestRaw(anyString(), anyList(), any(), anyBoolean(), any());
     }
 
@@ -162,7 +277,7 @@ class OpenSearchDocumentSinkTest {
         // (pre-transformation) source so a failed document stream record can report the source document.
         org.mockito.ArgumentCaptor<List<org.opensearch.migrations.bulkload.common.bulk.BulkOperationSpec>> captor =
             org.mockito.ArgumentCaptor.forClass(List.class);
-        when(client.sendBulkRequest(anyString(), captor.capture(), any(), anyBoolean(), any())).thenReturn(OK);
+        when(client.sendBulkRequest(anyString(), captor.capture(), any(), anyBoolean(), any(), eq(1))).thenReturn(OK);
 
         // Transformer mutates the document body in place.
         IJsonTransformer mutate = input -> {
@@ -190,7 +305,7 @@ class OpenSearchDocumentSinkTest {
         // failed document stream will fall back to the transformed body.
         org.mockito.ArgumentCaptor<List<org.opensearch.migrations.bulkload.common.bulk.BulkOperationSpec>> captor =
             org.mockito.ArgumentCaptor.forClass(List.class);
-        when(client.sendBulkRequest(anyString(), captor.capture(), any(), anyBoolean(), any())).thenReturn(OK);
+        when(client.sendBulkRequest(anyString(), captor.capture(), any(), anyBoolean(), any(), eq(1))).thenReturn(OK);
 
         IJsonTransformer renamer = input -> {
             for (var m : (List<Map<String, Object>>) input) {
@@ -210,5 +325,49 @@ class OpenSearchDocumentSinkTest {
 
     private static Document doc(String id, String json) {
         return new Document(id, json.getBytes(), Document.Operation.UPSERT, Map.of(), Map.of());
+    }
+
+    private OpenSearchClient collectionClient(String collection) {
+        var collectionClient = mock(OpenSearchClient.class);
+        when(client.forCollection(collection)).thenReturn(collectionClient);
+        return collectionClient;
+    }
+
+    private static final byte[] UNCONVERTIBLE = {0x01, 0x02, 0x03, (byte) 0xFF};
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void writeBatch_withTransformer_unconvertibleSourceFailsOnlyThatDocument() {
+        IJsonTransformer identity = input -> input;
+        when(client.sendBulkRequest(anyString(), anyList(), any(), anyBoolean(), any(), eq(1))).thenReturn(OK);
+        var sink = new OpenSearchDocumentSink(client, () -> identity, false, DocumentExceptionAllowlist.empty(), null);
+        var bad = new Document("d2", UNCONVERTIBLE, Document.Operation.UPSERT, Map.of(), Map.of());
+
+        var result = sink.writeBatch("idx", List.of(doc("d1", "{\"a\":1}"), bad, doc("d3", "{\"c\":3}"))).block();
+
+        assertNotNull(result);
+        assertEquals(3, result.docsInBatch());
+        assertEquals(1, result.failures().nonRetryable());
+        verify(client).reportInvalidDocumentSource(eq("idx"), eq("d2"), eq(UNCONVERTIBLE), any(), isNull());
+        org.mockito.ArgumentCaptor<List<BulkOperationSpec>> sent = org.mockito.ArgumentCaptor.forClass(List.class);
+        verify(client).sendBulkRequest(eq("idx"), sent.capture(), isNull(), eq(false), any(), eq(1));
+        assertEquals(List.of("d1", "d3"), sent.getValue().stream().map(op -> op.getOperation().getId()).toList());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void writeBatch_withTransformer_unconvertiblePriorSourceDoesNotBlockADelete() {
+        IJsonTransformer identity = input -> input;
+        when(client.sendBulkRequest(anyString(), anyList(), any(), anyBoolean(), any(), eq(1))).thenReturn(OK);
+        var sink = new OpenSearchDocumentSink(client, () -> identity, false, DocumentExceptionAllowlist.empty(), null);
+        var delete = new Document("d1", UNCONVERTIBLE, Document.Operation.DELETE, Map.of(), Map.of());
+
+        sink.writeBatch("idx", List.of(delete)).block();
+
+        verify(client, never()).reportInvalidDocumentSource(any(), any(), any(), any(), any());
+        org.mockito.ArgumentCaptor<List<BulkOperationSpec>> sent = org.mockito.ArgumentCaptor.forClass(List.class);
+        verify(client).sendBulkRequest(eq("idx"), sent.capture(), isNull(), eq(false), any(), eq(1));
+        assertEquals(1, sent.getValue().size());
+        assertEquals("d1", sent.getValue().get(0).getOperation().getId());
     }
 }

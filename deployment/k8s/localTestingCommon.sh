@@ -43,6 +43,11 @@ print_next_steps() {
   echo
   echo "Helm releases:"
   helm --kube-context "${KUBE_CONTEXT}" -n ma list
+  if [[ -n "${KIND_LOGS_DIR:-}" ]]; then
+    echo
+    echo "Logs (one directory per node; also at /shared-logs-output in the migration console):"
+    echo "  ${KIND_LOGS_DIR}"
+  fi
 }
 
 detect_platform() {
@@ -84,7 +89,9 @@ build_local_images() {
   echo "Using local image tag: ${image_tag}"
   echo "Using build registry endpoint: ${BUILD_REGISTRY_ENDPOINT}"
   if [[ "${image_tag}" != "latest" ]]; then
-    gradle_args+=("-PimageVersion=${image_tag}")
+    # Push only this tag, so a build with its own tag doesn't overwrite other clusters' :latest
+    # images in the shared local registry.
+    gradle_args+=("-PimageVersion=${image_tag}" "-PimageVersionOnly=true")
   fi
   if [[ -n "${BUILD_CONTAINER_REGISTRY_ENDPOINT:-}" ]]; then
     echo "Using container-visible registry endpoint for builds: ${BUILD_CONTAINER_REGISTRY_ENDPOINT}"
@@ -93,10 +100,15 @@ build_local_images() {
 
   print_step "Building container images for ${platform}"
   # buildKitLoadTestAll_* is listed separately: buildImagesToRegistry_* no longer builds the k6
-  # scripts image, because load-test images are their own aggregate (see buildImages/build.gradle).
+  # runner or patched operator, because load-test images are their own aggregate.
   # Load-test cases (Test008x) need it in the registry before the k6LoadTest chart can run.
-  gradlew ":buildImages:buildImagesToRegistry_${platform}" \
-    ":buildImages:buildKitLoadTestAll_${platform}" \
+  # SKIP_LOAD_TEST_IMAGES=true leaves them out, for runs that don't use k6 or networks where their
+  # Go module downloads fail.
+  local build_targets=(":buildImages:buildImagesToRegistry_${platform}")
+  if [[ "${SKIP_LOAD_TEST_IMAGES:-false}" != "true" ]]; then
+    build_targets+=(":buildImages:buildKitLoadTestAll_${platform}")
+  fi
+  gradlew "${build_targets[@]}" \
     -Pbuilder="${builder_name}" \
     -PregistryEndpoint="${BUILD_REGISTRY_ENDPOINT}" \
     "${gradle_args[@]}"
@@ -147,8 +159,8 @@ deploy_local_charts() {
     print_step "Installing local source and target test clusters"
     helm --kube-context "${KUBE_CONTEXT}" upgrade --install --create-namespace -n ma tc charts/aggregates/testClusters \
       --wait --timeout 10m \
-      --set "source.image=${LOCAL_REGISTRY}/migrations/elasticsearch_searchguard" \
-      --set "source.imageTag=${image_tag}"
+      -f charts/aggregates/testClusters/values.yaml \
+      -f charts/aggregates/testClusters/valuesOss.yaml
   else
     echo "Using non-local registry (USE_LOCAL_REGISTRY=false). Adjust repositories as needed."
     print_step "Installing Migration Assistant chart"
@@ -160,7 +172,9 @@ deploy_local_charts() {
 
     print_step "Installing local source and target test clusters"
     helm --kube-context "${KUBE_CONTEXT}" upgrade --install --create-namespace -n ma tc charts/aggregates/testClusters \
-      --wait --timeout 10m
+      --wait --timeout 10m \
+      -f charts/aggregates/testClusters/values.yaml \
+      -f charts/aggregates/testClusters/valuesOss.yaml
   fi
 
   run_named_hook "${POST_TC_INSTALL_HOOK:-}"

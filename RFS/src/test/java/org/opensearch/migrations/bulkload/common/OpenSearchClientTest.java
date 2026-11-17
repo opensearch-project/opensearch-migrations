@@ -1,26 +1,44 @@
 package org.opensearch.migrations.bulkload.common;
 
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.IntStream;
 
 import org.opensearch.migrations.Version;
+import org.opensearch.migrations.bulkload.common.bulk.BulkOperationConverter;
 import org.opensearch.migrations.bulkload.common.bulk.BulkOperationSpec;
 import org.opensearch.migrations.bulkload.common.bulk.IndexOp;
 import org.opensearch.migrations.bulkload.common.bulk.enums.OperationType;
+import org.opensearch.migrations.bulkload.common.bulk.enums.VersionType;
+import org.opensearch.migrations.bulkload.common.bulk.metadata.VersionControlMetadata;
 import org.opensearch.migrations.bulkload.common.bulk.operations.IndexOperationMeta;
 import org.opensearch.migrations.bulkload.common.http.CompressionMode;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.common.http.HttpResponse;
+import org.opensearch.migrations.bulkload.common.retry.AdaptiveLimit;
+import org.opensearch.migrations.bulkload.common.retry.RetryBudget;
 import org.opensearch.migrations.bulkload.http.BulkRequestGenerator;
 import org.opensearch.migrations.bulkload.http.BulkRequestGenerator.BulkItemResponseEntry;
+import org.opensearch.migrations.bulkload.pipeline.DocumentMigrationPipeline;
+import org.opensearch.migrations.bulkload.pipeline.adapter.EsShardPartition;
+import org.opensearch.migrations.bulkload.pipeline.adapter.LuceneAdapter;
+import org.opensearch.migrations.bulkload.pipeline.adapter.OpenSearchDocumentSink;
+import org.opensearch.migrations.bulkload.pipeline.model.Document;
+import org.opensearch.migrations.bulkload.pipeline.model.MigrationMetrics;
+import org.opensearch.migrations.bulkload.pipeline.source.DocumentSource;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts.ICheckedIdempotentPutRequestContext;
+import org.opensearch.migrations.bulkload.transformers.BulkVersioningTransformerProvider;
 import org.opensearch.migrations.bulkload.version_os_2_11.OpenSearchClient_OS_2_11;
 import org.opensearch.migrations.reindexer.FailedRequestsLogger;
+import org.opensearch.migrations.reindexer.faileddocumentstream.FailedDocumentStreamSink;
 import org.opensearch.migrations.testutils.CloseableLogSetup;
+import org.opensearch.migrations.transform.IJsonTransformer;
 
 import com.fasterxml.jackson.core.StreamReadFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -30,10 +48,14 @@ import lombok.SneakyThrows;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.Mock.Strictness;
 import org.mockito.junit.jupiter.MockitoExtension;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.util.retry.Retry;
 
@@ -42,6 +64,8 @@ import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.CoreMatchers.not;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.lessThan;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -79,6 +103,30 @@ class OpenSearchClientTest {
         when(connectionContext.getUri()).thenReturn(URI.create("http://localhost/"));
         when(restClient.getConnectionContext()).thenReturn(connectionContext);
         openSearchClient = spy(new OpenSearchClient_OS_2_11(restClient, failedRequestLogger, Version.fromString("OS 2.11"), CompressionMode.UNCOMPRESSED));
+    }
+
+    @Test
+    void repeatedSubscriptionsStartWithFreshBatches() {
+        openSearchClient = new OpenSearchClient_OS_2_11(restClient, failedRequestLogger,
+            Version.fromString("OS 2.11"), CompressionMode.UNCOMPRESSED, 2, 1024);
+        var docs = List.of(
+            new Document("a", "{}".getBytes(StandardCharsets.UTF_8), Document.Operation.UPSERT, Map.of(), Map.of()),
+            new Document("b", "{}".getBytes(StandardCharsets.UTF_8), Document.Operation.UPSERT, Map.of(), Map.of()),
+            new Document("c", "{}".getBytes(StandardCharsets.UTF_8), Document.Operation.UPSERT, Map.of(), Map.of()));
+        when(restClient.postAsyncBytes(any(), any(), any(), any()))
+            .thenReturn(Mono.just(new HttpResponse(200, "OK", Map.of(), "{\"errors\":false,\"items\":[]}")));
+        var request = openSearchClient.sendBulkRequestRaw("idx", docs, null, false, DocumentExceptionAllowlist.empty());
+
+        var first = request.block();
+        var second = request.block();
+
+        assertEquals(2, first.requests.total());
+        assertEquals(first.target, second.target);
+        assertEquals(first.requests.bytes(), second.requests.bytes());
+        var bodies = ArgumentCaptor.forClass(byte[].class);
+        verify(restClient, times(4)).postAsyncBytes(any(), bodies.capture(), any(), any());
+        org.junit.jupiter.api.Assertions.assertArrayEquals(bodies.getAllValues().get(0), bodies.getAllValues().get(2));
+        org.junit.jupiter.api.Assertions.assertArrayEquals(bodies.getAllValues().get(1), bodies.getAllValues().get(3));
     }
 
     @Test
@@ -178,13 +226,14 @@ class OpenSearchClientTest {
         var finalDocSuccess = bulkItemResponse(false, List.of(itemEntry(docId2)));
         var server500 = new HttpResponse(500, "", null, "{\"error\":\"Cannot Process Error!\"}");
 
-        when(restClient.postAsyncBytes(any(), any(), any(), any())).thenReturn(Mono.just(bothDocsFail))
+        when(restClient.postAsyncBytes(any(), any(), any(), any()))
+            .thenReturn(Mono.just(bothDocsFail).delayElement(Duration.ofMillis(20)))
             .thenReturn(Mono.just(oneFailure))
             .thenReturn(Mono.just(server500))
             .thenReturn(Mono.just(finalDocSuccess));
 
         var bulkDocs = List.of(createBulkDoc(docId1), createBulkDoc(docId2));
-        doReturn(Retry.fixedDelay(6, Duration.ofMillis(10))).when(openSearchClient).getBulkRetryStrategy();
+        doReturn(Retry.fixedDelay(6, Duration.ofMillis(10))).when(openSearchClient).getBulkRetryStrategy(any());
 
         // Action
         var responseMono = openSearchClient.sendBulkRequest(
@@ -194,13 +243,130 @@ class OpenSearchClientTest {
             false,
             DocumentExceptionAllowlist.empty()
         );
-        responseMono.block();
-
-        // Assertions
-        // StepVerifier.create(responseMono).expectComplete().verify();
-
-        verify(restClient, times(4)).postAsyncBytes(any(), any(), any(), any());
+        var response = responseMono.block();
+        var requests = ArgumentCaptor.forClass(byte[].class);
+        verify(restClient, times(4)).postAsyncBytes(any(), requests.capture(), any(), any());
+        assertEquals(1, response.requests.batches());
+        assertEquals(4, response.requests.total());
+        assertEquals(3, response.requests.retries());
+        assertEquals(new MigrationMetrics.Operations(2, 0, 34), response.target);
+        assertEquals(requests.getAllValues().stream().mapToLong(bytes -> bytes.length).sum(), response.requests.bytes());
+        org.junit.jupiter.api.Assertions.assertTrue(response.requests.durationMillis() >= 10);
+        var second = responseMono.block();
+        assertEquals(1, second.requests.total());
+        assertEquals(0, second.requests.retries());
+        assertEquals(response.target, second.target);
+        var allRequests = ArgumentCaptor.forClass(byte[].class);
+        verify(restClient, times(5)).postAsyncBytes(any(), allRequests.capture(), any(), any());
+        org.junit.jupiter.api.Assertions.assertArrayEquals(
+            allRequests.getAllValues().get(0), allRequests.getAllValues().get(4));
         verifyNoInteractions(failedRequestLogger);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void byteLimitUsesTheActualMetadataAfterIdRemoval(boolean raw) {
+        var docs = List.of(
+            new Document("long-original-document-id-1", "{\"v\":1}".getBytes(StandardCharsets.UTF_8),
+                Document.Operation.UPSERT, Map.of(), Map.of()),
+            new Document("long-original-document-id-2", "{\"v\":1}".getBytes(StandardCharsets.UTF_8),
+                Document.Operation.UPSERT, Map.of(), Map.of()));
+        long exactSize = org.opensearch.migrations.bulkload.common.bulk.BulkNdjson
+            .serializeRaw(docs, "idx", true, OBJECT_MAPPER).bytes().length;
+        openSearchClient = new OpenSearchClient_OS_2_11(restClient, failedRequestLogger,
+            Version.fromString("OS 2.11"), CompressionMode.UNCOMPRESSED, 10, exactSize);
+        when(restClient.postAsyncBytes(any(), any(), any(), any()))
+            .thenReturn(Mono.just(bulkItemResponse(false, List.of(itemEntry("generated-1"), itemEntry("generated-2")))));
+
+        if (raw) {
+            openSearchClient.sendBulkRequestRaw("idx", docs, null, true, DocumentExceptionAllowlist.empty()).block();
+        } else {
+            openSearchClient.sendBulkRequest("idx",
+                docs.stream().map(doc -> BulkOperationConverter.fromRawDocument(doc, "idx")).toList(),
+                null, true, DocumentExceptionAllowlist.empty()).block();
+        }
+
+        var request = ArgumentCaptor.forClass(byte[].class);
+        verify(restClient).postAsyncBytes(any(), request.capture(), any(), any());
+        assertEquals(exactSize, request.getValue().length, "Both operations fit after their IDs are removed");
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void rawRetriesPreserveTheSizedDocumentBytes(boolean generateIds) {
+        var body = "{\r\n\"value\":1e2,\n\"text\":\"é\\n\\r\"\r\n}".getBytes(StandardCharsets.UTF_8);
+        var documents = List.of(
+            new Document("d1", body, Document.Operation.UPSERT, Map.of(), Map.of()),
+            new Document("d2", body, Document.Operation.UPSERT, Map.of(), Map.of()));
+        doReturn(Retry.fixedDelay(1, Duration.ofMillis(1))).when(openSearchClient).getBulkRetryStrategy(any());
+        when(restClient.postAsyncBytes(any(), any(), any(), any()))
+            .thenReturn(Mono.just(bulkItemResponse(true,
+                List.of(itemEntryRetryableFailure("d1"), itemEntryRetryableFailure("d2")))))
+            .thenReturn(Mono.just(bulkItemResponse(false, List.of(itemEntry("d1"), itemEntry("d2")))));
+
+        openSearchClient.sendBulkRequestRaw("idx", documents, null, generateIds, DocumentExceptionAllowlist.empty())
+            .block(Duration.ofSeconds(10));
+
+        var requests = ArgumentCaptor.forClass(byte[].class);
+        verify(restClient, times(2)).postAsyncBytes(any(), requests.capture(), any(), any());
+        org.junit.jupiter.api.Assertions.assertArrayEquals(requests.getAllValues().get(0), requests.getAllValues().get(1));
+        var lines = new String(requests.getAllValues().get(0), StandardCharsets.UTF_8).split("\n");
+        assertEquals(4, lines.length, "Two operations must have exactly four NDJSON lines");
+        assertEquals("{  \"value\":1e2, \"text\":\"é\\n\\r\"  }", lines[1]);
+        assertEquals(lines[1], lines[3]);
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {0, 2, 8})
+    @SuppressWarnings("unchecked")
+    void committedMetricsDistinguishSourceAndTransformedTargetOperations(int outputCount) throws Exception {
+        var partition = new EsShardPartition("snapshot", "idx", 0);
+        var documents = IntStream.range(0, 4).mapToObj(i -> new Document("source-" + i,
+            "{\"v\":1}".getBytes(StandardCharsets.UTF_8), Document.Operation.UPSERT, Map.of(), Map.of())).toList();
+        var source = mock(DocumentSource.class);
+        when(source.readDocuments(partition, 0)).thenReturn(Flux.fromIterable(documents));
+        IJsonTransformer transformer = input -> {
+            var operations = (List<Map<String, Object>>) input;
+            return IntStream.range(0, outputCount).mapToObj(i -> {
+                var operation = new HashMap<>(operations.get(i % operations.size()));
+                var metadata = new HashMap<>((Map<String, Object>) operation.get("operation"));
+                metadata.put("_id", "target-" + i);
+                operation.put("operation", metadata);
+                operation.put("document", Map.of("value", "é-" + i, "extra", true));
+                return operation;
+            }).toList();
+        };
+        when(restClient.postAsyncBytes(any(), any(), any(), any()))
+            .thenReturn(Mono.just(new HttpResponse(200, "OK", Map.of(), "{\"errors\":false,\"items\":[]}")));
+        var sink = new OpenSearchDocumentSink(openSearchClient, () -> transformer,
+            false, DocumentExceptionAllowlist.empty(), null);
+        var cursor = new DocumentMigrationPipeline(source, sink, 10, 10000)
+            .migratePartition(partition, "idx", 0).blockLast();
+        assertEquals(4, cursor.nextPosition());
+        assertEquals(new MigrationMetrics.Operations(4, 0, 28), cursor.metrics().source());
+        long outputBytes = 0;
+        for (int i = 0; i < outputCount; i++) {
+            outputBytes += OBJECT_MAPPER.writeValueAsBytes(Map.of("value", "é-" + i, "extra", true)).length;
+        }
+        assertEquals(new MigrationMetrics.Operations(outputCount, 0, outputBytes), cursor.metrics().target());
+        assertEquals(outputCount == 0 ? 0 : 1, cursor.metrics().requests().total());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void targetMetricsExcludeDeleteDiagnosticBodies(boolean raw) {
+        var documents = List.of(
+            new Document("upsert", "{\"v\":1}".getBytes(StandardCharsets.UTF_8),
+                Document.Operation.UPSERT, Map.of(), Map.of()),
+            new Document("deleted", "{\"old\":true}".getBytes(StandardCharsets.UTF_8),
+                Document.Operation.DELETE, Map.of(), Map.of()));
+        when(restClient.postAsyncBytes(any(), any(), any(), any()))
+            .thenReturn(Mono.just(new HttpResponse(200, "OK", Map.of(), "{\"errors\":false,\"items\":[]}")));
+        var response = (raw
+            ? openSearchClient.sendBulkRequestRaw("idx", documents, null, false, DocumentExceptionAllowlist.empty())
+            : openSearchClient.sendBulkRequest("idx", documents.stream()
+                .map(doc -> BulkOperationConverter.fromRawDocument(doc, "idx")).toList(), null)).block();
+        assertEquals(new MigrationMetrics.Operations(1, 1, 7), response.target);
     }
 
     @Test
@@ -213,7 +379,7 @@ class OpenSearchClientTest {
         when(restClient.postAsyncBytes(any(), any(), any(), any())).thenReturn(Mono.just(docFails));
 
         var maxRetries = 6;
-        doReturn(Retry.fixedDelay(maxRetries, Duration.ofMillis(10))).when(openSearchClient).getBulkRetryStrategy();
+        doReturn(Retry.fixedDelay(maxRetries, Duration.ofMillis(10))).when(openSearchClient).getBulkRetryStrategy(any());
 
         var bulkDoc = createBulkDoc(docId1);
         var indexName = "alwaysFailingIndexName";
@@ -235,6 +401,91 @@ class OpenSearchClientTest {
         verify(restClient, times(maxAttempts)).postAsyncBytes(any(), any(), any(), any());
         verify(failedRequestLogger).logBulkFailure(any(), any(), any(), any());
         verifyNoMoreInteractions(failedRequestLogger);
+    }
+
+    @Test
+    void generatingIdsDoesNotSilentlyRemoveExplicitConcurrencyChecks() throws Exception {
+        var operation = IndexOp.builder()
+            .operation(IndexOperationMeta.builder()
+                .id("source-id").index("products")
+                .versioning(VersionControlMetadata.builder()
+                    .version(7L).versionType(VersionType.EXTERNAL)
+                    .ifSeqNo(5L).ifPrimaryTerm(3L).build())
+                .build())
+            .document(Map.of("field", "value"))
+            .build();
+        when(restClient.postAsyncBytes(any(), any(), any(), any()))
+            .thenReturn(Mono.just(bulkItemResponse(false, List.of(itemEntry("generated-id")))));
+
+        openSearchClient.sendBulkRequest("products", List.of(operation), null, true,
+            DocumentExceptionAllowlist.empty()).block();
+
+        var request = ArgumentCaptor.forClass(byte[].class);
+        verify(restClient).postAsyncBytes(any(), request.capture(), any(), any());
+        var action = OBJECT_MAPPER.readTree(new String(request.getValue(), java.nio.charset.StandardCharsets.UTF_8)
+            .split("\n")[0]).path("index");
+        assertFalse(action.has("_id"));
+        assertFalse(action.has("version"));
+        assertFalse(action.has("version_type"));
+        assertEquals(5L, action.path("if_seq_no").longValue());
+        assertEquals(3L, action.path("if_primary_term").longValue());
+    }
+
+    @ParameterizedTest
+    @CsvSource({"raw,false", "raw,true", "map,false", "map,true", "native,false", "native,true"})
+    void retriesPreserveOnlyExplicitVersioningAndRespectIdPolicy(String path, boolean generateIds) throws Exception {
+        doReturn(Retry.fixedDelay(2, Duration.ofMillis(1))).when(openSearchClient).getBulkRetryStrategy(any());
+        when(restClient.postAsyncBytes(any(), any(), any(), any()))
+            .thenReturn(Mono.just(bulkItemResponse(true, List.of(itemEntry("done"), itemEntryRetryableFailure("retry")))))
+            .thenReturn(Mono.just(bulkItemResponse(false, List.of(itemEntry("retry")))));
+        var documents = List.of(snapshotDocument("done", 7L), snapshotDocument("retry", Long.MAX_VALUE));
+        if (path.equals("raw")) {
+            openSearchClient.sendBulkRequestRaw("products", documents, null, generateIds, DocumentExceptionAllowlist.empty()).block();
+        } else {
+            var operations = documents.stream()
+                .map(doc -> path.equals("native") ? BulkOperationConverter.fromRawDocument(doc, "products")
+                    : BulkOperationConverter.fromDocument(doc, "products"))
+                .toList();
+            if (path.equals("native")) {
+                var transformer = new BulkVersioningTransformerProvider()
+                    .createTransformer(Map.of("versionType", "external_gte"));
+                operations = transformer.transformOperations(operations);
+            }
+            openSearchClient.sendBulkRequest("products", operations, null, generateIds, DocumentExceptionAllowlist.empty()).block();
+        }
+        var requests = ArgumentCaptor.forClass(byte[].class);
+        verify(restClient, times(2)).postAsyncBytes(any(), requests.capture(), any(), any());
+        var retriedLines = new String(requests.getAllValues().get(1), java.nio.charset.StandardCharsets.UTF_8).split("\n");
+        assertEquals(2, retriedLines.length, "Only the failed document should be retried");
+        assertEquals(generateIds ? "" : "retry", OBJECT_MAPPER.readTree(retriedLines[0]).path("index").path("_id").asText());
+        for (byte[] body : requests.getAllValues()) {
+            String[] lines = new String(body, java.nio.charset.StandardCharsets.UTF_8).split("\n");
+            for (int i = 0; i < lines.length; i += 2) {
+                var action = OBJECT_MAPPER.readTree(lines[i]).path("index");
+                if (generateIds) {
+                    assertFalse(action.has("_id"));
+                }
+                if (generateIds || !path.equals("native")) {
+                    assertFalse(action.has("version"));
+                    assertFalse(action.has("version_type"));
+                } else {
+                    assertEquals(action.path("_id").asText().equals("retry") ? Long.MAX_VALUE : 7L,
+                        action.path("version").longValue());
+                    assertEquals("external_gte", action.path("version_type").asText());
+                }
+                if (path.equals("native")) {
+                    assertEquals("{ \"value\" : 9007199254740993 }", lines[i + 1],
+                        "Native metadata transformations and ID stripping must retain raw bodies through retries");
+                }
+            }
+        }
+        verifyNoInteractions(failedRequestLogger);
+    }
+
+    private static Document snapshotDocument(String id, Long version) {
+        return new LuceneAdapter().fromLucene(new LuceneDocumentChange(0, id, null,
+            "{ \"value\" : 9007199254740993 }".getBytes(java.nio.charset.StandardCharsets.UTF_8),
+            null, DocumentChangeType.INDEX, version));
     }
 
     private HttpResponse bulkItemResponse(boolean hasErrors, List<BulkItemResponseEntry> entries) {
@@ -331,7 +582,7 @@ class OpenSearchClientTest {
             when(restClient.postAsyncBytes(any(), any(), any(), any())).thenReturn(Mono.just(docFails));
 
             var maxRetries = 1;
-            doReturn(Retry.fixedDelay(maxRetries, Duration.ofMillis(10))).when(openSearchClient).getBulkRetryStrategy();
+            doReturn(Retry.fixedDelay(maxRetries, Duration.ofMillis(10))).when(openSearchClient).getBulkRetryStrategy(any());
 
             var bulkDoc = createBulkDoc(docId1);
             var indexName = "alwaysFailingIndexName";
@@ -376,7 +627,7 @@ class OpenSearchClientTest {
             when(restClient.postAsyncBytes(any(), any(), any(), any())).thenReturn(Mono.just(docFails));
 
             var maxRetries = 1;
-            doReturn(Retry.fixedDelay(maxRetries, Duration.ofMillis(10))).when(openSearchClient).getBulkRetryStrategy();
+            doReturn(Retry.fixedDelay(maxRetries, Duration.ofMillis(10))).when(openSearchClient).getBulkRetryStrategy(any());
 
             var bulkDoc = createBulkDoc(docId1);
             var indexName = "alwaysFailingIndexName";
@@ -415,5 +666,116 @@ class OpenSearchClientTest {
         verify(restClient).getAsync(any(), any());
         verify(restClient).putAsync(any(), any(), any());
         verifyNoMoreInteractions(restClient);
+    }
+
+    private RestClient collectionRestClient(String collection) {
+        var collectionRestClient = mock(RestClient.class);
+        when(restClient.withDefaultHeaders(Map.of("x-amz-aoss-collection-name", List.of(collection))))
+            .thenReturn(collectionRestClient);
+        return collectionRestClient;
+    }
+
+    @Test
+    void testForCollection_sendsBulkRequestsThroughTheCollectionRestClient() {
+        var collectionRestClient = collectionRestClient("tenant-a");
+        var docId = "tt1979320";
+        when(collectionRestClient.postAsyncBytes(any(), any(), any(), any()))
+            .thenReturn(Mono.just(bulkItemResponse(false, List.of(itemEntry(docId)))));
+
+        openSearchClient.forCollection("tenant-a").sendBulkRequest(
+            "testIndex",
+            List.of(createBulkDoc(docId)),
+            mock(IRfsContexts.IRequestContext.class),
+            false,
+            DocumentExceptionAllowlist.empty()
+        ).block();
+
+        verify(collectionRestClient).postAsyncBytes(eq("testIndex/_bulk"), any(), any(), any());
+        verify(restClient, times(0)).postAsyncBytes(any(), any(), any(), any());
+    }
+
+    @Test
+    void testForCollection_createsIndicesThroughTheCollectionRestClient() {
+        var collectionRestClient = collectionRestClient("tenant-a");
+        when(collectionRestClient.getAsync(eq("indexName"), any()))
+            .thenReturn(Mono.just(new HttpResponse(404, "", null, "does not exist")));
+        when(collectionRestClient.putAsync(eq("indexName"), any(), any()))
+            .thenReturn(Mono.just(new HttpResponse(200, "", null, "{}")));
+
+        var result = openSearchClient.forCollection("tenant-a").createIndex("indexName",
+            OBJECT_MAPPER.createObjectNode(), mock(ICheckedIdempotentPutRequestContext.class));
+
+        assertThat(result.isPresent(), equalTo(true));
+        verify(restClient, times(0)).getAsync(any(), any());
+        verify(restClient, times(0)).putAsync(any(), any(), any());
+    }
+
+    @Test
+    void testForCollection_sharesFailedDocumentStreamContextSetAfterBinding() {
+        collectionRestClient("tenant-a");
+        var bound = openSearchClient.forCollection("tenant-a");
+        var sink = mock(FailedDocumentStreamSink.class);
+
+        openSearchClient.setFailedDocumentStreamContext(sink, "session", "worker");
+
+        assertThat(bound.getFailedDocumentStreamSink(), equalTo(sink));
+    }
+
+    @Test
+    void testForCollection_sharesBulkTrafficControlSetAfterBinding() {
+        collectionRestClient("tenant-a");
+        var bound = openSearchClient.forCollection("tenant-a");
+        var retryBudget = new RetryBudget();
+        var inFlightLimit = new AdaptiveLimit(7);
+
+        openSearchClient.setBulkRetryBudget(retryBudget);
+        openSearchClient.setBulkInFlightLimit(inFlightLimit);
+
+        org.junit.jupiter.api.Assertions.assertSame(retryBudget, bound.getBulkRetryBudget());
+        org.junit.jupiter.api.Assertions.assertSame(inFlightLimit, bound.getBulkInFlightLimit());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void testIsCollectionRouted_comesFromTheConnection(boolean collectionRouted) {
+        var connectionContext = mock(ConnectionContext.class);
+        when(connectionContext.isCollectionRouted()).thenReturn(collectionRouted);
+        when(restClient.getConnectionContext()).thenReturn(connectionContext);
+
+        assertThat(openSearchClient.isCollectionRouted(), equalTo(collectionRouted));
+    }
+
+    @Test
+    void invalidSourceFailsOnlyThatDocumentThroughFailedDocumentStream() throws Exception {
+        var failures = mock(org.opensearch.migrations.reindexer.faileddocumentstream.FailedDocumentStreamSink.class);
+        when(failures.write(any())).thenReturn(Mono.empty());
+        openSearchClient.setFailedDocumentStreamContext(failures, "session", "worker");
+        byte[] smile = new ObjectMapper(new com.fasterxml.jackson.dataformat.smile.SmileFactory())
+            .writeValueAsBytes(Map.of("a", 1));
+        byte[] unknown = "not json".getBytes(StandardCharsets.UTF_8);
+        var docs = List.of(
+            new Document("smile", smile, Document.Operation.UPSERT, Map.of(), Map.of()),
+            new Document("bad", unknown, Document.Operation.UPSERT, Map.of(), Map.of()));
+        when(restClient.postAsyncBytes(any(), any(), any(), any()))
+            .thenReturn(Mono.just(new HttpResponse(200, "OK", Map.of(), "{\"errors\":false,\"items\":[]}")));
+
+        var response =
+            openSearchClient.sendBulkRequestRaw("idx", docs, null, false, DocumentExceptionAllowlist.empty()).block();
+
+        assertEquals(1, response.failures.nonRetryable());
+        var body = ArgumentCaptor.forClass(byte[].class);
+        verify(restClient).postAsyncBytes(any(), body.capture(), any(), any());
+        var lines = new String(body.getValue(), StandardCharsets.UTF_8).split("\n");
+        assertEquals(2, lines.length);
+        assertEquals("smile", OBJECT_MAPPER.readTree(lines[0]).path("index").path("_id").asText());
+        assertEquals("{\"a\":1}", lines[1]);
+
+        var record = ArgumentCaptor.forClass(
+            org.opensearch.migrations.reindexer.faileddocumentstream.FailedDocumentStreamRecord.class);
+        verify(failures).write(record.capture());
+        assertEquals("bad", record.getValue().getDocumentId());
+        assertEquals(OpenSearchClient.INVALID_SOURCE_FORMAT, record.getValue().getFailureType());
+        assertEquals(java.util.Base64.getEncoder().encodeToString(unknown),
+            record.getValue().getSource().path("bodyBase64").asText());
     }
 }

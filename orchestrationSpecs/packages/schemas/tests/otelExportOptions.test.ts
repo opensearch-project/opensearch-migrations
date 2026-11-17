@@ -13,7 +13,9 @@ const schemas = [
     ["traffic replayer", USER_REPLAYER_PROCESS_OPTIONS, {}],
     ["create snapshot", USER_CREATE_SNAPSHOT_PROCESS_OPTIONS, {}],
     ["metadata migration", USER_METADATA_PROCESS_OPTIONS, {}],
-    ["document backfill", USER_RFS_PROCESS_OPTIONS, {}],
+    ["document backfill", USER_RFS_PROCESS_OPTIONS, {
+        failedDocumentStream: {type: "disabled" as const},
+    }],
     ["Solr backup", SOLR_CREATE_BACKUP_OPTIONS, {}],
 ] as const;
 
@@ -75,4 +77,10 @@ describe.each(schemas)("%s OpenTelemetry export options", (_name, schema, baseOp
             otelTraceCollectorEndpoint: "   ",
         }).success).toBe(false);
     });
+});
+
+test("capture proxy defaults to Netty's processor-aware worker count", () => {
+    const result = USER_PROXY_PROCESS_OPTIONS.parse({listenPort: 9200});
+
+    expect(result.numThreads).toBe(0);
 });

@@ -26,6 +26,8 @@ processors:
         action: delete
       - key: service.name
         action: delete
+      - key: service.instance.id
+        action: delete
 extensions:
   health_check:
     endpoint: :13133

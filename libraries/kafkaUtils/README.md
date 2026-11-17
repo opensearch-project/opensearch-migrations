@@ -1,6 +1,7 @@
 # Kafka Loader From File
 
-This package contains a utility to load captured traffic records from a file into a Kafka topic.
+This package contains utilities to load captured traffic records into Kafka and inspect a
+replayer consumer group's offset and replay-time progress without fetching captured record values.
 
 
 ## Setting up an environment to load Kafka records from an export
@@ -37,3 +38,14 @@ The following command can be modified to execute with a given kafka export input
 ```shell
 ./gradlew :libraries:KafkaUtils:run --args="--inputFile '<INPUT_FILE_PATH>' --kafkaConnection localhost:9092"
 ```
+
+To inspect a replayer group:
+
+```shell
+./gradlew :libraries:kafkaUtils:run --args="--consumerGroupProgress logging-group-default --kafkaBrokers localhost:9092"
+```
+
+The progress command reads committed offsets and their replay-watermark metadata, partition end
+offsets, and maximum record timestamps through Kafka Admin APIs. `OFFSET-LAG` remains Kafka's
+ordinary offset distance. `TEMPORAL-BACKLOG` is the timestamp span between the last durably replayed
+record and the newest partition record; it is not the age of the exact next unprocessed record.

@@ -28,4 +28,4 @@ snapshotMigrationConfigs:
     perSnapshotConfig:
       workflowBackup:
         - metadataMigrationConfig: {}
-          documentBackfillConfig: {}
+          documentBackfillConfig: { failedDocumentStream: { type: disabled } }

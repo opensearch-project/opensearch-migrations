@@ -144,13 +144,17 @@ export interface TupleRequest {
  *
  * @see ParsedHttpMessagesAsDicts.STATUS_CODE_KEY — "Status-Code"
  * @see ParsedHttpMessagesAsDicts.RESPONSE_TIME_MS_KEY — "response_time_ms"
+ * @see ParsedHttpMessagesAsDicts.FIRST_BYTE_MS_KEY — "first_byte_ms"
  * @see ParsedHttpMessagesAsDicts.HTTP_VERSION_KEY — "HTTP-Version"
  */
 export interface TupleResponse {
   'HTTP-Version': string;
   'Status-Code': number;
   'Reason-Phrase': string;
+  /** Whole ms from the request's last byte to the last byte of the final response. */
   response_time_ms: number;
+  /** Whole ms from the request's last byte to the first byte of the final response, when known. */
+  first_byte_ms?: number;
   payload?: Payload;
   /** Headers flattened as "header-1", "header-2", etc. */
   [header: string]: unknown;

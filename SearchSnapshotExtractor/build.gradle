@@ -118,6 +118,7 @@ dependencies {
     implementation libs.zstd.jni
     implementation libs.reactor.core
 
+    testImplementation libs.jackson.dataformat.cbor
     testImplementation libs.mockito.core
     testImplementation libs.mockito.junit.jupiter
 

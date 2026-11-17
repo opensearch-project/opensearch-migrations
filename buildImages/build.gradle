@@ -143,6 +143,26 @@ def k6Entry = [
     ]
 ]
 
+def k6OperatorEntry = [
+    // Narrowly patched upstream k6-operator. The Dockerfile pins and verifies the upstream source
+    // archive, applies the repository-owned patch, and runs its focused Go tests before packaging.
+    serviceName: "k6Operator",
+    contextDir: "TrafficCapture/trafficLoadTest/k6Operator",
+    imageName:  "k6_operator",
+    imageTag:   "latest",
+    // The image build downloads Go modules for its tests and the controller, so it honors the
+    // builder's GOPROXY the same way as k6Runner above.
+    buildArgs: [
+        GOPROXY: System.getenv("GOPROXY") ?: "",
+        BUILDER_IMAGE: ptc.rewrite(
+            "docker.io/library/golang:1.26.4-alpine@sha256:3ad57304ad93bbec8548a0437ad9e06a455660655d9af011d58b993f6f615648"
+        ),
+        RUNTIME_IMAGE: ptc.rewrite(
+            "gcr.io/distroless/static:nonroot@sha256:963fa6c544fe5ce420f1f54fb88b6fb01479f054c8056d0f74cc2c6000df5240"
+        )
+    ]
+]
+
 
 
 // custom solr image since solr 6.x does not bring arm64 / multiplatform
@@ -272,7 +292,8 @@ def testBuildKitProjects = [
 
 // k6 load test only images
 def loadTestBuildKitProjects = [
-        k6Entry
+        k6Entry,
+        k6OperatorEntry
 ]
 
 // Test-only images: not required for main MA operations, excluded with -PskipTestImages=true

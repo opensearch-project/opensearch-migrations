@@ -4,6 +4,7 @@ import {
     INTERNAL,
     makeDirectTypeProxy,
     makeStringTypeProxy,
+    selectInputsForRegister,
     typeToken,
     WorkflowBuilder
 } from "@opensearch-migrations/argo-workflow-builders";
@@ -15,7 +16,12 @@ import {
 } from "./commonUtils/resourceRetryStrategy";
 import {makePodDisruptionBudgetDefinition} from "./commonUtils/podDisruptionBudget";
 import {workflowParameterAsNumber} from "./commonUtils/scalableWorkload";
-import {MIGRATION_RESOURCE_UID_LABEL} from "./commonUtils/resourceLabels";
+import {
+    COMPONENT_LABEL,
+    COMPONENTS,
+    MIGRATION_RESOURCE_UID_LABEL,
+    workloadSelectorLabels,
+} from "./commonUtils/resourceLabels";
 
 export function getRfsCoordinatorClusterName(sessionName: BaseExpression<string>): BaseExpression<string> {
     return expr.concat(sessionName, expr.literal("-rfs-coordinator"));
@@ -46,9 +52,7 @@ function createRfsCoordinatorSecretManifest(
         metadata: {
             name: makeStringTypeProxy(expr.concat(clusterName, expr.literal("-creds"))),
             ownerReferences: makeOwnerReferences(ownerName, ownerUid),
-            labels: {
-                app: makeStringTypeProxy(clusterName)
-            }
+            labels: workloadSelectorLabels(COMPONENTS.RFS_COORDINATOR, ownerUid)
         },
         type: "Opaque",
         stringData: {
@@ -69,15 +73,11 @@ function createRfsCoordinatorServiceManifest(
         metadata: {
             name: makeStringTypeProxy(clusterName),
             ownerReferences: makeOwnerReferences(ownerName, ownerUid),
-            labels: {
-                app: makeStringTypeProxy(clusterName)
-            }
+            labels: workloadSelectorLabels(COMPONENTS.RFS_COORDINATOR, ownerUid)
         },
         spec: {
             clusterIP: "None", // Headless service for direct pod communication in StatefulSet
-            selector: {
-                app: makeStringTypeProxy(clusterName)
-            },
+            selector: workloadSelectorLabels(COMPONENTS.RFS_COORDINATOR, ownerUid),
             ports: [
                 {
                     name: "https",
@@ -89,23 +89,40 @@ function createRfsCoordinatorServiceManifest(
     };
 }
 
+// The coordinator's pods carry the same relationship labels as the RFS workers, so log filters
+// such as --from-snapshot-migration return both.
+type CoordinatorPodLabelInputs = {
+    sourceK8sLabel: BaseExpression<string>,
+    targetK8sLabel: BaseExpression<string>,
+    snapshotK8sLabel: BaseExpression<string>,
+    fromSnapshotMigrationK8sLabel: BaseExpression<string>,
+    taskK8sLabel: BaseExpression<string>,
+};
+
 function createRfsCoordinatorStatefulSetManifest(
     clusterName: BaseExpression<string>,
     coordinatorImage: BaseExpression<string>,
     ownerName: BaseExpression<string>,
     ownerUid: BaseExpression<string>,
+    podLabelInputs: CoordinatorPodLabelInputs,
 ) {
+    const labels = {
+        [COMPONENT_LABEL]: COMPONENTS.RFS_COORDINATOR,
+        "workflows.argoproj.io/workflow": makeStringTypeProxy(expr.getWorkflowValue("name")),
+        "migrations.opensearch.org/source": makeStringTypeProxy(podLabelInputs.sourceK8sLabel),
+        "migrations.opensearch.org/target": makeStringTypeProxy(podLabelInputs.targetK8sLabel),
+        "migrations.opensearch.org/snapshot": makeStringTypeProxy(podLabelInputs.snapshotK8sLabel),
+        "migrations.opensearch.org/from-snapshot-migration": makeStringTypeProxy(podLabelInputs.fromSnapshotMigrationK8sLabel),
+        "migrations.opensearch.org/task": makeStringTypeProxy(podLabelInputs.taskK8sLabel),
+        [MIGRATION_RESOURCE_UID_LABEL]: makeStringTypeProxy(ownerUid),
+    };
     return {
         apiVersion: "apps/v1",
         kind: "StatefulSet",
         metadata: {
             name: makeStringTypeProxy(clusterName),
             ownerReferences: makeOwnerReferences(ownerName, ownerUid),
-            labels: {
-                app: makeStringTypeProxy(clusterName),
-                "app.kubernetes.io/instance": makeStringTypeProxy(clusterName),
-                [MIGRATION_RESOURCE_UID_LABEL]: makeStringTypeProxy(ownerUid),
-            }
+            labels
         },
         spec: {
             serviceName: makeStringTypeProxy(clusterName),
@@ -115,17 +132,11 @@ function createRfsCoordinatorStatefulSetManifest(
                 whenScaled: "Retain"
             },
             selector: {
-                matchLabels: {
-                    app: makeStringTypeProxy(clusterName)
-                }
+                matchLabels: workloadSelectorLabels(COMPONENTS.RFS_COORDINATOR, ownerUid)
             },
             template: {
                 metadata: {
-                    labels: {
-                        app: makeStringTypeProxy(clusterName),
-                        "app.kubernetes.io/instance": makeStringTypeProxy(clusterName),
-                        [MIGRATION_RESOURCE_UID_LABEL]: makeStringTypeProxy(ownerUid),
-                    }
+                    labels
                 },
                 spec: {
                     serviceAccountName: "argo-workflow-executor",
@@ -307,6 +318,11 @@ export const RfsCoordinatorCluster = WorkflowBuilder.create({
         .addRequiredInput("coordinatorImage", typeToken<string>())
         .addRequiredInput("ownerName", typeToken<string>())
         .addRequiredInput("ownerUid", typeToken<string>())
+        .addRequiredInput("sourceK8sLabel", typeToken<string>())
+        .addRequiredInput("targetK8sLabel", typeToken<string>())
+        .addRequiredInput("snapshotK8sLabel", typeToken<string>())
+        .addRequiredInput("fromSnapshotMigrationK8sLabel", typeToken<string>())
+        .addOptionalInput("taskK8sLabel", c => "reindexFromSnapshot")
         .addResourceTask(b => b
             .setDefinition({
                 action: "apply",
@@ -317,7 +333,8 @@ export const RfsCoordinatorCluster = WorkflowBuilder.create({
                     b.inputs.clusterName,
                     b.inputs.coordinatorImage,
                     b.inputs.ownerName,
-                    b.inputs.ownerUid
+                    b.inputs.ownerUid,
+                    b.inputs
                 )
             }))
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
@@ -332,12 +349,8 @@ export const RfsCoordinatorCluster = WorkflowBuilder.create({
             .setDefinition(makePodDisruptionBudgetDefinition({
                 name: b.inputs.clusterName,
                 minAvailable: workflowParameterAsNumber(b.inputs.minPodReplicas),
-                matchLabels: {
-                    app: b.inputs.clusterName,
-                },
-                labels: {
-                    app: b.inputs.clusterName,
-                },
+                matchLabels: workloadSelectorLabels(COMPONENTS.RFS_COORDINATOR, b.inputs.ownerUid),
+                labels: workloadSelectorLabels(COMPONENTS.RFS_COORDINATOR, b.inputs.ownerUid),
                 ownerReferences: makeOwnerReferences(b.inputs.ownerName, b.inputs.ownerUid),
             }))
         )
@@ -350,6 +363,10 @@ export const RfsCoordinatorCluster = WorkflowBuilder.create({
         .addRequiredInput("ownerName", typeToken<string>())
         .addRequiredInput("ownerUid", typeToken<string>())
         .addRequiredInput("minPodReplicas", typeToken<number>())
+        .addRequiredInput("sourceK8sLabel", typeToken<string>())
+        .addRequiredInput("targetK8sLabel", typeToken<string>())
+        .addRequiredInput("snapshotK8sLabel", typeToken<string>())
+        .addRequiredInput("fromSnapshotMigrationK8sLabel", typeToken<string>())
         .addOptionalInput("groupName_view", c => "Start RFS OpenSearch cluster for worker coordination")
         .addSteps(b => b
             .addStep("createSecret", INTERNAL, "createRfsCoordinatorSecret", c =>
@@ -374,10 +391,7 @@ export const RfsCoordinatorCluster = WorkflowBuilder.create({
                     }))
                 .addStep("createStatefulSet", INTERNAL, "createRfsCoordinatorStatefulSet", c =>
                     c.register({
-                        clusterName: b.inputs.clusterName,
-                        coordinatorImage: b.inputs.coordinatorImage,
-                        ownerName: b.inputs.ownerName,
-                        ownerUid: b.inputs.ownerUid
+                        ...selectInputsForRegister(b, c),
                     }))
             )
         )

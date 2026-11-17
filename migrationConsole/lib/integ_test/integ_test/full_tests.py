@@ -15,7 +15,7 @@ from console_link.models.replayer_base import Replayer, ReplayStatus
 from console_link.models.kafka import Kafka
 from console_link.models.command_result import CommandResult
 from console_link.models.snapshot import Snapshot
-from console_link.middleware.kafka import delete_topic
+from console_link.middleware.kafka import reset_consumer_group_offsets_to_latest
 from console_link.models.metadata import Metadata
 from console_link.cli import Context
 from .common_utils import wait_for_service_status
@@ -33,19 +33,6 @@ def initialize(request):
     pytest.unique_id = unique_id
     source_cluster = pytest.console_env.source_cluster
     target_cluster = pytest.console_env.target_cluster
-    # If in AWS, modify source and target objects here to route requests through the created ALB to verify its operation
-    if 'AWS_EXECUTION_ENV' in os.environ:
-        logger.info("Detected an AWS environment")
-        source_proxy_alb_endpoint = request.config.getoption("--source_proxy_alb_endpoint")
-        target_proxy_alb_endpoint = request.config.getoption("--target_proxy_alb_endpoint")
-        logger.info("Checking original source and target endpoints can be reached, before using ALB endpoints for test")
-        direct_source_con_result: ConnectionResult = connection_check(source_cluster)
-        assert direct_source_con_result.connection_established is True
-        direct_target_con_result: ConnectionResult = connection_check(target_cluster)
-        assert direct_target_con_result.connection_established is True
-        source_cluster.endpoint = source_proxy_alb_endpoint
-        target_cluster.endpoint = target_proxy_alb_endpoint
-        target_cluster.allow_insecure = True
     backfill: Backfill = pytest.console_env.backfill
     assert backfill is not None
     metadata: Metadata = pytest.console_env.metadata
@@ -62,12 +49,32 @@ def initialize(request):
     target_con_result: ConnectionResult = connection_check(target_cluster)
     assert target_con_result.connection_established is True
 
-    # Clear Cluster
+    # Clear the clusters directly, so the cleanup isn't captured by the proxy and replayed onto the target.
     clear_cluster(source_cluster, snapshot)
     clear_cluster(target_cluster)
 
-    # Delete existing Kafka topic to clear records
-    delete_topic(kafka=kafka, topic_name="logging-traffic-topic")
+    # Start this run's replayer at the end of the capture topic so it replays only this run's traffic. CI
+    # reuses deployments, so the topic keeps earlier runs' traffic, and a new consumer group would otherwise
+    # start at the earliest offset. (Deleting the topic instead fails required capture on a proxy that still
+    # has records in flight, and the proxy terminates.) On a new deployment the topic doesn't exist yet.
+    replayer_group = request.config.getoption("--replayer_group_id") or f"logging-group-{unique_id}"
+    topics = kafka.list_topics()
+    assert topics.success, f"Could not list Kafka topics: {topics.value}"
+    if "logging-traffic-topic" in str(topics.value).split():
+        reset_result = reset_consumer_group_offsets_to_latest(
+            kafka=kafka, group_name=replayer_group, topic_name="logging-traffic-topic")
+        assert reset_result.success, f"Could not reset {replayer_group} to the end of the topic: {reset_result.value}"
+
+    # If in AWS, route requests through the created ALBs from here on, to verify their operation
+    if 'AWS_EXECUTION_ENV' in os.environ:
+        logger.info("Detected an AWS environment; switching the source and target to their ALB endpoints")
+        source_cluster.endpoint = request.config.getoption("--source_proxy_alb_endpoint")
+        target_cluster.endpoint = request.config.getoption("--target_proxy_alb_endpoint")
+        target_cluster.allow_insecure = True
+        source_alb_con_result: ConnectionResult = connection_check(source_cluster)
+        assert source_alb_con_result.connection_established is True
+        target_alb_con_result: ConnectionResult = connection_check(target_cluster)
+        assert target_alb_con_result.connection_established is True
 
     # Record test start time for filtering rotated tuple files by mtime at test end.
     pytest.test_start_time = time.time()

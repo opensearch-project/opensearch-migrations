@@ -354,7 +354,8 @@ export class EKSInfra extends Construct {
                 effect: Effect.ALLOW,
                 actions: [
                     "cloudwatch:ListMetrics",
-                    "cloudwatch:GetMetricData"
+                    "cloudwatch:GetMetricData",
+                    "cloudwatch:DescribeAlarms"
                 ],
                 resources: ['*'],
             }),
@@ -384,6 +385,20 @@ export class EKSInfra extends Construct {
                 ],
                 resources: [
                     `arn:${Aws.PARTITION}:cloudwatch::${Stack.of(this).account}:dashboard/MA-*`
+                ],
+            }),
+            // CloudWatch alarm lifecycle for ACK-managed Kafka PVC percentage alarms.
+            new PolicyStatement({
+                effect: Effect.ALLOW,
+                actions: [
+                    'cloudwatch:PutMetricAlarm',
+                    'cloudwatch:DeleteAlarms',
+                    'cloudwatch:TagResource',
+                    'cloudwatch:UntagResource',
+                    'cloudwatch:ListTagsForResource',
+                ],
+                resources: [
+                    `arn:${Aws.PARTITION}:cloudwatch:${Stack.of(this).region}:${Stack.of(this).account}:alarm:MA-*`
                 ],
             }),
             // ACM PCA permissions for TLS certificate issuance via cert-manager

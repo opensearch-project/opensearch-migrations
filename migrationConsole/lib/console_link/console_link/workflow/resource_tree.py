@@ -29,13 +29,10 @@ RESOURCE_SECTIONS = [
 PHASE_SYMBOLS = {
     'Ready': ('✓', 'green'),
     'Completed': ('✓', 'green'),
-    'Succeeded': ('✓', 'green'),
-    'Running': ('▶', 'yellow'),
     'Pending': ('○', 'cyan'),
-    'Initialized': ('○', 'cyan'),
-    'Failed': ('✗', 'red'),
+    'Created': ('○', 'cyan'),
+    'Deleting': ('⊘', 'yellow'),
     'Error': ('✗', 'red'),
-    'Skipped': ('~', 'dim'),
     'Unknown': ('?', 'white'),
 }
 
@@ -261,7 +258,7 @@ def _render_group(parent_tree, group: ResourceGroup, show_live_status: bool = Tr
 
 
 # Phases shown in the resource label (settled states)
-DISPLAY_PHASES = {'Ready', 'Completed', 'Failed', 'Error'}
+DISPLAY_PHASES = {'Ready', 'Completed', 'Error'}
 
 
 def _render_resource(parent_node, resource: ResourceNode, show_live_status: bool = True) -> None:

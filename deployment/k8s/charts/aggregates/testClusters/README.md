@@ -4,6 +4,25 @@ This scrappy chart is only for developer tests - even then, developers may be
 annoyed by the lack of durability and redundancy, especially if one needs to
 test within and environment where pods may be reassigned aggressively.
 
+## Values files
+
+`values.yaml` holds the defaults: an Elasticsearch 7.10 source on the SearchGuard test image, an
+OpenSearch 2.11 target, and snapshots to localstack. Each other file is an overlay passed after it
+with `-f`; Helm merges them left to right, so a later file wins.
+
+| Overlay | Layer after | What it changes |
+|---|---|---|
+| `valuesOss.yaml` | `values.yaml` | kind/local: `elasticsearch-oss` source behind an nginx TLS and basic-auth sidecar |
+| `valuesEks.yaml` | `values.yaml` | EKS: the same source, with S3 snapshots through Pod Identity, plus EKS placement |
+| `valuesEksNoAuth.yaml` | `valuesEks.yaml` | Plain HTTP and no auth on the source, and no security plugin on the target |
+| `valuesNoAuth.yaml` | `values.yaml` | No auth on the SearchGuard source and the target (local only) |
+| `valuesSolrSource.yaml` | `values.yaml` | A Solr source in place of Elasticsearch |
+| `valuesSolrSourceEks.yaml` | `valuesSolrSource.yaml` | The Solr source on EKS, with S3 snapshots through Pod Identity |
+| `values5xMedium.yaml` | any | A 5-node target (8 CPU, 32 GiB, 500 GiB each) on a dedicated Karpenter pool |
+
+The kind flow (`localTestingCommon.sh`) installs `values.yaml` + `valuesOss.yaml`; the EKS quick start
+uses `values.yaml` + `valuesEks.yaml`. The sections below cover each overlay in detail.
+
 ## Solr Source Cluster
 
 This chart can optionally deploy a SolrCloud source cluster using the
@@ -51,80 +70,64 @@ The `valuesSolrSourceEks.yaml` overlay layers on top of `valuesSolrSource.yaml`:
 - Removes explicit S3 credentials (SDK auto-discovers from Pod Identity)
 - Adds tolerations for the dedicated search node pool
 
-## No-Auth Mode
+## Open-source Elasticsearch source
 
-Both `values.yaml` and `valuesEks.yaml` leave HTTPS + basic-auth turned on
-(SearchGuard on the ES source, the security plugin on the OS target). For
-developer workflows that want to exercise the migration paths against an
-anonymous, plain-HTTP pair of clusters, layer on the no-auth presets:
+`valuesOss.yaml` (local, kind) and `valuesEks.yaml` (EKS) run an Elasticsearch source built only
+from published open-source parts: `elasticsearch-oss:7.10.2` (Apache-2.0), the `repository-s3`
+plugin installed at startup, and an nginx sidecar for HTTPS (cert-manager, `migrations-ca`) and
+basic auth (`admin:admin`). Elasticsearch listens only on loopback; nginx is the only way in.
+Clients use `https://elasticsearch-master:9200` with `-u admin:admin`, as with the SearchGuard
+image this replaces on Kubernetes (the Docker Compose solution still uses it).
 
 ```bash
-# Local / kind / in-cluster dev
-helm install tc . -f values.yaml -f valuesNoAuth.yaml
+# Local / kind: snapshots go to the Migration Assistant's localstack
+helm upgrade --install tc . -n ma -f values.yaml -f valuesOss.yaml
 
-# EKS (layer AFTER valuesEks.yaml)
-helm install tc . -f values.yaml -f valuesEks.yaml -f valuesEksNoAuth.yaml
+# EKS: snapshots go to S3 with the pod's Pod Identity credentials
+helm upgrade --install tc . -n ma -f values.yaml -f valuesEks.yaml \
+  --set conditionalPackageInstalls.target=false
+
+# Check either one end to end: TLS, auth, S3 snapshot and restore
+./verifyOssSource.sh --bucket <bucket> --region <region>     # add --skip-s3-listing for localstack
 ```
 
-With these overlays active, the clusters are reachable with `curl
-http://elasticsearch-master:9200/` and `curl
-http://opensearch-cluster-master:9200/` — no `-u`, no `-k`. Configure the
-workflow session's `sourceClusters` / `targetClusters` with the matching
-`http://...` endpoints and omit `authConfig` entirely.
+On EKS, a sidecar copies the pod's Pod Identity credentials into the Elasticsearch keystore every
+minute. The plugin's bundled AWS SDK (1.11.749) can't use Pod Identity itself; the header of
+`valuesEks.yaml` explains why the Pod Identity variables don't need to be unset.
+
+## No-Auth Mode
+
+The open-source source can drop TLS and auth so that clients use plain
+`curl http://elasticsearch-master:9200/`, with no `-u` and no `-k`:
+
+```bash
+# Local / kind
+helm upgrade --install tc . -n ma -f values.yaml -f valuesOss.yaml \
+  --set nginxFrontend.basicAuth.enabled=false --set nginxFrontend.tls.enabled=false \
+  --set source.podAnnotations.testclusters/nginx-frontend=plain
+
+# EKS (layer AFTER valuesEks.yaml; also disables the OS target's security plugin)
+helm upgrade --install tc . -n ma -f values.yaml -f valuesEks.yaml -f valuesEksNoAuth.yaml
+```
+
+`valuesNoAuth.yaml` is the equivalent for the SearchGuard image (the `values.yaml` default),
+disabling SearchGuard on the ES source and the security plugin on the OS target. Configure the
+workflow session's `sourceClusters` / `targetClusters` with the matching `http://...` endpoints
+and omit `authConfig` entirely.
 
 ## S3 Snapshot Support
 
-The default base image for ES 7.10 that this installation uses constructed by
-the opensearch-migrations project for testing.  That image has Search Guard
-installed and is configured to use insecure HTTPS for its incoming connections.
+Each source variant can take S3 snapshots without manual steps:
 
-The chart itself sets the elasticsearch.yml to include a couple 
-`s3.client.default` settings to use `http://localstack:4566` as its S3 endpoint.
-That makes it possible (and straightforward) to do E2E testing of the Migration
-Assistant tools without needing to do anything that isn't supported for 
-production.
+| Values | Image | S3 | Credentials |
+|---|---|---|---|
+| `values.yaml` (default) | SearchGuard test image | localstack (`http://localstack:4566`) | Fixed test keys baked into the image's keystore |
+| `valuesOss.yaml` (kind) | `elasticsearch-oss` | localstack | Fixed test keys written to the keystore at startup |
+| `valuesEks.yaml` (EKS) | `elasticsearch-oss` | the deployment's bucket | A sidecar copies the pod's Pod Identity credentials into the keystore every minute and reloads them |
 
-### Testing against S3 (not localstack)
+The S3 plugin bundled with Elasticsearch 7.10 can't use Pod Identity itself, which is why the EKS
+overlay uses the keystore sidecar. In an isolated VPC, set the source's `S3_CLIENT_ENDPOINT`
+environment variable (`source.extraEnvs`) to the regional endpoint, for example
+`s3.us-east-2.amazonaws.com`, so requests route through the VPC's S3 gateway endpoint.
 
-If you're interested in using this chart for testing in EKS - be prepared,
-you'll probably want to consider other ways to set up a cluster.  As mentioned
-above, this chart isn't configured well out-of-the-box to deal with pod 
-evictions - so the configuration that isn't in the chart and the data are 
-highly volatile.
-
-For this deployment, the S3 plugin for Elasticsearch has a simple model for
-credentials management.  Normally, an S3 client might use IMDS credentials from
-EC2 to provide credentials.  When running a cluster through pods, that isn't 
-possible.  The [EKS CloudFormation templates](../../../aws/README.md) that are 
-part of this project use (Pod Identity)[https://docs.aws.amazon.com/eks/latest/userguide/pod-identities.html] 
-to map service accounts to IAM identities, vending credentials to the containers
-that run within pods.  Those identities are available for the migration console,
-but the S3 plugin doesn't take advantage of them.
-
-Therefore, we don't have an option to get short-lived credentials into the 
-Elasticsearch container automatically.  Setting up a long term credential
-is theoretically possible, but not secure, and there are far better solutions
-to run a cluster securely than this INSECURE chart!
-
-However, if you want to do a quick-and-dirty test - you can load credentials
-onto the Elasticsearch host through the key store and use those to take a 
-snapshot.
-
-First, make sure that you have a role that has access to the S3 bucket that 
-the snapshot will be written to.  Get the credentials triple (awscli2 provides
-`aws configure export-credentials`) and fill those values into the keystore add
-commands.
-
-Copy those credentials into the keystore and refresh.  Run the following
-(interactive) commands.
-
-```bash
-bin/elasticsearch-keystore add s3.client.default.access_key
-bin/elasticsearch-keystore add s3.client.default.secret_key
-bin/elasticsearch-keystore add s3.client.default.session_token
-
-curl -X POST "http://localhost:9200/_nodes/reload_secure_settings?pretty"
-```
-
-After that, you should be able to run the snapshot migration step once the 
-workflow has been configured.
+This chart is for testing only: the source is a single node with no durable storage.

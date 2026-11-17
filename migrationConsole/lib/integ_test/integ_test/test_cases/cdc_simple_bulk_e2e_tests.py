@@ -69,7 +69,7 @@ class Test0040CdcFullE2eSimpleBulk(MATestBase):
             self.argo_service.resume_workflow(workflow_name=self.workflow_name)
 
         logger.info("Waiting for capture-proxy to be ready...")
-        wait_for_proxy_ready(ns, timeout_seconds)
+        wait_for_proxy_ready(ns, timeout_seconds, workflow_name=self.workflow_name)
 
         # Topic-record counts bracket the pre-snapshot generate-data. No consumer
         # group exists yet, so this is the earliest confirmation that the capture

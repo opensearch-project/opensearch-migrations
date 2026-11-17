@@ -48,7 +48,4 @@ public class ActiveContextTrackerByActivityType implements IContextTracker {
             .map(Map.Entry::getKey);
     }
 
-    public long numScopesFor(Class<IScopedInstrumentationAttributes> c) {
-        return orderedScopesByScopeType.get(c).size();
-    }
 }

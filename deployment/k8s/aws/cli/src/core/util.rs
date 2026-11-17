@@ -90,6 +90,19 @@ pub fn count_lines(s: &str) -> usize {
     }
 }
 
+/// The AWS partition of an ARN (`arn:<partition>:...`), e.g. `aws`, `aws-cn` or
+/// `aws-iso-e`. Falls back to `aws` when `arn` isn't an ARN, so commercial
+/// behaviour is unchanged for unexpected input.
+pub fn partition_of(arn: &str) -> &str {
+    match arn
+        .strip_prefix("arn:")
+        .and_then(|rest| rest.split(':').next())
+    {
+        Some(partition) if !partition.is_empty() => partition,
+        _ => "aws",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -165,5 +178,33 @@ mod tests {
         );
         assert_eq!(path_join(["/foo/", "/bar"]), "/foo/bar");
         assert_eq!(path_join(["foo", "bar", "baz"]), "foo/bar/baz");
+    }
+
+    #[test]
+    fn partition_of_reads_the_arn_partition() {
+        assert_eq!(partition_of("arn:aws:iam::123456789012:role/R"), "aws");
+        assert_eq!(
+            partition_of("arn:aws-cn:iam::123456789012:role/R"),
+            "aws-cn"
+        );
+        assert_eq!(
+            partition_of("arn:aws-us-gov:iam::123456789012:role/R"),
+            "aws-us-gov"
+        );
+        assert_eq!(
+            partition_of("arn:aws-iso-e:iam::123456789012:role/R"),
+            "aws-iso-e"
+        );
+        assert_eq!(
+            partition_of("arn:aws-eusc:iam::123456789012:role/R"),
+            "aws-eusc"
+        );
+    }
+
+    #[test]
+    fn partition_of_defaults_to_aws_for_non_arns() {
+        assert_eq!(partition_of(""), "aws");
+        assert_eq!(partition_of("not-an-arn"), "aws");
+        assert_eq!(partition_of("arn::iam::123456789012:role/R"), "aws");
     }
 }

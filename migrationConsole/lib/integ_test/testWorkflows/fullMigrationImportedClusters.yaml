@@ -240,6 +240,7 @@ spec:
               | if has("sigv4") then .authConfig = {sigv4: .sigv4} | del(.sigv4) else . end
               # Move basic_auth under authConfig.basic with secretName
               | if has("basic_auth") then .authConfig = {basic: {secretName: .basic_auth.k8s_secret_name}} | del(.basic_auth) else . end
+              | del(.no_auth)
             ')
 
             # Build perSnapshotConfig: snapshot/backup label -> migrations array

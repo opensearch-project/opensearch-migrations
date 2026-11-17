@@ -17,8 +17,9 @@ import { check } from 'k6';
 import exec from 'k6/execution';
 
 // __VU restarts at 1 in every runner pod; idInTest is unique across the whole test.
-function generateId() {
-  return `seq-${exec.vu.idInTest}-${__ITER}`;
+export function generateId(execution = exec, prefix = 'seq', suffix = null) {
+  const base = `${prefix}-${execution.vu.idInTest}-${execution.scenario.iterationInTest}`;
+  return suffix === null ? base : `${base}-${suffix}`;
 }
 
 function createDocument(proxyUrl, index, connParams, randomDocument) {

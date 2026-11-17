@@ -46,6 +46,20 @@ class RotatingGzipS3ObjectWriterTest {
         RotationPolicy policy,
         int maxUploadAttempts
     ) {
+        return writer(
+            uploader,
+            policy,
+            maxUploadAttempts,
+            RotatingGzipS3ObjectWriter.UploadRetryObserver.NONE
+        );
+    }
+
+    private static RotatingGzipS3ObjectWriter<byte[]> writer(
+        RotatingGzipS3ObjectWriter.ObjectUploader uploader,
+        RotationPolicy policy,
+        int maxUploadAttempts,
+        RotatingGzipS3ObjectWriter.UploadRetryObserver observer
+    ) {
         return new RotatingGzipS3ObjectWriter<>(
             uploader,
             "bucket",
@@ -54,7 +68,9 @@ class RotatingGzipS3ObjectWriterTest {
             policy,
             Duration.ofMillis(10),
             maxUploadAttempts,
-            "writer-test-");
+            "writer-test-",
+            observer
+        );
     }
 
     private static String decode(byte[] gz) throws IOException {
@@ -126,6 +142,21 @@ class RotatingGzipS3ObjectWriterTest {
     void retriesSameKeyUntilSuccessWhenUnlimitedAttempts() throws Exception {
         var attemptKeys = new CopyOnWriteArrayList<String>();
         var attempts = new AtomicInteger();
+        var failures =
+            new CopyOnWriteArrayList<RotatingGzipS3ObjectWriter.UploadRetryFailure>();
+        var recoveries =
+            new CopyOnWriteArrayList<RotatingGzipS3ObjectWriter.UploadRetryRecovery>();
+        var observer = new RotatingGzipS3ObjectWriter.UploadRetryObserver() {
+            @Override
+            public void retryScheduled(RotatingGzipS3ObjectWriter.UploadRetryFailure failure) {
+                failures.add(failure);
+            }
+
+            @Override
+            public void uploadRecovered(RotatingGzipS3ObjectWriter.UploadRetryRecovery recovery) {
+                recoveries.add(recovery);
+            }
+        };
         RotatingGzipS3ObjectWriter.ObjectUploader flaky = (bucket, key, file) -> {
             attemptKeys.add(key);
             if (attempts.incrementAndGet() < 3) {
@@ -133,13 +164,24 @@ class RotatingGzipS3ObjectWriterTest {
             }
             return CompletableFuture.completedFuture(null);
         };
-        try (var w = writer(flaky, RotationPolicy.ofBytes(1), 0)) {   // 0 = retry forever
+        try (var w = writer(flaky, RotationPolicy.ofBytes(1), 0, observer)) {   // 0 = retry forever
             var f = w.write(rec("a"));   // rotates immediately; upload retried until the 3rd attempt
             f.get(5, TimeUnit.SECONDS);  // completes only after a successful upload
         }
         assertEquals(3, attempts.get());
         // Every retry used the same key.
         assertTrue(attemptKeys.stream().allMatch(k -> k.equals("p/obj-0.gz")));
+        assertEquals(2, failures.size());
+        assertTrue(failures.get(0).firstFailureForObject());
+        assertTrue(failures.get(0).writerBecameDegraded());
+        assertEquals(1, failures.get(0).retryingObjectCount());
+        assertTrue(!failures.get(1).firstFailureForObject());
+        assertTrue(!failures.get(1).writerBecameDegraded());
+        assertEquals(1, failures.get(1).retryingObjectCount());
+        assertEquals(1, recoveries.size());
+        assertEquals(2, recoveries.get(0).failedAttemptCount());
+        assertEquals(0, recoveries.get(0).retryingObjectCount());
+        assertTrue(recoveries.get(0).writerRecovered());
     }
 
     @Test

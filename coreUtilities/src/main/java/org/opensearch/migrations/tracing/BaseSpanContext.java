@@ -15,8 +15,12 @@ public abstract class BaseSpanContext<S extends IInstrumentConstructor>
         IScopedInstrumentationAttributes,
         IHasRootInstrumentationScope<S>,
         AutoCloseable {
+    private static final ContextIdAllocator CONTEXT_ID_ALLOCATOR = new ContextIdAllocator();
+
     @Getter
     protected final S rootInstrumentationScope;
+    @Getter
+    final long contextId;
     @Getter
     final long startTimeNano;
     @Getter
@@ -27,6 +31,7 @@ public abstract class BaseSpanContext<S extends IInstrumentConstructor>
     private Span currentSpan;
 
     protected BaseSpanContext(S rootScope) {
+        this.contextId = CONTEXT_ID_ALLOCATOR.nextId();
         this.startTimeNano = System.nanoTime();
         this.startTimeInstant = Instant.now();
         this.rootInstrumentationScope = rootScope;

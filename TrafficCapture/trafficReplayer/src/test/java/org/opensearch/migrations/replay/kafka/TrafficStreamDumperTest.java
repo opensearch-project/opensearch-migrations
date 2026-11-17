@@ -10,9 +10,14 @@ package org.opensearch.migrations.replay.kafka;
 
 import java.nio.charset.StandardCharsets;
 
+import org.opensearch.migrations.trafficcapture.protos.CaptureCapabilityProbe;
+import org.opensearch.migrations.trafficcapture.protos.CaptureRecord;
 import org.opensearch.migrations.trafficcapture.protos.CloseObservation;
 import org.opensearch.migrations.trafficcapture.protos.ConnectObservation;
 import org.opensearch.migrations.trafficcapture.protos.EndOfMessageIndication;
+import org.opensearch.migrations.trafficcapture.protos.EndOfSegmentsIndication;
+import org.opensearch.migrations.trafficcapture.protos.InterimResponseObservation;
+import org.opensearch.migrations.trafficcapture.protos.InterimResponseSegmentObservation;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
 import org.opensearch.migrations.trafficcapture.protos.ReadSegmentObservation;
 import org.opensearch.migrations.trafficcapture.protos.RequestIntentionallyDropped;
@@ -20,6 +25,7 @@ import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.trafficcapture.protos.WriteObservation;
 import org.opensearch.migrations.trafficcapture.protos.WriteSegmentObservation;
+import org.opensearch.migrations.trafficcapture.protos.WriterPartitionHeartbeat;
 
 import com.google.protobuf.ByteString;
 import com.google.protobuf.Timestamp;
@@ -71,6 +77,31 @@ class TrafficStreamDumperTest {
             .setTs(ts(epochSeconds))
             .setWrite(WriteObservation.newBuilder()
                 .setData(ByteString.copyFrom(data)))
+            .build();
+    }
+
+    private static TrafficObservation interimObs(long epochSeconds, String data) {
+        return TrafficObservation.newBuilder()
+            .setTs(ts(epochSeconds))
+            .setInterimResponse(
+                InterimResponseObservation.newBuilder().setData(ByteString.copyFromUtf8(data))
+            )
+            .build();
+    }
+
+    private static TrafficObservation interimSegmentObs(long epochSeconds, String data) {
+        return TrafficObservation.newBuilder()
+            .setTs(ts(epochSeconds))
+            .setInterimResponseSegment(
+                InterimResponseSegmentObservation.newBuilder().setData(ByteString.copyFromUtf8(data))
+            )
+            .build();
+    }
+
+    private static TrafficObservation segmentEndObs(long epochSeconds) {
+        return TrafficObservation.newBuilder()
+            .setTs(ts(epochSeconds))
+            .setSegmentEnd(EndOfSegmentsIndication.getDefaultInstance())
             .build();
     }
 
@@ -193,6 +224,34 @@ class TrafficStreamDumperTest {
     }
 
     @Test
+    void formatsWholeAndSegmentedInterimResponsesDistinctFromFinalWrites() {
+        var first = "HTTP/1.1 100 Continue\r\n\r\n";
+        var secondStart = "HTTP/1.1 103 Early ";
+        var secondEnd = "Hints\r\n\r\n";
+        var finalResponse = "HTTP/1.1 200 OK\r\n\r\n";
+        var ts = TrafficStream.newBuilder()
+            .setNodeId("n").setConnectionId("c").setNumber(0)
+            .addSubStream(interimObs(100, first))
+            .addSubStream(interimSegmentObs(101, secondStart))
+            .addSubStream(interimSegmentObs(102, secondEnd))
+            .addSubStream(segmentEndObs(103))
+            .addSubStream(writeObs(104, finalResponse))
+            .build();
+
+        var result = TrafficStreamDumper.format(ts, -1, -1, 128, 128);
+
+        Assertions.assertTrue(result.contains(
+            "I[" + (first.length() + secondStart.length() + secondEnd.length()) + "]: "
+                + first.replace("\r\n", "..")
+                + secondStart
+                + secondEnd.replace("\r\n", "..")
+        ));
+        Assertions.assertTrue(result.contains("W[" + finalResponse.length() + "]: HTTP/1.1 200 OK"));
+        Assertions.assertEquals(1, countOccurrences(result, "I["));
+        Assertions.assertFalse(result.contains("SEGMENT_END"));
+    }
+
+    @Test
     void testPreviewTruncation() {
         var longData = "GET /very/long/path/that/exceeds/preview HTTP/1.1\r\nHost: x\r\n\r\n";
         var ts = TrafficStream.newBuilder()
@@ -270,6 +329,51 @@ class TrafficStreamDumperTest {
         // Should have R[size] but no preview text after it
         Assertions.assertTrue(result.contains("R[18]"));
         Assertions.assertFalse(result.contains("GET"));
+    }
+
+    /** Proves replayer rebuild plan S1 dump-tool handling for WriterPartitionHeartbeat. */
+    @Test
+    void formatsHeartbeatEnvelope() {
+        var record = CaptureRecord.newBuilder()
+            .setWriterPartitionHeartbeat(
+                WriterPartitionHeartbeat.newBuilder()
+                    .setWriterNodeId("writer-a")
+                    .setHeartbeatIntervalMillis(10_000)
+                    .setEmittedAtMillis(123_456)
+            )
+            .build();
+
+        var result = TrafficStreamDumper.format(record, 2, 17, 64, 64, -1);
+
+        Assertions.assertEquals(
+            "[?-?] p:2 o:    17 HEARTBEAT writer:writer-a intervalMillis:10000 emittedAtMillis:123456",
+            result
+        );
+    }
+
+    /** Proves replayer rebuild plan S1 dump-tool handling for CaptureCapabilityProbe. */
+    @Test
+    void formatsCapabilityProbeEnvelope() {
+        var record = CaptureRecord.newBuilder()
+            .setCaptureCapabilityProbe(
+                CaptureCapabilityProbe.newBuilder()
+                    .setWriterNodeId("writer-b")
+                    .setProbeId("probe-9")
+            )
+            .build();
+
+        var result = TrafficStreamDumper.format(record, 3, 21, 64, 64, -1);
+
+        Assertions.assertEquals("[?-?] p:3 o:    21 PROBE writer:writer-b id:probe-9", result);
+    }
+
+    /** Proves replayer rebuild plan S1 dump-tool handling for PAYLOAD_NOT_SET. */
+    @Test
+    void rejectsEnvelopeWithoutPayload() {
+        Assertions.assertThrows(
+            CaptureRecordProtocolViolationException.class,
+            () -> TrafficStreamDumper.format(CaptureRecord.getDefaultInstance(), 1, 4, 64, 64, -1)
+        );
     }
 
     private static int countOccurrences(String str, String sub) {

@@ -4,6 +4,7 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.SequenceInputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Set;
 import java.util.function.Consumer;
@@ -17,6 +18,8 @@ import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufInputStream;
 import io.netty.channel.embedded.EmbeddedChannel;
+import io.opentelemetry.sdk.metrics.data.HistogramPointData;
+import io.opentelemetry.sdk.metrics.data.MetricData;
 import io.opentelemetry.sdk.trace.data.SpanData;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
@@ -45,7 +48,8 @@ public class RootWireLoggingContextTest {
                     "c",
                     ctx -> offloader,
                     new RequestCapturePredicate(),
-                    x -> shouldBlock
+                    x -> shouldBlock,
+                    new CaptureProcessState(CaptureFailurePolicy.FAIL_OPEN)
                 )
             );
             channelWriter.accept(channel);
@@ -82,7 +86,9 @@ public class RootWireLoggingContextTest {
             Assertions.assertEquals(1, streamManager.flushCount.get());
 
             var trafficStream = TrafficStream.parseFrom(streamManager.byteBufferAtomicReference.get());
-            Assertions.assertTrue(trafficStream.getSubStreamCount() > 0 && trafficStream.getSubStream(0).hasRead());
+            Assertions.assertTrue(
+                trafficStream.getSubStreamCount() > 0 && trafficStream.getSubStream(0).hasRead()
+            );
             var combinedTrafficPacketsStream = new SequenceInputStream(
                 Collections.enumeration(
                     trafficStream.getSubStreamList()
@@ -102,7 +108,23 @@ public class RootWireLoggingContextTest {
                 expectedTraces.stream().sorted().collect(Collectors.joining("\n")),
                 finishedSpans.stream().map(SpanData::getName).sorted().collect(Collectors.joining("\n"))
             );
+
+            // Each message phase records its duration in its own histogram, once per request.
+            var metrics = rootContext.instrumentationBundle.getFinishedMetrics();
+            for (var phase : expectedTraces) {
+                if (!phase.equals("captureConnection")) {
+                    Assertions.assertEquals(1, histogramCount(metrics, phase + "Duration"), phase + "Duration");
+                }
+            }
         }
+    }
+
+    private static long histogramCount(Collection<MetricData> metrics, String name) {
+        return metrics.stream()
+            .filter(m -> m.getName().equals(name))
+            .flatMap(m -> m.getHistogramData().getPoints().stream())
+            .mapToLong(HistogramPointData::getCount)
+            .sum();
     }
 
     @Test

@@ -266,6 +266,31 @@ class OpenSearchWorkCoodinatorTest {
 
     @ParameterizedTest
     @MethodSource("provideTestedVersions")
+    public void testCreatedLeaseIsReportedWithTheMaxLeaseCap(Version version) throws Exception {
+        // The shard-setup lock asks for 5 minutes; with a 2-minute cap the new document expires in 2.
+        var factory = new WorkCoordinatorFactory(version, "", OpenSearchWorkCoordinator.CompletionRetryConfig.DEFAULT,
+            Duration.ofMinutes(2));
+        var workItem = new IWorkCoordinator.WorkItemAndDuration.WorkItem("item", 0, 0L).toString();
+
+        try (var workCoordinator = factory.get(new MockHttpClient(getCreatedResponse()), 2, "testWorker")) {
+            var before = java.time.Instant.now();
+            var result = Assertions.assertInstanceOf(IWorkCoordinator.WorkItemAndDuration.class,
+                workCoordinator.createOrUpdateLeaseForWorkItem(workItem, Duration.ofMinutes(5), () -> null));
+            var lease = Duration.between(before, result.getLeaseExpirationTime());
+            Assertions.assertTrue(lease.compareTo(Duration.ofMinutes(2).plusSeconds(5)) < 0, "lease was " + lease);
+            Assertions.assertTrue(lease.compareTo(Duration.ofMinutes(2).minusSeconds(5)) > 0, "lease was " + lease);
+        }
+        try (var uncapped = new WorkCoordinatorFactory(version).get(new MockHttpClient(getCreatedResponse()), 2, "w")) {
+            var before = java.time.Instant.now();
+            var result = Assertions.assertInstanceOf(IWorkCoordinator.WorkItemAndDuration.class,
+                uncapped.createOrUpdateLeaseForWorkItem(workItem, Duration.ofMinutes(5), () -> null));
+            Assertions.assertTrue(Duration.between(before, result.getLeaseExpirationTime())
+                .compareTo(Duration.ofMinutes(5).minusSeconds(5)) > 0);
+        }
+    }
+
+    @ParameterizedTest
+    @MethodSource("provideTestedVersions")
     public void testCreateUnassignedWorkItemRetriesUnexpectedCoordinatorResponse(Version version) throws Exception {
         var factory = new WorkCoordinatorFactory(version);
         var client = new SequenceMockHttpClient(getClockDriftResponse(), getCreatedResponse());

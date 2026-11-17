@@ -1,5 +1,5 @@
 kafkaClusterConfiguration:
-  myKafka:
+  my-kafka:
     existing:
       enableMSKAuth: true
       kafkaConnection: broker.a:9092,broker.b:9092
@@ -31,7 +31,6 @@ targetClusters:
   target:
     endpoint: https://opensearch-cluster-master-headless:9200
     allowInsecure: true
-    version: OS 2.11
     authConfig:
       basic:
         secretName: target-creds
@@ -44,12 +43,12 @@ snapshotMigrationConfigs:
 traffic:
   proxies:
     proxy1:
-      kafka: myKafka
+      kafka: my-kafka
       kafkaTopic: capture-traffic
       source: source
       proxyConfig:
         listenPort: 9201
   replayers:
     replay1:
-      fromProxy: proxy1
+      fromCapturedTraffic: proxy1
       toTarget: target

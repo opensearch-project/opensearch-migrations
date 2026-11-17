@@ -165,7 +165,10 @@ non-`.vapretry` milestone checkpoints) are described in
 Changes to resources fall into three categories.
 
 1. **Impossible:** Cannot be done — the user must explicitly delete & recreate the resource. This branch of the workflow cannot be advanced without .
-2. **Gated:** Requires explicit approval annotation (injected via the Workflow) to proceed.
+2. **Gated:** Requires explicit approval annotation (injected via the Workflow) to proceed. A numeric field
+   can be **gated on increase** (`.gatedOnIncrease()` in the schema): lowering it applies immediately, and only
+   raising it needs approval. RFS `maxConnections` works this way, since fewer connections can only reduce the
+   load on the target.
 3. **Safe:** Low-risk, allowed dynamically without approval. Safe fields require no VAP expressions — they are included in the classification tables for coverage tracking only.
 
 For terminal resources in `Completed` state, the [Lock-on-Complete](#the-lock-on-complete-pattern-terminal-resources-only) pattern overrides all categories — every spec change becomes Impossible.
@@ -310,11 +313,12 @@ The replayer has no downstream dependencies — nothing waits on it. The checksu
 | `spec.otelTraceCollectorEndpoint` | Safe | Trace export config | Yes (rolling) | ❌ |
 | `spec.otelMetricsCollectorEndpoint` | Safe | Metrics export config | Yes (rolling) | ❌ |
 | `spec.speedupFactor` | Safe | Replay rate tuning | Yes (rolling) | ❌ |
-| `spec.lookaheadTimeSeconds` | Safe | Buffer tuning | Yes (rolling) | ❌ |
-| `spec.maxConcurrentRequests` | Safe | Performance tuning | Yes (rolling) | ❌ |
-| `spec.numClientThreads` | Safe | Performance tuning | Yes (rolling) | ❌ |
-| `spec.observedPacketConnectionTimeout` | Safe | Timeout tuning | Yes (rolling) | ❌ |
-| `spec.quiescentPeriodMs` | Safe | Timing tuning | Yes (rolling) | ❌ |
+| `spec.maxConcurrentRequests` | Safe | Maximum simultaneous target HTTP requests | Yes (rolling) | ❌ |
+| `spec.numClientThreads` | Safe | Absolute target event-loop workers; 0 uses Netty's processor-based default | Yes (rolling) | ❌ |
+| `spec.heartbeatExpirationIntervalSeconds` | Safe | Broker-time heartbeat expiration interval `E` | Yes (rolling) | ❌ |
+| `spec.maximumBackwardSkewSeconds` | Safe | Permitted Kafka broker timestamp regression `S` | Yes (rolling) | ❌ |
+| `spec.sourceResponseRetryWindowSeconds` | Safe | Broker-time source-response retry window `W` | Yes (rolling) | ❌ |
+| `spec.readyRequestsBufferPerThread` | Safe | Retry-ready request buffer `P` per target event-loop thread | Yes (rolling) | ❌ |
 | `spec.targetServerResponseTimeoutSeconds` | Safe | Timeout tuning | Yes (rolling) | ❌ |
 | `spec.userAgent` | Safe | Cosmetic | Yes (rolling) | ❌ |
 
@@ -360,22 +364,52 @@ in-progress, they would need to delete the existing snapshot and redrive.
 
 **Document backfill (RFS) fields:**
 
+Every field of `documentBackfillConfig` is listed here; a test in `orchestrationSpecs/packages/schemas` fails when this table and the schema disagree. **Gated on increase** applies a decrease immediately and needs approval only for an increase.
+
 | Field | Category   | Rationale | In Checksum For: Replayer |
 | --- |------------| --- | --- |
-| `spec.documentBackfillConfig.indexAllowlist` | Impossible | | ✅ |
-| `spec.documentBackfillConfig.podReplicas` | Safe       | | ❌ |
-| `spec.documentBackfillConfig.allowLooseVersionMatching` | Impossible | | ✅ |
-| `spec.documentBackfillConfig.docTransformerConfigBase64` | Impossible | | ✅ |
-| `spec.documentBackfillConfig.documentsPerBulkRequest` | Safe       | | ❌ |
-| `spec.documentBackfillConfig.initialLeaseDuration` | Gated      | | ❌ |
-| `spec.documentBackfillConfig.maxConnections` | Gated      | | ❌ |
-| `spec.documentBackfillConfig.maxShardSizeBytes` | Gated      | | ❌ |
-| `spec.documentBackfillConfig.otelTraceCollectorEndpoint` | Safe       | Trace export config | ❌ |
-| `spec.documentBackfillConfig.otelMetricsCollectorEndpoint` | Safe       | Metrics export config | ❌ |
-| `spec.documentBackfillConfig.useTargetClusterForWorkCoordination` |  Safe          | | ❌ |
-| `spec.documentBackfillConfig.jvmArgs` |  Safe          | | ❌ |
-| `spec.documentBackfillConfig.loggingConfigurationOverrideConfigMap` |   Safe         | | ❌ |
-| `spec.documentBackfillConfig.resources` |    Safe        | | ❌ |
+| `spec.documentBackfillConfig.podReplicas` | Safe | Throughput only | ❌ |
+| `spec.documentBackfillConfig.minPodReplicas` | Safe |  | ❌ |
+| `spec.documentBackfillConfig.jvmArgs` | Safe |  | ❌ |
+| `spec.documentBackfillConfig.loggingConfigurationOverrideConfigMap` | Safe |  | ❌ |
+| `spec.documentBackfillConfig.logLevels` | Safe | Rolls the pods | ❌ |
+| `spec.documentBackfillConfig.skipApproval` | Safe |  | ❌ |
+| `spec.documentBackfillConfig.useTargetClusterForWorkCoordination` | Safe |  | ❌ |
+| `spec.documentBackfillConfig.resources` | Safe |  | ❌ |
+| `spec.documentBackfillConfig.indexAllowlist` | Impossible | Changes which documents migrate | ✅ |
+| `spec.documentBackfillConfig.allowLooseVersionMatching` | Impossible |  | ✅ |
+| `spec.documentBackfillConfig.docTransformerConfigBase64` | Impossible |  | ✅ |
+| `spec.documentBackfillConfig.docTransformerConfig` | Impossible |  | ✅ |
+| `spec.documentBackfillConfig.docTransformerConfigFile` | Impossible |  | ✅ |
+| `spec.documentBackfillConfig.documentTransforms` | Impossible |  | ✅ |
+| `spec.documentBackfillConfig.documentsPerBulkRequest` | Safe | Bigger bulks don't add concurrency; the target sees the same parallelism | ❌ |
+| `spec.documentBackfillConfig.documentsSizePerBulkRequest` | Safe | Same as documentsPerBulkRequest | ❌ |
+| `spec.documentBackfillConfig.bulkRequestTraceMaxBytes` | Safe | Changes only how much of each traced request or response body is logged | ❌ |
+| `spec.documentBackfillConfig.maxDocumentSizeBytes` | Impossible | Changes which documents migrate | ✅ |
+| `spec.documentBackfillConfig.initialLeaseDuration` | Safe | Only schedules leases granted after the change | ❌ |
+| `spec.documentBackfillConfig.maxLeaseDuration` | Safe | Only caps leases granted after the change | ❌ |
+| `spec.documentBackfillConfig.bulkResponseTimeout` | Safe | Only changes how long each bulk waits for its response | ❌ |
+| `spec.documentBackfillConfig.maxConnections` | Gated on increase | Lowering only reduces load on the target; raising adds load, so it needs approval | ❌ |
+| `spec.documentBackfillConfig.maxShardSizeBytes` | Gated | Drives ephemeral-storage sizing for the worker pods | ❌ |
+| `spec.documentBackfillConfig.otelTraceExportEnabled` | Safe |  | ❌ |
+| `spec.documentBackfillConfig.otelTraceCollectorEndpoint` | Safe | Trace export config | ❌ |
+| `spec.documentBackfillConfig.otelMetricsExportEnabled` | Safe |  | ❌ |
+| `spec.documentBackfillConfig.otelMetricsCollectorEndpoint` | Safe | Metrics export config | ❌ |
+| `spec.documentBackfillConfig.serverGeneratedIds` | Safe |  | ❌ |
+| `spec.documentBackfillConfig.emitDocType` | Impossible |  | ✅ |
+| `spec.documentBackfillConfig.allowedDocExceptionTypes` | Safe |  | ❌ |
+| `spec.documentBackfillConfig.coordinatorRetryMaxRetries` | Safe |  | ❌ |
+| `spec.documentBackfillConfig.coordinatorRetryInitialDelayMs` | Safe |  | ❌ |
+| `spec.documentBackfillConfig.coordinatorRetryMaxDelayMs` | Safe |  | ❌ |
+| `spec.documentBackfillConfig.enableSourcelessMigrations` | Impossible |  | ✅ |
+| `spec.documentBackfillConfig.useRecoverySource` | Impossible |  | ✅ |
+| `spec.documentBackfillConfig.failedDocumentStreamS3Prefix` | Safe |  | ❌ |
+| `spec.documentBackfillConfig.failedDocumentStreamS3Bucket` | Gated | Switching the stream mid-run leaves an inconsistent failure record | ❌ |
+| `spec.documentBackfillConfig.disableFailedDocumentStream` | Gated | Same as failedDocumentStreamS3Bucket | ❌ |
+| `spec.documentBackfillConfig.failedDocumentStreamS3Region` | Safe |  | ❌ |
+| `spec.documentBackfillConfig.failedDocumentStreamS3Endpoint` | Safe |  | ❌ |
+| `spec.documentBackfillConfig.failedDocumentStreamMaxBufferBytes` | Safe |  | ❌ |
+| `spec.documentBackfillConfig.positionGapStopword` | Impossible |  | ✅ |
 
 ---
 
@@ -389,13 +423,16 @@ Migration CRD resources follow a common lifecycle tracked natively in the `.stat
 
 | State | Meaning | Used By |
 | --- | --- | --- |
-| `Initialized` | Placeholder — created by the initialization process but not yet acted upon. | All |
-| `Running` | Work is in progress (deployment rolling out, snapshot copying). | All |
+| `Created` | Placeholder — created by the initialization process but not yet acted upon. | All |
+| `Pending` | Argo is applying work (deployment rolling out, snapshot copying). | All |
 | `Ready` | Infrastructure is healthy, operational, and serving traffic. | **Long-Lived** (Proxy, Kafka) |
 | `Completed` | A finite task has finished successfully. The output is immutable. | **Terminal** (Snapshots) |
+| `Deleting` | `workflow reset` is tearing the resource down; a VAP rejects updates other than deletion bookkeeping (it does not cover the `/status` subresource). | **Long-Lived**, **Terminal** |
 | `Error` | Execution failed. The resource is "poisoned". | All |
 
-Bootstrap placeholder resources are created during the migration initialization step (before the Argo workflow starts) so that downstream `waitFor` steps can find them. The initializer creates each CRD resource with only the minimal bootstrap fields needed up front, plus `status.phase: Initialized` and an empty `status.configChecksum`. The workflow's first successful `tryApply` writes the real desired spec contract.
+ApprovalGates have their own lifecycle: `Created`, then `Pending` while waiting for approval, then `Approved`, or `Error`.
+
+Bootstrap placeholder resources are created during the migration initialization step (before the Argo workflow starts) so that downstream `waitFor` steps can find them. The initializer creates each CRD resource with only the minimal bootstrap fields needed up front, plus `status.phase: Created` and, except for ApprovalGates, an empty `status.configChecksum`. The workflow's first successful `tryApply` writes the real desired spec contract.
 
 ### The "Fail Forward / Poison Resource" Principle
 
@@ -497,7 +534,7 @@ validations:
 
 ```
 
-*(Note: There is explicitly **no** "Running Guard" in this architecture. Long-lived infrastructure supports native K8s stacked rollouts. If a Proxy is `Running`, the user is free to push a corrective workflow over it immediately, governed purely by the standard Gated/Impossible field checks).*
+*(Note: There is explicitly **no** guard on `Pending` resources in this architecture. Long-lived infrastructure supports native K8s stacked rollouts. If a Proxy is `Pending`, the user is free to push a corrective workflow over it immediately, governed purely by the standard Gated/Impossible field checks).*
 
 ### CRD Upgrade "In-Flight" Handling
 
@@ -542,7 +579,7 @@ If the Kafka cluster config changes, its checksum changes, which cascades throug
 **Runtime flow:**
 
 1. Config processor computes all checksums and includes them in the workflow config
-2. The initializer creates placeholder CRDs with `status.phase: Initialized`, an empty `status.configChecksum`, and only the minimal bootstrap fields needed before the workflow starts
+2. The initializer creates placeholder CRDs with `status.phase: Created`, an empty `status.configChecksum` (except ApprovalGates), and only the minimal bootstrap fields needed before the workflow starts
 3. The initializer also emits helper scripts because CRD status must be patched through the `/status` subresource separately from the initial create/apply
 4. Lifecycle templates only stamp the final success state and the new `status.configChecksum` after the child-resource subtree succeeds
 5. Waiters compare both lifecycle state and checksum for CRDs, and compare Strimzi readiness plus a checksum annotation for Kafka
@@ -620,8 +657,8 @@ the migration-console image; they are not hand-maintained Helm templates.
 
 Each resource is a single CRD with configuration in `.spec` and lifecycle in `.status.phase`. Choose the lifecycle type:
 
-* **Long-lived** (proxy, replayer): phases `[Initialized, Running, Ready, Error]`
-* **Terminal** (snapshot, migration job): phases `[Initialized, Running, Completed, Error]`
+* **Long-lived** (proxy, replayer): phases `[Created, Pending, Ready, Deleting, Error]`
+* **Terminal** (snapshot, migration job): phases `[Created, Pending, Completed, Deleting, Error]`
 
 Include a typed schema for every spec field — don't use `x-kubernetes-preserve-unknown-fields` on the spec root. This enables CEL field-level comparisons in VAPs.
 
@@ -682,7 +719,7 @@ includes the resource in `lock-on-complete-policy`.
 
 ### 5. Add initializer placeholder
 
-In `migrationInitializer.ts`, create the resource with only the minimal bootstrap fields it needs before workflow execution (for example, dependency links or identity fields needed by waiters), plus `status: { phase: "Initialized", configChecksum: "" }`. Do **not** duplicate the full desired spec contract in the initializer; the workflow-owned `tryApply` step is the canonical place that writes the full root spec.
+In `migrationInitializer.ts`, create the resource with only the minimal bootstrap fields it needs before workflow execution (for example, dependency links or identity fields needed by waiters), plus `status: { phase: "Created", configChecksum: "" }`. Do **not** duplicate the full desired spec contract in the initializer; the workflow-owned `tryApply` step is the canonical place that writes the full root spec.
 
 If the resource is a CRD with a status subresource, make sure the initializer also emits the corresponding status patch handling in the generated resource handler script.
 
@@ -757,7 +794,7 @@ Call the lifecycle template from `fullMigration.ts` (or the appropriate orchestr
 Create a test pod in `templates/tests/` modeled on `test-vap-kafka.yaml`. The test should:
 
 1. Create the resource
-2. Apply a spec (should succeed on `Initialized`)
+2. Apply a spec (should succeed on `Created`)
 3. Try an Impossible field change (should fail)
 4. Try a Gated field change without approval (should fail)
 5. Add matching run label + approval annotation, retry the Gated change (should succeed)

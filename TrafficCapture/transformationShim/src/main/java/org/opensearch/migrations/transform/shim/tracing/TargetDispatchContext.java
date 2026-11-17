@@ -48,7 +48,7 @@ public class TargetDispatchContext
         public final LongCounter targetBytesReceivedCounter;
 
         private MetricInstruments(Meter meter, String activityName) {
-            super(meter, activityName);
+            super(meter, activityName, LONG_DURATION_BUCKETS_MS);
             targetBytesSentCounter = meter.counterBuilder(
                 IShimProxyContexts.MetricNames.TARGET_BYTES_SENT).setUnit("By").build();
             targetBytesReceivedCounter = meter.counterBuilder(

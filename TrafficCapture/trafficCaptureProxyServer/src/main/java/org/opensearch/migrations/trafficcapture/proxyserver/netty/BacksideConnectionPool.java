@@ -7,6 +7,7 @@ import java.time.Duration;
 import java.util.concurrent.TimeUnit;
 
 import io.netty.bootstrap.Bootstrap;
+import io.netty.buffer.ByteBufAllocator;
 import io.netty.channel.ChannelDuplexHandler;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
@@ -97,7 +98,7 @@ public class BacksideConnectionPool {
                 log.debug("Done setting up backend channel & it was successful (" + connectFuture.channel() + ")");
                 if (backsideSslContext != null) {
                     var pipeline = connectFuture.channel().pipeline();
-                    SSLEngine sslEngine = backsideSslContext.newEngine(connectFuture.channel().alloc());
+                    SSLEngine sslEngine = createSslEngine(connectFuture.channel().alloc());
                     sslEngine.setUseClientMode(true);
                     var sslHandler = new SslHandler(sslEngine);
                     pipeline.addFirst("ssl", sslHandler);
@@ -116,5 +117,9 @@ public class BacksideConnectionPool {
             }
         });
         return rval;
+    }
+
+    SSLEngine createSslEngine(ByteBufAllocator allocator) {
+        return backsideSslContext.newEngine(allocator, backsideUri.getHost(), backsideUri.getPort());
     }
 }

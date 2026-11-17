@@ -1,0 +1,15 @@
+# Kafka broker volumes for the 160K benchmark. gp3's default 125 MB/s saturated at ~192K records/s
+# of capture across 12 brokers with replication 3; provision 4x that.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: kafka-gp3-provisioned
+provisioner: ebs.csi.eks.amazonaws.com
+parameters:
+  type: gp3
+  iops: "8000"
+  throughput: "500"
+  encrypted: "true"
+volumeBindingMode: WaitForFirstConsumer
+reclaimPolicy: Delete
+allowVolumeExpansion: true

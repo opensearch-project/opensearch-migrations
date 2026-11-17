@@ -37,6 +37,7 @@ import org.opensearch.migrations.transform.shim.validation.FieldIgnoringEquality
 import org.opensearch.migrations.transform.shim.validation.JavascriptValidator;
 import org.opensearch.migrations.transform.shim.validation.Target;
 import org.opensearch.migrations.transform.shim.validation.ValidationRule;
+import org.opensearch.migrations.utils.ProcessHelpers;
 
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
@@ -240,7 +241,7 @@ public class ShimMain {
         var otelSdk = RootOtelContext.initializeOpenTelemetryWithCollectorsOrAsNoop(
             new OtelCollectorEndpoints(params.otelTraceCollectorEndpoint, params.otelMetricsCollectorEndpoint),
             "shimProxy",
-            "shim-" + params.listenPort);
+            buildOtelInstanceName(params.listenPort, ProcessHelpers::getNodeInstanceName));
         var rootContext = new RootShimProxyContext(otelSdk,
             new CompositeContextTracker(new ActiveContextTracker(), new ActiveContextTrackerByActivityType()));
 
@@ -277,6 +278,10 @@ public class ShimMain {
         }
         log.info("Shim running on port {}", params.listenPort);
         proxy.waitForClose();
+    }
+
+    static String buildOtelInstanceName(int listenPort, Supplier<String> processInstanceNameSupplier) {
+        return "shim-" + listenPort + "-" + processInstanceNameSupplier.get();
     }
 
     /** Holds the reporting components built from config. Both fields are null when reporting is disabled. */

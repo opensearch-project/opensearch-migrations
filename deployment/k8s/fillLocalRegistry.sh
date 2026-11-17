@@ -53,7 +53,7 @@ case $(uname -m) in
 esac
 
 # buildKitLoadTestAll_* is listed separately: buildImagesToRegistry_* no longer builds the k6
-# scripts image, because load-test images are their own aggregate (see buildImages/build.gradle).
+# runner or patched operator, because load-test images are their own aggregate.
 echo "Building general, test and load test images"
 "$MIGRATIONS_REPO_ROOT_DIR/gradlew" "buildImagesToRegistry_${PLATFORM}" "buildKitTestAll_${PLATFORM}" "buildKitLoadTestAll_${PLATFORM}" -PregistryEndpoint=localhost:5001 -Pbuilder=local-remote-builder -PincludeSolr773TestImage
 

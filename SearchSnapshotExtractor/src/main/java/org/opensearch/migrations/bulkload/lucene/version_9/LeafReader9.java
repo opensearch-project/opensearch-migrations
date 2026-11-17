@@ -86,6 +86,39 @@ public class LeafReader9 implements LuceneLeafReader {
         return new Document9(wrapped.storedFields().document(luceneDocId));
     }
 
+    @Override
+    public DocumentReader openDocumentReader() throws IOException {
+        var storedFields = wrapped.storedFields();
+        return docId -> new Document9(storedFields.document(docId));
+    }
+
+    @Override
+    public long countLiveDocumentsWithTermPrefix(String fieldName, String prefix) throws IOException {
+        var terms = wrapped.terms(fieldName);
+        if (terms == null) {
+            return 0;
+        }
+        var iterator = terms.iterator();
+        if (iterator.seekCeil(new BytesRef(prefix)) == TermsEnum.SeekStatus.END) {
+            return 0;
+        }
+        long count = 0;
+        PostingsEnum postings = null;
+        for (var term = iterator.term(); term != null && term.utf8ToString().startsWith(prefix); term = iterator.next()) {
+            if (liveDocs == null) {
+                count += iterator.docFreq();
+                continue;
+            }
+            postings = iterator.postings(postings, PostingsEnum.NONE);
+            for (int doc = postings.nextDoc(); doc != PostingsEnum.NO_MORE_DOCS; doc = postings.nextDoc()) {
+                if (liveDocs.get(doc)) {
+                    count++;
+                }
+            }
+        }
+        return count;
+    }
+
     public int maxDoc() {
         return wrapped.maxDoc();
     }
@@ -195,6 +228,12 @@ public class LeafReader9 implements LuceneLeafReader {
                 default -> {}
             }
         }
+    }
+
+    @Override
+    public NumericValueReader openNumericValueReader(String fieldName) throws IOException {
+        NumericDocValues dv = wrapped.getNumericDocValues(fieldName);
+        return docId -> dv != null && dv.advanceExact(docId) ? dv.longValue() : null;
     }
 
     @Override

@@ -12,6 +12,15 @@ TEST_DATA_DIRECTORY = pathlib.Path(__file__).parent / "data"
 
 TEST_NAMESPACE = "test"
 TEST_DEPLOYMENT_NAME = "ma-test-deployment"
+TEST_MATCH_LABELS = {
+    "migrations.opensearch.org/migration-resource-uid": "uid-1",
+    "migrations.opensearch.org/component": "rfs-worker",
+}
+
+
+def _deployment(replicas, match_labels=TEST_MATCH_LABELS):
+    return SimpleNamespace(spec=SimpleNamespace(replicas=replicas,
+                                                selector=SimpleNamespace(match_labels=match_labels)))
 
 
 @pytest.fixture
@@ -57,7 +66,7 @@ def test_retrieve_deployment_status_success(kubectl_runner):
     kubectl_runner.k8s_core.list_namespaced_pod = mock_list_namespaced_pod
 
     def mock_read_namespaced_deployment(name, namespace):
-        return SimpleNamespace(spec=SimpleNamespace(replicas=2))
+        return _deployment(2)
     kubectl_runner.k8s_apps.read_namespaced_deployment = mock_read_namespaced_deployment
 
     status = kubectl_runner.retrieve_deployment_status()
@@ -78,7 +87,7 @@ def test_retrieve_deployment_status_terminating(kubectl_runner):
     kubectl_runner.k8s_core.list_namespaced_pod = mock_list_namespaced_pod
 
     def mock_read_namespaced_deployment(name, namespace):
-        return SimpleNamespace(spec=SimpleNamespace(replicas=0))
+        return _deployment(0)
     kubectl_runner.k8s_apps.read_namespaced_deployment = mock_read_namespaced_deployment
 
     status = kubectl_runner.retrieve_deployment_status()
@@ -93,6 +102,7 @@ def test_retrieve_deployment_status_failure_pod_list(kubectl_runner):
     def mock_list_namespaced_pod(namespace, label_selector):
         raise Exception("Pod list error")
     kubectl_runner.k8s_core.list_namespaced_pod = mock_list_namespaced_pod
+    kubectl_runner.k8s_apps.read_namespaced_deployment = lambda name, namespace: _deployment(1)
 
     status = kubectl_runner.retrieve_deployment_status()
     assert status is None
@@ -113,6 +123,31 @@ def test_retrieve_deployment_status_failure_deployment_read(kubectl_runner):
 
     status = kubectl_runner.retrieve_deployment_status()
     assert status is None
+
+
+def test_retrieve_deployment_status_lists_pods_by_the_deployment_selector(kubectl_runner):
+    seen = {}
+
+    def mock_list_namespaced_pod(namespace, label_selector):
+        seen["selector"] = label_selector
+        return SimpleNamespace(items=[])
+    kubectl_runner.k8s_core.list_namespaced_pod = mock_list_namespaced_pod
+    kubectl_runner.k8s_apps.read_namespaced_deployment = lambda name, namespace: _deployment(1)
+
+    assert kubectl_runner.retrieve_deployment_status() is not None
+    assert seen["selector"] == (
+        "migrations.opensearch.org/component=rfs-worker,"
+        "migrations.opensearch.org/migration-resource-uid=uid-1"
+    )
+
+
+def test_retrieve_deployment_status_without_selector_lists_nothing(kubectl_runner):
+    def mock_list_namespaced_pod(namespace, label_selector):
+        raise AssertionError("an empty selector would match every pod in the namespace")
+    kubectl_runner.k8s_core.list_namespaced_pod = mock_list_namespaced_pod
+    kubectl_runner.k8s_apps.read_namespaced_deployment = lambda name, namespace: _deployment(1, match_labels=None)
+
+    assert kubectl_runner.retrieve_deployment_status() is None
 
 
 def test_read_secret(kubectl_runner):

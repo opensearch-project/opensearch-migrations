@@ -1,5 +1,9 @@
 package org.opensearch.migrations.trafficcapture.proxyserver.netty;
 
+import java.time.Instant;
+
+import org.opensearch.migrations.trafficcapture.netty.SourceForwardingCompletion;
+
 import io.netty.buffer.Unpooled;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFutureListener;
@@ -51,19 +55,23 @@ public class FrontsideHandler extends ChannelInboundHandlerAdapter {
             log.debug("Writing data to backside handler " + outboundChannel);
             outboundChannel.writeAndFlush(msg).addListener((ChannelFutureListener) future -> {
                 if (future.isSuccess()) {
+                    // Before the next read, so a completed request's forward is captured ahead of the next request.
+                    SourceForwardingCompletion.reportWriteCompleted(ctx.channel(), Instant.now());
                     ctx.channel().read(); // kickoff another read for the frontside
                 } else {
                     log.debug(
                         "closing outbound channel because WRITE future was not successful due to: ",
                         future.cause()
                     );
-                    future.channel().close(); // close the backside
+                    closeAndFlush(future.channel());
+                    closeAndFlush(ctx.channel());
                 }
             });
             outboundChannel.config().setAutoRead(true);
-        } else { // if the outbound channel has died, so be it... let this frontside finish with its call naturally
+        } else {
             log.warn("Output channel (" + outboundChannel + ") is NOT active");
             ReferenceCountUtil.release(msg);
+            closeAndFlush(ctx.channel());
         }
     }
 
@@ -78,12 +86,26 @@ public class FrontsideHandler extends ChannelInboundHandlerAdapter {
         }
     }
 
+    @Override
+    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
+        log.atError()
+            .setCause(cause)
+            .setMessage("Closing proxy connection after an unrecoverable frontside forwarding error")
+            .log();
+        if (outboundChannel != null) {
+            closeAndFlush(outboundChannel);
+        }
+        closeAndFlush(ctx.channel());
+    }
+
     /**
      * Closes the specified channel after all queued write requests are flushed.
      */
     static void closeAndFlush(Channel ch) {
         if (ch.isActive()) {
             ch.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+        } else if (ch.isOpen()) {
+            ch.close();
         }
     }
 }

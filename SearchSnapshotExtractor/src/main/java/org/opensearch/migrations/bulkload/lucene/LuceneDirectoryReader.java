@@ -8,6 +8,9 @@ import org.slf4j.LoggerFactory;
 
 public interface LuceneDirectoryReader extends AutoCloseable {
     int maxDoc();
+    default int maxDocIncludingSoftDeletes() {
+        return maxDoc();
+    }
     List<? extends LuceneLeafReaderContext> leaves();
     Path getIndexDirectoryPath();
     void close() throws IOException;

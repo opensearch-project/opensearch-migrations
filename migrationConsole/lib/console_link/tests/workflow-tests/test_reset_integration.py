@@ -28,12 +28,12 @@ from console_link.workflow.commands.reset import _delete_crd, _get_resource_comp
 logger = logging.getLogger(__name__)
 
 VALID_PHASES = {
-    "approvalgates": "Initialized",
+    "approvalgates": "Created",
     "capturedtraffics": "Ready",
     "captureproxies": "Ready",
     "datasnapshots": "Completed",
     "kafkaclusters": "Ready",
-    "snapshotmigrations": "Running",
+    "snapshotmigrations": "Pending",
     "trafficreplays": "Ready",
 }
 

@@ -20,6 +20,7 @@ import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 import org.opensearch.migrations.testfixtures.SearchClusterContainer;
 import org.opensearch.migrations.utils.FileSystemUtils;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Tag;
@@ -115,6 +116,14 @@ public class DataStreamMigrationTest extends SourceTestBase {
             assertThat("Source document with ID should be indexed successfully, but got " + sourceDocResponse,
                 sourceDocResponse.getKey(), anyOf(equalTo(200), equalTo(201)));
             log.info("Added source document with ID: {}", staticDocId);
+
+            // A source-only document proves that migration writes succeed; a
+            // pre-existing target document alone could hide rejected bulk requests.
+            var newSourceDocument = sourceClusterOperations.put(
+                "/" + DATA_STREAM_NAME + "/_create/new-source-document",
+                "{\"@timestamp\":\"2013-03-01T00:00:00\",\"message\":\"New source document\"}");
+            assertThat("Source-only document should be created",
+                newSourceDocument.getKey(), equalTo(201));
 
             log.info("Refreshing data stream again");
             refreshDataStream(sourceClusterOperations, DATA_STREAM_NAME);
@@ -231,6 +240,11 @@ public class DataStreamMigrationTest extends SourceTestBase {
             
             // Verify we got the document
             String responseBody = searchResponse.getValue();
+            var hits = new ObjectMapper().readTree(responseBody).path("hits");
+            assertThat("Both the existing target and newly migrated document must be present",
+                hits.path("total").path("value").asInt(), equalTo(2));
+            assertThat("The source-only document must be migrated",
+                responseBody.contains("New source document"), equalTo(true));
             assertThat("Response should contain hits section, but got: " + responseBody,
                 responseBody.contains("\"hits\""), equalTo(true));
             assertThat("Response should contain total count, but got: " + responseBody,

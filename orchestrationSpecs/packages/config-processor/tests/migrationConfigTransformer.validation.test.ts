@@ -87,6 +87,50 @@ describe('MigrationConfigTransformer validation', () => {
 
     const cloneBaseConfig = () => JSON.parse(JSON.stringify(baseConfig));
 
+    it('should omit version from transformed target identities while retaining source version', async () => {
+        const result = await transformer.processFromObject(cloneBaseConfig());
+        const snapshotMigration = result.snapshotMigrations![0];
+        const trafficReplay = result.trafficReplays![0];
+
+        expect(snapshotMigration.sourceConnectionIdentity).toEqual(expect.objectContaining({
+            version: "ES 7.10",
+        }));
+        expect(snapshotMigration.targetConnectionIdentity).not.toHaveProperty("version");
+        expect(trafficReplay.targetConnectionIdentity).not.toHaveProperty("version");
+        expect(snapshotMigration.targetConnectionIdentity).toEqual(expect.objectContaining({
+            solrContextPath: "",
+        }));
+    });
+
+    it('should lower the user-facing failed-document stream object to internal RFS options', async () => {
+        const config = cloneBaseConfig();
+        config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0] = {
+            documentBackfillConfig: {
+                failedDocumentStream: {
+                    type: "s3",
+                    bucket: "failed-documents",
+                    prefix: "migration-a/",
+                    region: "us-west-2",
+                    endpoint: "https://s3.us-west-2.amazonaws.com",
+                    maxBufferBytes: 123456,
+                },
+            },
+        };
+
+        const result = await transformer.processFromObject(config);
+        const documentBackfillConfig = result.snapshotMigrations![0].documentBackfillConfig!;
+
+        expect(documentBackfillConfig).toEqual(expect.objectContaining({
+            failedDocumentStreamS3Bucket: "failed-documents",
+            failedDocumentStreamS3Prefix: "migration-a/",
+            failedDocumentStreamS3Region: "us-west-2",
+            failedDocumentStreamS3Endpoint: "https://s3.us-west-2.amazonaws.com",
+            failedDocumentStreamMaxBufferBytes: 123456,
+            disableFailedDocumentStream: false,
+        }));
+        expect(documentBackfillConfig).not.toHaveProperty("failedDocumentStream");
+    });
+
     it('should reject rogue key at top level', () => {
         const configWithRogueKey = {
             ...baseConfig,
@@ -154,7 +198,10 @@ describe('MigrationConfigTransformer validation', () => {
                     skipEvaluateApproval: innerValue,
                     skipMigrateApproval: innerValue
                 },
-                documentBackfillConfig: innerValue === undefined ? {} : {
+                documentBackfillConfig: innerValue === undefined ? {
+                    failedDocumentStream: {type: "disabled"}
+                } : {
+                    failedDocumentStream: {type: "disabled"},
                     skipApproval: innerValue
                 }
             };
@@ -176,7 +223,7 @@ describe('MigrationConfigTransformer validation', () => {
         config.snapshotMigrationConfigs[0].skipApprovals = false;
         config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0] = {
             metadataMigrationConfig: {},
-            documentBackfillConfig: {}
+            documentBackfillConfig: {failedDocumentStream: {type: "disabled"}}
         };
 
         const result = await transformer.processFromObject(config);
@@ -185,6 +232,55 @@ describe('MigrationConfigTransformer validation', () => {
         expect(migration?.metadataMigrationConfig?.skipEvaluateApproval).toBe(false);
         expect(migration?.metadataMigrationConfig?.skipMigrateApproval).toBe(false);
         expect(migration?.documentBackfillConfig?.skipApproval).toBe(false);
+    });
+
+    it('should materialize component log-level defaults before building workflows', async () => {
+        const config = cloneBaseConfig();
+        config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0] = {
+            metadataMigrationConfig: {},
+            documentBackfillConfig: {failedDocumentStream: {type: "disabled"}}
+        };
+
+        const result = await transformer.processFromObject(config);
+        const migration = result.snapshotMigrations[0];
+
+        expect(result.proxies[0].proxyConfig.logLevels).toEqual({root: "info"});
+        expect(result.trafficReplays[0].replayerConfig.logLevels).toEqual({root: "info"});
+        expect(migration.metadataMigrationConfig?.logLevels).toEqual({root: "info"});
+        expect(migration.documentBackfillConfig?.logLevels).toEqual({
+            root: "info",
+            bulkRequestTrace: "off",
+            failedRequests: "warn",
+        });
+    });
+
+    it('should preserve configured log levels while materializing missing defaults', async () => {
+        const config = cloneBaseConfig();
+        config.traffic.proxies.proxy1.proxyConfig.logLevels = {root: "debug"};
+        config.traffic.replayers.replay1.replayerConfig = {
+            logLevels: {root: "trace"},
+        };
+        config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0] = {
+            metadataMigrationConfig: {
+                logLevels: {root: "warn"},
+            },
+            documentBackfillConfig: {
+                failedDocumentStream: {type: "disabled"},
+                logLevels: {root: "error"},
+            },
+        };
+
+        const result = await transformer.processFromObject(config);
+        const migration = result.snapshotMigrations[0];
+
+        expect(result.proxies[0].proxyConfig.logLevels).toEqual({root: "debug"});
+        expect(result.trafficReplays[0].replayerConfig.logLevels).toEqual({root: "trace"});
+        expect(migration.metadataMigrationConfig?.logLevels).toEqual({root: "warn"});
+        expect(migration.documentBackfillConfig?.logLevels).toEqual({
+            root: "error",
+            bulkRequestTrace: "off",
+            failedRequests: "warn",
+        });
     });
 
     it('should let per-gate skip flags override broader skipApprovals', async () => {
@@ -196,6 +292,7 @@ describe('MigrationConfigTransformer validation', () => {
                 skipEvaluateApproval: false
             },
             documentBackfillConfig: {
+                failedDocumentStream: {type: "disabled"},
                 skipApproval: false
             }
         };
@@ -206,6 +303,107 @@ describe('MigrationConfigTransformer validation', () => {
         expect(migration?.metadataMigrationConfig?.skipEvaluateApproval).toBe(false);
         expect(migration?.metadataMigrationConfig?.skipMigrateApproval).toBe(true);
         expect(migration?.documentBackfillConfig?.skipApproval).toBe(false);
+    });
+
+    it('should pass collectionRouting to both metadata and backfill as JSON for a collection-routed target', async () => {
+        const config = cloneBaseConfig() as any;
+        // A replayer on a collection-routed target would need a request transform
+        delete config.traffic;
+        config.targetClusters.target1 = {
+            endpoint: "https://123456789012.aoss.us-east-1.on.aws",
+            authConfig: {sigv4: {region: "us-east-1", service: "aoss"}},
+            collectionRouted: true
+        };
+        const collectionRouting = {
+            staticCollectionRouting: [{sourceIndex: "shared-config", collection: "common"}],
+            regexCollectionRouting: [{sourceIndex: "(.+)[-_]\\d{4}", collection: "$1"}]
+        };
+        config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0] = {
+            ...collectionRouting,
+            metadataMigrationConfig: {},
+            documentBackfillConfig: {failedDocumentStream: {type: "disabled"}}
+        };
+
+        const result = await transformer.processFromObject(config);
+        const migration = result.snapshotMigrations?.[0] as any;
+
+        expect(JSON.parse(migration.metadataMigrationConfig.collectionRouting)).toEqual(collectionRouting);
+        expect(JSON.parse(migration.documentBackfillConfig.collectionRouting)).toEqual(collectionRouting);
+        expect(migration.targetConfig.collectionRouted).toBe(true);
+    });
+
+    it('should pass a replayer with a request transform through for a collection-routed target', async () => {
+        const config = cloneBaseConfig() as any;
+        config.targetClusters.target1 = {
+            endpoint: "https://123456789012.aoss.us-east-1.on.aws",
+            authConfig: {sigv4: {region: "us-east-1", service: "aoss"}},
+            collectionRouted: true
+        };
+        config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0] = {
+            staticCollectionRouting: [{sourceIndex: "shared-config", collection: "common"}],
+            metadataMigrationConfig: {},
+            documentBackfillConfig: {failedDocumentStream: {type: "disabled"}}
+        };
+        config.traffic.replayers.replay1.replayerConfig = {
+            requestTransforms: {entryPoint: {javascript: "(m) => m"}}
+        };
+
+        const result = await transformer.processFromObject(config);
+        const replay = result.trafficReplays?.[0] as any;
+
+        expect(replay.replayerConfig.transformerConfig).toEqual(expect.any(String));
+        expect(replay.toTarget.authConfig.sigv4.service).toBe("aoss");
+    });
+
+    it('should pass only the routing lists that are set', async () => {
+        const config = cloneBaseConfig() as any;
+        delete config.traffic;
+        config.targetClusters.target1 = {
+            endpoint: "https://123456789012.aoss.us-east-1.on.aws",
+            authConfig: {sigv4: {region: "us-east-1", service: "aoss"}},
+            collectionRouted: true
+        };
+        const regexCollectionRouting = [{sourceIndex: "(vectors)_.*", collection: "tenant-$1"}];
+        config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0] = {
+            regexCollectionRouting,
+            metadataMigrationConfig: {}
+        };
+
+        const result = await transformer.processFromObject(config);
+        const migration = result.snapshotMigrations?.[0] as any;
+
+        expect(JSON.parse(migration.metadataMigrationConfig.collectionRouting)).toEqual({regexCollectionRouting});
+    });
+
+    it('should reject the old single collectionRouting list', async () => {
+        const config = cloneBaseConfig() as any;
+        delete config.traffic;
+        config.targetClusters.target1 = {
+            endpoint: "https://123456789012.aoss.us-east-1.on.aws",
+            authConfig: {sigv4: {region: "us-east-1", service: "aoss"}},
+            collectionRouted: true
+        };
+        config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0] = {
+            collectionRouting: [{sourceIndex: "regex:(.+)-\\d{4}", collection: "$1"}],
+            metadataMigrationConfig: {}
+        };
+
+        // The routed-target rule points users of the old field at the new ones
+        await expect(transformer.processFromObject(config)).rejects.toThrow(
+            /needs at least one staticCollectionRouting or regexCollectionRouting entry/);
+    });
+
+    it('should leave collectionRouting out for other targets', async () => {
+        const config = cloneBaseConfig();
+        config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0] = {
+            metadataMigrationConfig: {},
+            documentBackfillConfig: {failedDocumentStream: {type: "disabled"}}
+        };
+        const result = await transformer.processFromObject(config);
+        const migration = result.snapshotMigrations?.[0] as any;
+
+        expect(migration.metadataMigrationConfig).not.toHaveProperty('collectionRouting');
+        expect(migration.documentBackfillConfig).not.toHaveProperty('collectionRouting');
     });
 
     it('should carry metadata memory overrides from user input into populated workflow resources', async () => {
@@ -389,6 +587,11 @@ describe('MigrationConfigTransformer validation', () => {
             label: "default",
             kafkaTopic: "loaded-dump",
             managedByWorkflow: true,
+            topicSpecOverrides: expect.objectContaining({
+                config: expect.objectContaining({
+                    "message.timestamp.type": "CreateTime",
+                }),
+            }),
             configChecksum: expect.stringMatching(/^[a-f0-9]{16}$/)
         }));
 
@@ -430,6 +633,7 @@ describe('MigrationConfigTransformer validation', () => {
                     }
                 },
                 documentBackfillConfig: {
+                    failedDocumentStream: {type: "disabled"},
                     documentTransforms: [
                         {
                             transformName: "TypeMappingSanitizationTransformerProvider",
@@ -846,6 +1050,7 @@ describe('MigrationConfigTransformer validation', () => {
     it('should keep workload identity stable across gated RFS changes only', async () => {
         const withBackfill = JSON.parse(JSON.stringify(baseConfig));
         withBackfill.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0].documentBackfillConfig = {
+            failedDocumentStream: {type: "disabled"},
             maxConnections: 4,
         };
 
@@ -901,11 +1106,15 @@ describe('MigrationConfigTransformer validation', () => {
         const withMetadataOnly = cloneBaseConfig(); // baseConfig already has only metadataMigrationConfig
 
         const withBoth = cloneBaseConfig();
-        withBoth.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0].documentBackfillConfig = {};
+        withBoth.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0].documentBackfillConfig = {
+            failedDocumentStream: {type: "disabled"}
+        };
 
         const withBackfillOnly = cloneBaseConfig();
         delete withBackfillOnly.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0].metadataMigrationConfig;
-        withBackfillOnly.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0].documentBackfillConfig = {};
+        withBackfillOnly.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0].documentBackfillConfig = {
+            failedDocumentStream: {type: "disabled"}
+        };
 
         const metadataOnly = (await transformer.processFromObject(withMetadataOnly)).snapshotMigrations[0];
         const both = (await transformer.processFromObject(withBoth)).snapshotMigrations[0];
@@ -982,28 +1191,9 @@ describe('MigrationConfigTransformer validation', () => {
                         size: "2Gi",
                         deleteClaim: true,
                     },
-                    template: {
-                        pod: {
-                            topologySpreadConstraints: [
-                                {
-                                    maxSkew: 1,
-                                    topologyKey: "kubernetes.io/hostname",
-                                    whenUnsatisfiable: "ScheduleAnyway",
-                                    labelSelector: {
-                                        matchExpressions: [
-                                            {
-                                                key: "strimzi.io/name",
-                                                operator: "Exists",
-                                            },
-                                        ],
-                                    },
-                                },
-                            ],
-                        },
-                    },
                 },
                 topicSpecOverrides: {
-                    partitions: 1,
+                    partitions: 2,
                     replicas: 3,
                     config: {
                         "retention.ms": 604800000,
@@ -1024,6 +1214,109 @@ describe('MigrationConfigTransformer validation', () => {
                 }
             }
         });
+    });
+
+    it('should leave Kafka topology spread to the deployment unless the configuration overrides it', async () => {
+        const defaults = await transformer.processFromObject(baseConfig);
+        expect(defaults.kafkaClusters?.[0]?.config?.nodePoolSpecOverrides?.template).toBeUndefined();
+
+        const constraints = [{
+            maxSkew: 2,
+            topologyKey: "topology.kubernetes.io/zone",
+            whenUnsatisfiable: "ScheduleAnyway",
+            labelSelector: {},
+        }];
+        const config = cloneBaseConfig();
+        config.kafkaClusterConfiguration = {
+            default: {
+                autoCreate: {
+                    nodePoolSpecOverrides: {template: {pod: {topologySpreadConstraints: constraints}}},
+                },
+            },
+        };
+        const overridden = await transformer.processFromObject(config);
+        expect(overridden.kafkaClusters?.[0]?.config?.nodePoolSpecOverrides).toMatchObject({
+            replicas: 3,
+            template: {pod: {topologySpreadConstraints: constraints}},
+        });
+    });
+
+    it('should default workflow-managed live proxy topics to LogAppendTime', async () => {
+        const config = cloneBaseConfig();
+        config.kafkaClusterConfiguration = {
+            default: {
+                autoCreate: {
+                    topicSpecOverrides: {
+                        partitions: 2,
+                        replicas: 3,
+                        config: {
+                            "retention.ms": 12345,
+                        },
+                    },
+                },
+            },
+        };
+
+        const result = await transformer.processFromObject(config);
+
+        expect(result.proxies[0].kafkaConfig.topicSpecOverrides).toEqual({
+            partitions: 2,
+            replicas: 3,
+            config: {
+                "retention.ms": 12345,
+                "segment.bytes": 1073741824,
+                "message.timestamp.type": "LogAppendTime",
+            },
+        });
+    });
+
+    it('should reject an explicit CreateTime override for workflow-managed live proxy topics', () => {
+        const config = cloneBaseConfig();
+        config.kafkaClusterConfiguration = {
+            default: {
+                autoCreate: {
+                    topicSpecOverrides: {
+                        config: {
+                            "message.timestamp.type": "CreateTime",
+                        },
+                    },
+                },
+            },
+        };
+
+        expect(() => transformer.validateInput(config)).toThrow(
+            /'message.timestamp.type' to be 'LogAppendTime'/
+        );
+    });
+
+    it('should reject an explicit LogAppendTime override for workflow-managed BYOC topics', () => {
+        const config = cloneBaseConfig();
+        config.snapshotMigrationConfigs = [];
+        config.traffic = {
+            s3Sources: {
+                "loaded-dump": {
+                    s3Uri: "s3://traffic-bucket/captures/one.proto.gz",
+                    awsRegion: "us-east-1",
+                    sourceLabel: "detached-source",
+                },
+            },
+            replayers: {},
+        };
+        config.kafkaClusterConfiguration = {
+            default: {
+                autoCreate: {
+                    topicSpecOverrides: {
+                        config: {
+                            "message.timestamp.type": "LogAppendTime",
+                        },
+                    },
+                },
+            },
+        };
+
+        expect(() => transformer.validateInput(config)).toThrow(
+            /'message.timestamp.type' to be 'CreateTime'/
+        );
     });
 
     it('should require a CA secret for existing SCRAM-managed Kafka clusters', () => {
@@ -1133,6 +1426,7 @@ describe('MigrationConfigTransformer validation', () => {
                                     skipMigrateApproval: true,
                                 },
                                 documentBackfillConfig: {
+                                    failedDocumentStream: {type: "disabled"},
                                     podReplicas: 1,
                                 },
                             }

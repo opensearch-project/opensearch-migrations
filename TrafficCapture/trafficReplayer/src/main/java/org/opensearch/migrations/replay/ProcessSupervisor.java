@@ -1,0 +1,345 @@
+/*
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * The OpenSearch Contributors require contributions made to
+ * this file be licensed under the Apache-2.0 license or a
+ * compatible open source license.
+ */
+
+package org.opensearch.migrations.replay;
+
+import java.io.PrintStream;
+import java.time.Duration;
+import java.util.Comparator;
+import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
+
+import lombok.NonNull;
+import lombok.extern.slf4j.Slf4j;
+import org.apache.logging.log4j.LogManager;
+
+/**
+ * Converts an unrecoverable replay failure into one deterministic process-wide termination sequence.
+ *
+ * <p>Replay work is distributed across independently scheduled owners, so several failures can surface
+ * concurrently after one invariant is broken. This supervisor records only the first fatal signal, stops
+ * new input, emits the available diagnostics, and exits with a code that identifies the failure category.
+ * Later signals are ignored so they cannot replace the evidence for the initiating failure.</p>
+ *
+ * <p>A non-daemon watchdog is armed before any shutdown action runs. If logging, input shutdown, JVM
+ * shutdown hooks, or {@link System#exit(int)} stall, the watchdog prints all thread stacks and invokes
+ * {@link Runtime#halt(int)}. The result is a bounded failure path even when the normal process-exit
+ * machinery is itself unhealthy.</p>
+ */
+@Slf4j
+public final class ProcessSupervisor {
+    public static final Duration EXIT_WATCHDOG_LIMIT = Duration.ofMinutes(10);
+    public static final int EVENT_LOOP_EXIT_CODE = 80;
+    public static final int CAPTURE_PROTOCOL_VIOLATION_EXIT_CODE = 81;
+    public static final int UNEXPECTED_OWNER_EXIT_CODE = 89;
+
+    public enum Reason {
+        EVENT_LOOP_TERMINATED(
+            EVENT_LOOP_EXIT_CODE,
+            "event_loop_terminated",
+            "FATAL: a required replayer event loop terminated"
+        ),
+        CAPTURE_PROTOCOL_VIOLATION(
+            CAPTURE_PROTOCOL_VIOLATION_EXIT_CODE,
+            "capture_protocol_violation",
+            "FATAL: capture protocol violation drain limit expired"
+        ),
+        UNEXPECTED_FATAL_ERROR(
+            UNEXPECTED_OWNER_EXIT_CODE,
+            "unexpected_fatal_error",
+            "FATAL: a replayer owner failed unexpectedly"
+        );
+
+        private final int exitCode;
+        private final String metricLabel;
+        private final String message;
+
+        Reason(int exitCode, String metricLabel, String message) {
+            this.exitCode = exitCode;
+            this.metricLabel = metricLabel;
+            this.message = message;
+        }
+
+        public int exitCode() {
+            return exitCode;
+        }
+
+        public String metricLabel() {
+            return metricLabel;
+        }
+
+        public String message() {
+            return message;
+        }
+    }
+
+    // The warnings target compiler-generated members of this public fatal-signal contract.
+    @SuppressWarnings({"java:S100", "java:S1186"})
+    public record FatalSignal(
+        @NonNull Reason reason,
+        @NonNull String owner,
+        @NonNull String operation,
+        @NonNull Error failure
+    ) {}
+
+    @FunctionalInterface
+    public interface FailureSink {
+        void onFatal(FatalSignal signal);
+    }
+
+    @FunctionalInterface
+    public interface Metrics {
+        void fatalFailure(Reason reason);
+    }
+
+    @FunctionalInterface
+    public interface InputStopper {
+        void stopNewInput(FatalSignal signal);
+    }
+
+    @FunctionalInterface
+    interface ExitInitiator {
+        void exit(int exitCode);
+    }
+
+    @FunctionalInterface
+    interface HaltTerminator {
+        void halt(int exitCode);
+    }
+
+    @FunctionalInterface
+    interface WatchdogStarter {
+        void start(Duration delay, Runnable action);
+    }
+
+    @FunctionalInterface
+    interface ThreadDumper {
+        void dump(PrintStream stream);
+    }
+
+    private final Metrics metrics;
+    private final InputStopper inputStopper;
+    private final ExitInitiator exitInitiator;
+    private final HaltTerminator haltTerminator;
+    private final WatchdogStarter watchdogStarter;
+    private final ThreadDumper threadDumper;
+    private final Runnable diagnosticFlusher;
+    private final PrintStream errorStream;
+    private final AtomicReference<FatalSignal> firstFatal = new AtomicReference<>();
+
+    public ProcessSupervisor(Metrics metrics, InputStopper inputStopper) {
+        this(
+            metrics,
+            inputStopper,
+            System::exit,
+            Runtime.getRuntime()::halt,
+            ProcessSupervisor::startWatchdogThread,
+            ProcessSupervisor::dumpAllThreads,
+            LogManager::shutdown,
+            System.err
+        );
+    }
+
+    ProcessSupervisor(
+        @NonNull Metrics metrics,
+        @NonNull InputStopper inputStopper,
+        @NonNull ExitInitiator exitInitiator,
+        @NonNull HaltTerminator haltTerminator,
+        @NonNull WatchdogStarter watchdogStarter,
+        @NonNull ThreadDumper threadDumper,
+        @NonNull Runnable diagnosticFlusher,
+        @NonNull PrintStream errorStream
+    ) {
+        this.metrics = metrics;
+        this.inputStopper = inputStopper;
+        this.exitInitiator = exitInitiator;
+        this.haltTerminator = haltTerminator;
+        this.watchdogStarter = watchdogStarter;
+        this.threadDumper = threadDumper;
+        this.diagnosticFlusher = diagnosticFlusher;
+        this.errorStream = errorStream;
+    }
+
+    public void unexpectedOwnerFailure(String owner, String operation, Error failure) {
+        onFatal(new FatalSignal(Reason.UNEXPECTED_FATAL_ERROR, owner, operation, failure));
+    }
+
+    public void eventLoopTerminated(String owner, String operation, Error failure) {
+        onFatal(new FatalSignal(Reason.EVENT_LOOP_TERMINATED, owner, operation, failure));
+    }
+
+    public void captureProtocolViolationDrainExpired() {
+        onFatal(new FatalSignal(
+            Reason.CAPTURE_PROTOCOL_VIOLATION,
+            "capture protocol violation terminator",
+            "bounded drain expiry",
+            new Error("Capture protocol violation drain limit expired")
+        ));
+    }
+
+    public FailureSink failureSink() {
+        return this::onFatal;
+    }
+
+    public void onFatal(@NonNull FatalSignal signal) {
+        if (!firstFatal.compareAndSet(null, signal)) {
+            return;
+        }
+
+        watchdogStarter.start(EXIT_WATCHDOG_LIMIT, () -> watchdogExpired(signal));
+        stopNewInput(signal);
+        writeDiagnostics(signal);
+        exitInitiator.exit(signal.reason().exitCode());
+    }
+
+    public boolean fatalTerminationStarted() {
+        return firstFatal.get() != null;
+    }
+
+    public Optional<FatalSignal> firstFatalSignal() {
+        return Optional.ofNullable(firstFatal.get());
+    }
+
+    // The fatal path records every secondary Throwable so no failure can skip the remaining exit steps.
+    @SuppressWarnings("java:S1181")
+    private void stopNewInput(FatalSignal signal) {
+        try {
+            inputStopper.stopNewInput(signal);
+        } catch (Throwable stopFailure) {
+            signal.failure().addSuppressed(stopFailure);
+        }
+    }
+
+    // The fatal path records every secondary Throwable so no failure can skip the remaining diagnostics.
+    @SuppressWarnings("java:S1181")
+    private void writeDiagnostics(FatalSignal signal) {
+        try {
+            metrics.fatalFailure(signal.reason());
+        } catch (Throwable metricFailure) {
+            signal.failure().addSuppressed(metricFailure);
+        }
+
+        try {
+            log.atError()
+                .setCause(signal.failure())
+                .setMessage(
+                    "event=replayer_fatal_failure reason={} owner={} operation={}"
+                )
+                .addArgument(() -> signal.reason().name().toLowerCase(java.util.Locale.ROOT))
+                .addArgument(signal.owner())
+                .addArgument(signal.operation())
+                .log();
+        } catch (Throwable loggingFailure) {
+            signal.failure().addSuppressed(loggingFailure);
+        }
+
+        try {
+            errorStream.println(
+                signal.reason().message()
+                    + "; owner="
+                    + signal.owner()
+                    + ", operation="
+                    + signal.operation()
+            );
+            signal.failure().printStackTrace(errorStream);
+        } catch (Throwable stderrFailure) {
+            signal.failure().addSuppressed(stderrFailure);
+        }
+
+        try {
+            diagnosticFlusher.run();
+        } catch (Throwable flushFailure) {
+            signal.failure().addSuppressed(flushFailure);
+            try {
+                errorStream.println("FATAL: diagnostic flush failed during replay termination");
+                flushFailure.printStackTrace(errorStream);
+            } catch (Throwable ignored) {
+                // The watchdog remains responsible for eventual termination.
+            }
+        }
+
+        try {
+            errorStream.flush();
+        } catch (Throwable flushFailure) {
+            signal.failure().addSuppressed(flushFailure);
+        }
+    }
+
+    // Runtime.halt must still run when diagnostic output fails with any Throwable.
+    @SuppressWarnings("java:S1181")
+    private void watchdogExpired(FatalSignal signal) {
+        try {
+            errorStream.println(
+                "FATAL: System.exit did not complete within "
+                    + EXIT_WATCHDOG_LIMIT
+                    + "; owner="
+                    + signal.owner()
+                    + ", operation="
+                    + signal.operation()
+                    + "; writing a thread dump before Runtime.halt("
+                    + signal.reason().exitCode()
+                    + ")"
+            );
+            threadDumper.dump(errorStream);
+        } catch (Throwable dumpFailure) {
+            try {
+                errorStream.println("FATAL: failed to write the process watchdog thread dump");
+                dumpFailure.printStackTrace(errorStream);
+            } catch (Throwable ignored) {
+                // Runtime.halt must not depend on diagnostic output remaining functional.
+            }
+        } finally {
+            try {
+                errorStream.flush();
+            } finally {
+                haltTerminator.halt(signal.reason().exitCode());
+            }
+        }
+    }
+
+    private static void startWatchdogThread(Duration delay, Runnable action) {
+        var watchdog = new Thread(() -> {
+            try {
+                Thread.sleep(delay.toMillis());
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+            action.run();
+        }, "replayer-fatal-exit-watchdog");
+        watchdog.setDaemon(false);
+        watchdog.start();
+    }
+
+    private static void dumpAllThreads(PrintStream stream) {
+        stream.println("Full thread dump:");
+        Thread.getAllStackTraces()
+            .entrySet()
+            .stream()
+            .sorted(
+                Comparator.comparing((Map.Entry<Thread, StackTraceElement[]> entry) -> entry.getKey().getName())
+                    .thenComparingLong(entry -> entry.getKey().threadId())
+            )
+            .forEach(entry -> {
+                var thread = entry.getKey();
+                stream.println(
+                    '"'
+                        + thread.getName()
+                        + "\" #"
+                        + thread.threadId()
+                        + " "
+                        + thread.getState()
+                );
+                for (var frame : entry.getValue()) {
+                    stream.println("\tat " + frame);
+                }
+                stream.println();
+            });
+    }
+}

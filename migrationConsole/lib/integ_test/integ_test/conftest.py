@@ -10,6 +10,8 @@
 #              variables, so they only run in the BYOS pipeline — not the local k8s jobs.
 #   0020       GCS snapshot migration tests
 #   0021       Combined AOSS collection test (search, time-series, vector)
+#   0024       AOSS per-account endpoint routing to NextGen collections (0022-0023 are retired)
+#   0025       AOSS NextGen vector collection through its own endpoint (no collection routing)
 #   0031-0039  CDC tests (capture proxy + replayer + live traffic)
 #   0040-0049  CDC full E2E tests (capture proxy + replayer + backfill + generate-data)
 #   0050-0059  Observability tests (metrics/tracing backends)
@@ -35,12 +37,16 @@ from .test_cases.backfill_tests import *
 from .test_cases.snapshot_only_tests import *
 from .test_cases.cdc_tests import *
 from .test_cases.cdc_pem_env_var_tests import *
+from .test_cases.change_restriction_override_tests import *
+from .test_cases.backpressure_tests import *
 from .test_cases.cdc_generate_data_tests import *
 from .test_cases.cdc_mixed_operations_tests import *
 from .test_cases.cdc_simple_bulk_e2e_tests import *
 from .test_cases.mountable_transform_tests import *
 from .test_cases.cdc_aoss_tests import *
 from .test_cases.aoss_collection_tests import *
+from .test_cases.aoss_collection_routing_tests import *
+from .test_cases.aoss_nextgen_direct_tests import *
 from .test_cases.solr_tests import *
 from .test_cases.observability_tests import *
 from .test_cases.byoc_captured_traffic_tests import *
@@ -81,6 +87,9 @@ def pytest_addoption(parser):
                      help="Specify the Migration ALB endpoint for the source capture proxy")
     parser.addoption("--target_proxy_alb_endpoint", action="store", default=None,
                      help="Specify the Migration ALB endpoint for the target proxy")
+    parser.addoption("--replayer_group_id", action="store", default=None,
+                     help="Kafka consumer group of the deployed traffic replayer "
+                          "(default: logging-group-<unique_id>)")
     parser.addoption("--image_registry_prefix", action="store", default="",
                      help="Registry prefix for custom ES cluster images (e.g. 'localhost:5000/')")
     parser.addoption("--speedup_factor", type=int, default=20,

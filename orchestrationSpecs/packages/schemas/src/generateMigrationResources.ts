@@ -17,6 +17,15 @@ const MIGRATION_RUN_PLURAL = "migrationruns";
 const RUN_NUMBER_LABEL = `${API_GROUP}/run-number`;
 const WORKFLOW_UID_LABEL = `${API_GROUP}/workflow-uid`;
 const APPROVED_DURING_RUN_ANNOTATION = `${API_GROUP}/approved-during-run`;
+/**
+ * Override annotations let an operator push a change the field rules would refuse, for one workflow run.
+ * Their value must equal the resource's run-number label. One key per field (prefix + spec path), or one key for
+ * every field on the resource. They don't affect Lock-on-Complete, the deleting-phase guard, or MigrationRun
+ * immutability.
+ */
+export const CHANGE_RESTRICTION_OVERRIDE_FIELD_ANNOTATION_PREFIX = `change-restriction-override.${API_GROUP}/`;
+export const CHANGE_RESTRICTION_OVERRIDE_ALL_FIELDS_ANNOTATION = `${API_GROUP}/change-restriction-override-all-fields`;
+const ANNOTATION_NAME_PART = /^[A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?$/;
 const GENERATED_LABELS = {
     "app.kubernetes.io/part-of": "opensearch-migrations",
     "migrations.opensearch.org/generated": "true",
@@ -146,6 +155,9 @@ function statusSchemaFor(resource: ResourceProjection): Record<string, YamlValue
     };
     if (resource.lifecycle !== "approvalGate") {
         common.configChecksum = {type: "string"};
+    } else {
+        // Human-readable note on how the gate was approved, e.g. a change-restriction override.
+        common.message = {type: "string"};
     }
     if (resource.kind === "CapturedTraffic") {
         common.checksumForSnapshot = {type: "string"};
@@ -160,6 +172,8 @@ function statusSchemaFor(resource: ResourceProjection): Record<string, YamlValue
     }
     if (resource.kind === "SnapshotMigration") {
         common.checksumForReplayer = {type: "string"};
+        // Set once, when the backfill first starts; see fullMigration.ts migrateFromSnapshot.
+        common.rfsSessionName = {type: "string"};
         common.outputs = {type: "object", "x-kubernetes-preserve-unknown-fields": true};
     }
     return {
@@ -343,6 +357,12 @@ function equalityExpression(field: ProjectedField): string {
     return `(!(${oldPresent}) && !(${newPresent})) || ((${oldPresent}) && (${newPresent}) && ${celPath(field.specPath)} == ${celPath(field.specPath, "oldObject")})`;
 }
 
+function nonIncreasingExpression(field: ProjectedField): string {
+    const oldPresent = presentExpression(field.specPath, "oldObject");
+    const newPresent = presentExpression(field.specPath, "object");
+    return `(!(${oldPresent}) && !(${newPresent})) || ((${oldPresent}) && (${newPresent}) && ${celPath(field.specPath)} <= ${celPath(field.specPath, "oldObject")})`;
+}
+
 function nonDecreasingExpression(field: ProjectedField): string {
     const oldPresent = presentExpression(field.specPath, "oldObject");
     const newPresent = presentExpression(field.specPath, "object");
@@ -352,6 +372,32 @@ function nonDecreasingExpression(field: ProjectedField): string {
 function indentBlock(text: string, spaces: number): string {
     const pad = " ".repeat(spaces);
     return text.split("\n").map(line => `${pad}${line}`).join("\n");
+}
+
+/** The override annotation for one field, e.g. change-restriction-override.migrations.opensearch.org/documentBackfillDocTransformerConfig. */
+export function changeRestrictionOverrideFieldAnnotation(field: Pick<ProjectedField, "specPath">): string {
+    const name = field.specPath.join(".");
+    if (name.length > 63 || !ANNOTATION_NAME_PART.test(name)) {
+        throw new Error(`Spec path '${name}' can't be an override annotation name: annotation names are at most ` +
+            `63 alphanumeric, '-', '_' or '.' characters`);
+    }
+    return CHANGE_RESTRICTION_OVERRIDE_FIELD_ANNOTATION_PREFIX + name;
+}
+
+/** True when the annotation is present and equals the resource's run-number label. */
+function annotationForThisRunExpression(annotation: string): string {
+    return [
+        "has(object.metadata.annotations)",
+        `'${annotation}' in object.metadata.annotations`,
+        "has(object.metadata.labels)",
+        `'${RUN_NUMBER_LABEL}' in object.metadata.labels`,
+        `object.metadata.annotations['${annotation}'] == object.metadata.labels['${RUN_NUMBER_LABEL}']`,
+    ].join(" && ");
+}
+
+function changeRestrictionOverrideExpression(field: ProjectedField): string {
+    return `(${annotationForThisRunExpression(changeRestrictionOverrideFieldAnnotation(field))}) ||\n` +
+        `(${annotationForThisRunExpression(CHANGE_RESTRICTION_OVERRIDE_ALL_FIELDS_ANNOTATION)})`;
 }
 
 function approvalExpression(): string {
@@ -401,24 +447,30 @@ function policyFor(resource: ResourceProjection, fields: ProjectedField[]): stri
 
     for (const field of impossible) {
         validations.push(validationRule(
-            `(${firstPopulationAllowed}) ||\n(${equalityExpression(field)})`,
+            `(${firstPopulationAllowed}) ||\n(${equalityExpression(field)}) ||\n${changeRestrictionOverrideExpression(field)}`,
             `Impossible: ${field.specPath.join(".")} cannot be changed. Delete and recreate.`
         ));
     }
 
     for (const field of gated.filter(field => field.invariant === "nonDecreasing")) {
         validations.push(validationRule(
-            `(${firstPopulationAllowed}) ||\n(${nonDecreasingExpression(field)})`,
+            `(${firstPopulationAllowed}) ||\n(${nonDecreasingExpression(field)}) ||\n${changeRestrictionOverrideExpression(field)}`,
             `Impossible: ${field.specPath.join(".")} cannot decrease.`
         ));
     }
 
     if (gated.length > 0) {
-        const gatedEquality = gated.map(equalityExpression).map(expr => `(${expr})`).join(" &&\n");
+        // A field gated only on increase passes without approval when it stays the same or goes down.
+        // Each gated field also passes on its own override annotation, so overriding one field doesn't
+        // waive approval for another.
+        const gatedEquality = gated
+            .map(field => `(${field.gatedOnIncreaseOnly ? nonIncreasingExpression(field) : equalityExpression(field)}) ||\n` +
+                changeRestrictionOverrideExpression(field))
+            .map(expr => `(${expr})`).join(" &&\n");
         const expression = `(${firstPopulationAllowed}) ||\n(\n${indentBlock(gatedEquality, 2)}\n) ||\n(${indentBlock(approvalExpression(), 2)}\n)`;
         validations.push(validationRule(
             expression,
-            `Gated changes detected on ${resource.kind} fields: ${gated.map(field => field.specPath.join(".")).join(", ")}. Approve the corresponding ApprovalGate to proceed.`
+            `Gated changes detected on ${resource.kind} fields: ${gated.map(field => field.specPath.join(".") + (field.gatedOnIncreaseOnly ? " (increase)" : "")).join(", ")}. Approve the corresponding ApprovalGate to proceed.`
         ));
     }
 

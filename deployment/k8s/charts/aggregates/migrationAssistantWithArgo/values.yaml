@@ -66,16 +66,19 @@ aws:
   configureAwsEksResources: false
   region: us-east-2
   account: "123456789012"
+  # EKS cluster identity attached to Kafka PVC CloudWatch metrics. Deployment
+  # entrypoints populate this value from the CloudFormation stack output.
+  eksClusterName: ""
 
   # Tags to stamp onto the AWS resources that EKS Auto Mode provisions for this release:
   # EC2 instances, EBS volumes and the load balancers/target groups behind any Service or
   # Ingress. Auto Mode creates those at runtime rather than through CloudFormation, so
   # CloudFormation stack tags never reach them -- they have to be declared here instead.
-  # aws-bootstrap.sh populates this from its --tags flag; set it directly when installing
-  # the chart by hand. Requires the cluster IAM role to allow user tags on Auto Mode
-  # resources (the solution CloudFormation template grants this) and requires
-  # aws.nodeClassName to name a custom NodeClass, since the built-in "default" NodeClass
-  # is owned by EKS and cannot carry tags.
+  # aws-bootstrap.sh populates this from --tags, or restores it from the selected custom
+  # NodeClass during a skip-CFN redeployment. Set it directly when installing the chart by hand.
+  # Requires the cluster IAM role to allow user tags on Auto Mode resources (the solution
+  # CloudFormation template grants this) and requires aws.nodeClassName to name a custom
+  # NodeClass, since the built-in "default" NodeClass is owned by EKS and cannot carry tags.
   # Keys reserved by EKS/Karpenter are rejected: kubernetes.io/cluster/*, karpenter.sh/*,
   # eks.amazonaws.com/*.
   resourceTags: {}
@@ -85,7 +88,8 @@ aws:
   # NodeClass that every NodePool in this chart references. "default" is the NodeClass EKS
   # Auto Mode provisions for its built-in NodePools; it cannot be edited, so tagging nodes
   # means pointing this at a custom NodeClass (aws-bootstrap.sh creates one when --tags is
-  # given) and disabling the built-in NodePools, whose nodes always use "default".
+  # given and discovers it on skip-CFN redeployments) and disabling the built-in NodePools,
+  # whose nodes always use "default".
   nodeClassName: default
 
 cloudProvider: ""
@@ -111,11 +115,37 @@ cluster:
 # launches supported families, never nano/micro/small sizes, and nothing with a single CPU
 # (https://docs.aws.amazon.com/eks/latest/userguide/automode-learn-instances.html#auto-supported-instances).
 workloadsNodePool:
+  # Controls placement for the migration data plane:
+  #   shared   - RFS, Kafka, capture proxies and replayers use general-work-pool together.
+  #   isolated - RFS, Kafka, capture proxies and replayers each use a dedicated, tainted pool.
+  # The optional k6 load generator always uses its own tainted pool in either mode.
+  # This setting only has an effect when cluster.useCustomKarpenterNodePool is true.
+  mode: isolated
+  # How RFS workers, Kafka brokers, capture proxies and replayers spread across availability zones
+  # (topology.kubernetes.io/zone), applied whether or not the custom NodePools are enabled:
+  #   required  - never place a pod where its zone would be more than one pod ahead of the least
+  #               populated zone; pods wait for capacity in that zone instead.
+  #   preferred - bias placement toward balance but never block scheduling.
+  #   none      - no zone spread.
+  # Nodes without a zone label (kind, minikube, docker-desktop) are ineligible under "required".
+  # A workflow configuration's kafka nodePoolSpecOverrides.template.pod.topologySpreadConstraints,
+  # when set, replaces the generated Kafka constraints.
+  zoneSpread: preferred
+  # Number of zones the cluster schedules into. Under "required" it becomes the spread's
+  # minDomains, so pods wait for a node in every zone instead of filling the zones that already
+  # have capacity when a fleet starts. 0 leaves minDomains unset. aws-bootstrap.sh sets it from
+  # the cluster's subnets.
+  zoneCount: 0
+  name: general-work-pool
+  # Exact EC2 instance types. When set, these replace the architecture, category, generation and
+  # size filters below so inherited filters cannot accidentally exclude the requested SKU.
+  instanceTypes: []  # e.g. ["c6id.24xlarge"].
   architectures: []  # e.g. ["arm64"] for Graviton only.
   # With no capacity type, Auto Mode prioritizes reserved, then spot, then on-demand
   # (https://docs.aws.amazon.com/eks/latest/userguide/create-node-pool.html#auto-supported-labels),
-  # so spot will be used where available. A spot interruption stops the migration work on that
-  # node; set ["on-demand"] for long-running migrations that must not be interrupted.
+  # so spot will be used where available. This base value applies to the shared pool and to any
+  # dedicated pool that does not override it. RFS, Kafka, capture proxies and replayers override it
+  # below because interruptions destabilize backfill progress, capture availability and replay rate.
   capacityTypes: []
   instanceCategories: []  # e.g. ["c", "m", "r"] for compute, general purpose and memory optimized.
   minInstanceGeneration: null  # Inclusive, e.g. 5 means generation 5 and newer. 0 or null omits it.
@@ -137,6 +167,48 @@ workloadsNodePool:
     # out the value EKS itself defaults to when the block is omitted: remove empty nodes right away.
     # Set e.g. 30m to keep an empty node around for the next migration step.
     consolidateAfter: 0s
+
+  # Dedicated pools inherit the instance-type, architecture, capacity-type, instance-category,
+  # generation, instance-size and disruption settings above unless that setting is overridden below.
+  # Pool limits are deliberately independent and empty by default: taints plus required pod
+  # selection provide isolation without imposing a capacity ceiling. Set limits when a deployment
+  # needs an explicit cost or quota guardrail.
+  dedicatedPools:
+    rfs:
+      name: rfs-work-pool
+      # Backfills are long-lived and benchmark runs require stable capacity.
+      capacityTypes: ["on-demand"]
+      # Snapshot extraction needs both CPU and memory, and the ephemeral-storage request prevents
+      # Auto Mode from selecting instances without enough local or NodeClass-provided storage.
+      instanceCategories: ["c", "m", "r"]
+      minInstanceGeneration: 6
+      limits: {}
+    kafka:
+      name: kafka-work-pool
+      # Broker interruptions destabilize both capture publishing and replay consumer groups.
+      capacityTypes: ["on-demand"]
+      # Unconstrained, Auto Mode replaced an interrupted broker's node with a p4d.24xlarge GPU instance.
+      instanceCategories: ["c", "m", "r"]
+      minInstanceGeneration: 6
+      limits: {}
+    proxy:
+      name: proxy-work-pool
+      # Capture must remain continuously available; do not place proxies on interruptible capacity.
+      capacityTypes: ["on-demand"]
+      limits: {}
+    replayer:
+      name: replayer-work-pool
+      # Preserve a predictable replay rate and avoid fleet-wide Kafka rebalances from Spot churn.
+      capacityTypes: ["on-demand"]
+      # Replayers are CPU-bound. Unconstrained, Auto Mode packed them onto burstable t-series nodes
+      # (throttled once CPU credits run out) and accelerator families (inf, trn, g) whose separate
+      # quotas left node launches stuck and replayer pods pending.
+      instanceCategories: ["c", "m"]
+      minInstanceGeneration: 6
+      limits: {}
+    k6:
+      name: k6-work-pool
+      limits: {}
 
 # Worker fleets: migration-console-identical pods on bigger hardware.
 # Dormant at replicas: 0. Scale up with: kubectl scale deployment/worker-fleet-<name> --replicas=N
@@ -190,6 +262,13 @@ logs:
     name: logs-pvc
     size: 10Gi
     storageClass: ""
+  # Alternative to sharedLogsVolume for local clusters: Fluent Bit writes each node's logs to
+  # <node name>/ under this node path (valuesForLocalK8s.yaml), and the console mounts the path at
+  # /shared-logs-output. kindTesting.sh mounts one host directory here on every node, so the console
+  # sees every node's logs; without that mount it sees only its own node's.
+  hostLogsVolume:
+    enabled: false
+    path: /var/log/migrations-all
   format: application # application or docker-json
 
 
@@ -223,6 +302,10 @@ otelConfiguration:
 
 metrics:
   enabled: true
+  cloudWatch:
+    # Disable to keep Prometheus/Grafana metrics while suppressing CloudWatch
+    # metric export and ACK-managed dashboards.
+    enabled: true
   metricsCollectorEndpoint: "http://otel-collector:4317"
   env: []
   collectorResources:
@@ -299,6 +382,22 @@ metrics:
           receivers: [ otlp ]
           processors:
           exporters: [ debug ]
+
+# Global policy shared by the Prometheus and CloudWatch dashboards.
+# Percentages describe capacity remaining free, not capacity used.
+kafkaObservability:
+  storage:
+    warningFreePercent: 20
+    criticalFreePercent: 10
+    inodeFreePercent: 10
+    forecastLookback: 6h
+    projectedFillWarningHorizonHours: 24
+    abnormalVolumeHealthAlerting: true
+  prometheusAlerts:
+    enabled: false
+  brokerMetrics:
+    enabled: true
+    alertsEnabled: false
 
 tracing:
   enabled: false
@@ -614,6 +713,10 @@ charts:
       resources:
         requests: { cpu: 50m, memory: 32Mi }
         limits:   { cpu: 200m, memory: 64Mi }
+      # Like the otel-collector DaemonSet: run on every node, including the tainted RFS, Kafka,
+      # proxy, replayer and k6 pools, so those pods' logs are collected too.
+      tolerations:
+        - operator: Exists
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
@@ -765,10 +868,10 @@ charts:
           podMonitorNamespaceSelector: { }
           resources:
             requests:
-              memory: "1Gi"
+              memory: "2Gi"
               cpu: "500m"
             limits:
-              memory: "2Gi"
+              memory: "4Gi"
               cpu: "1000m"
           retention: "15d"
           retentionSize: "10GB"
@@ -784,6 +887,12 @@ charts:
         service:
           type: ClusterIP
           port: 9090
+      # The OTel DaemonSet already scrapes each node's cAdvisor endpoint and
+      # exposes those metrics to Prometheus as well as CloudWatch. Avoid a
+      # second, direct kubelet cAdvisor scrape of the same container series.
+      kubelet:
+        serviceMonitor:
+          cAdvisor: false
       alertmanager:
         enabled: false
       nodeExporter:
@@ -795,6 +904,11 @@ charts:
           requests: { cpu: 50m, memory: 128Mi }
           limits:   { cpu: 250m, memory: 256Mi }
       kube-state-metrics:
+        # kubelet_volume_stats_* identifies a PVC only by namespace/name. Export
+        # these Strimzi labels so PromQL can join the volume series to the PVC
+        # identity instead of treating every data-* claim as Kafka.
+        metricLabelsAllowlist:
+          - "persistentvolumeclaims=[strimzi.io/cluster,strimzi.io/pool-name]"
         resources:
           requests: { cpu: 50m, memory: 64Mi }
           limits:   { cpu: 200m, memory: 128Mi }
@@ -810,7 +924,9 @@ charts:
           limits:   { cpu: 500m, memory: 256Mi }
         sidecar:
           image:
-            tag: 1.30.11
+            # 1.30.11 never loads a dashboard: after loading the in-cluster config, its watches call
+            # localhost:80. 2.14.1 loads them (checked on kind and EKS).
+            tag: 2.14.1
           dashboards:
             resources:
               requests: { cpu: 50m, memory: 100Mi }

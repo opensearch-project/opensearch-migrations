@@ -4,7 +4,7 @@ import pytest
 from textual.widgets import Tree
 
 from console_link.workflow.resource_tree import (
-    ResourceNode, ResourceGroup, ResourceSection,
+    PHASE_SYMBOLS, ResourceNode, ResourceGroup, ResourceSection,
 )
 from console_link.workflow.tui.resource_tree_state_manager import (
     ResourceTreeStateManager, RESOURCE_ID_PREFIX,
@@ -13,7 +13,7 @@ from console_link.workflow.tui.resource_tree_state_manager import (
 
 # --- Helpers ---
 
-def make_resource(name, plural='snapshotmigrations', phase='Running', spec=None, status=None,
+def make_resource(name, plural='snapshotmigrations', phase='Pending', spec=None, status=None,
                   depends_on=None, workflow_progress=None):
     return ResourceNode(
         name=name, plural=plural, phase=phase,
@@ -130,7 +130,7 @@ class TestIncrementalUpdate:
 
     def test_update_detects_phase_change(self, tree_and_manager):
         tree, mgr = tree_and_manager
-        resource = make_resource('snap-1', 'datasnapshots', 'Running')
+        resource = make_resource('snap-1', 'datasnapshots', 'Pending')
         mgr.rebuild(make_sections({'Snapshot': [resource]}))
         # Change phase
         updated = make_resource('snap-1', 'datasnapshots', 'Completed')
@@ -212,3 +212,11 @@ class TestIncrementalUpdate:
         ])
         mgr.rebuild(make_sections({'Backfill': [resource]}))
         assert 'pod-1' in observed_pods
+
+
+class TestResourceLabel:
+    def test_label_uses_phase_symbol(self):
+        for phase in ['Created', 'Pending', 'Ready', 'Completed', 'Deleting', 'Error']:
+            label = ResourceTreeStateManager._resource_label(make_resource('r', phase=phase))
+            assert PHASE_SYMBOLS[phase][0] in label, phase
+            assert PHASE_SYMBOLS['Unknown'][0] not in label, phase

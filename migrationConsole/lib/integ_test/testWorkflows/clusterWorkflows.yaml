@@ -1264,6 +1264,14 @@ spec:
         parameters:
           - name: cluster-name
           - name: namespace
+          - name: opensearch-config-extra
+            default: ""
+          - name: cpu
+            default: "2"
+          - name: memory
+            default: "4Gi"
+          - name: heap
+            default: "2g"
       container:
         image: mirror.gcr.io/dtzar/helm-kubectl:3.18.6
         command: [sh, -c]
@@ -1279,6 +1287,7 @@ spec:
             network.host: 0.0.0.0
             discovery.type: single-node
             plugins.security.disabled: true
+            {{inputs.parameters.opensearch-config-extra}}
             EOF
             
             # Create OpenSearch values file
@@ -1294,14 +1303,14 @@ spec:
               enabled: false
             resources:
               requests:
-                cpu: "2"
-                memory: "4Gi"
+                cpu: "{{inputs.parameters.cpu}}"
+                memory: "{{inputs.parameters.memory}}"
               limits:
-                cpu: "2"
-                memory: "4Gi"
+                cpu: "{{inputs.parameters.cpu}}"
+                memory: "{{inputs.parameters.memory}}"
             persistence:
               enabled: false
-            opensearchJavaOpts: "-Xms2g -Xmx2g"
+            opensearchJavaOpts: "-Xms{{inputs.parameters.heap}} -Xmx{{inputs.parameters.heap}}"
             plugins:
               enabled: true
               installList:
@@ -1343,6 +1352,38 @@ spec:
           - name: cluster-config
             valueFrom:
               path: /tmp/cluster-config.json
+
+    # OpenSearch 2.19 starved on purpose, so that bulk writers get pushed back (Test0011RfsBackpressure): one CPU,
+    # one write thread and a write queue of 10, so more than about 11 concurrent bulks are rejected.
+    - name: opensearch-2-19-starved-single-node
+      inputs:
+        parameters:
+          - name: cluster-name
+          - name: namespace
+      steps:
+        - - name: deploy-starved-cluster
+            template: opensearch-2-19-single-node
+            arguments:
+              parameters:
+                - name: cluster-name
+                  value: "{{inputs.parameters.cluster-name}}"
+                - name: namespace
+                  value: "{{inputs.parameters.namespace}}"
+                - name: opensearch-config-extra
+                  value: |
+                    thread_pool.write.size: 1
+                    thread_pool.write.queue_size: 10
+                - name: cpu
+                  value: "1"
+                - name: memory
+                  value: "2Gi"
+                - name: heap
+                  value: "1g"
+      outputs:
+        parameters:
+          - name: cluster-config
+            valueFrom:
+              parameter: "{{steps.deploy-starved-cluster.outputs.parameters.cluster-config}}"
 
     # OpenSearch 3.1 Single Node Template
     # - Uses Argo "resource" templates (no image / no kubectl container)

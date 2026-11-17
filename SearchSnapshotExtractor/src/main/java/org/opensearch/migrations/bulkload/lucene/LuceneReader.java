@@ -1,16 +1,20 @@
 package org.opensearch.migrations.bulkload.lucene;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.stream.IntStream;
 
 import org.opensearch.migrations.bulkload.common.DocumentChangeType;
 import org.opensearch.migrations.bulkload.common.LuceneDocumentChange;
+import org.opensearch.migrations.bulkload.common.SnapshotDocumentCounts;
+import org.opensearch.migrations.bulkload.common.SourceFormat;
 
 import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
@@ -49,9 +53,23 @@ public class LuceneReader {
     }
 
     public static Flux<LuceneDocumentChange> streamDocumentChanges(LuceneIndexReader indexReader, String segmentsFileName, int startDocIdx, FieldMappingContext mappingContext, boolean useRecoverySource) {
+        return streamDocumentChanges(indexReader, segmentsFileName, startDocIdx, mappingContext,
+            useRecoverySource, null, null);
+    }
+
+    /**
+     * @param snapshotCountsSink receives the shard's document counts once the reader is
+     *                         open, before any documents are emitted. May be null.
+     */
+    public static Flux<LuceneDocumentChange> streamDocumentChanges(LuceneIndexReader indexReader, String segmentsFileName, int startDocIdx, FieldMappingContext mappingContext, boolean useRecoverySource, String nestedPathField, Consumer<SnapshotDocumentCounts> snapshotCountsSink) {
         return Flux.using(
             () -> indexReader.getReader(segmentsFileName),
-            reader -> readDocsByLeavesFromStartingPosition(reader, startDocIdx, mappingContext, useRecoverySource),
+            reader -> {
+                if (snapshotCountsSink != null) {
+                    snapshotCountsSink.accept(countSnapshotDocuments(reader, nestedPathField));
+                }
+                return readDocsByLeavesFromStartingPosition(reader, startDocIdx, mappingContext, useRecoverySource);
+            },
             reader -> {
                 try {
                     reader.close();
@@ -83,6 +101,23 @@ public class LuceneReader {
                     useRecoverySource)
             )
             .subscribeOn(LUCENE_IO_SCHEDULER);
+    }
+
+    public static SnapshotDocumentCounts countSnapshotDocuments(LuceneDirectoryReader reader, String nestedPathField) {
+        long live = 0;
+        long nested = 0;
+        try {
+            for (var leaf : reader.leaves()) {
+                var segment = leaf.reader();
+                var liveDocs = segment.getLiveDocs();
+                live += liveDocs == null ? segment.maxDoc() : liveDocs.cardinality();
+                nested += segment.countLiveDocumentsWithTermPrefix(nestedPathField,
+                    "_type".equals(nestedPathField) ? "__" : "");
+            }
+        } catch (IOException e) {
+            throw new UncheckedIOException("Unable to count snapshot documents", e);
+        }
+        return new SnapshotDocumentCounts(live, nested, reader.maxDocIncludingSoftDeletes() - live);
     }
 
     /**
@@ -135,6 +170,13 @@ public class LuceneReader {
     public static Flux<LuceneDocumentChange> readDocsFromSegment(ReaderAndBase readerAndBase, int docStartingId,
                                                 Path indexDirectoryPath, DocumentChangeType operation,
                                                 FieldMappingContext mappingContext, boolean useRecoverySource) {
+        return Flux.defer(() -> readDocsFromSegmentSubscription(readerAndBase, docStartingId,
+            indexDirectoryPath, operation, mappingContext, useRecoverySource));
+    }
+
+    private static Flux<LuceneDocumentChange> readDocsFromSegmentSubscription(ReaderAndBase readerAndBase,
+            int docStartingId, Path indexDirectoryPath, DocumentChangeType operation,
+            FieldMappingContext mappingContext, boolean useRecoverySource) {
         var segmentReader = readerAndBase.getReader();
         var liveDocs = readerAndBase.getLiveDocs();
 
@@ -170,10 +212,13 @@ public class LuceneReader {
         // sourceless to honor the cursor's monotonic-docId contract. For stored-source
         // (non-sourceless) reads the cursor is unused, so we keep the parallel fast path.
         int innerConcurrency = (mappingContext != null) ? 1 : SEGMENT_READ_CONCURRENCY;
+        var session = new SegmentReadSession(segmentReader);
         return Flux.fromStream(idxStream.boxed())
             .flatMapSequential(docIdx -> Mono.defer(() -> {
                     try {
-                        LuceneDocumentChange document = LuceneReader.getDocument(segmentReader, docIdx, true, segmentDocBase, getSegmentReaderDebugInfo, indexDirectoryPath, operation, mappingContext, termIndex, useRecoverySource);
+                        LuceneDocumentChange document = LuceneReader.getDocument(segmentReader, docIdx, true, segmentDocBase,
+                            getSegmentReaderDebugInfo, indexDirectoryPath, operation, mappingContext, termIndex,
+                            useRecoverySource, session.forCurrentThread());
                         return Mono.justOrEmpty(document);
                     } catch (Exception e) {
                         log.atError().setMessage("Error reading document from reader {} with index: {}")
@@ -185,7 +230,10 @@ public class LuceneReader {
                             + " from segment " + getSegmentReaderDebugInfo.get(), e));
                     }
                 }).subscribeOn(LUCENE_IO_SCHEDULER), innerConcurrency, 1)
-            .doFinally(sig -> termIndex.close());
+            .doFinally(sig -> {
+                session.close();
+                termIndex.close();
+            });
     }
 
     /**
@@ -221,9 +269,17 @@ public class LuceneReader {
     public static LuceneDocumentChange getDocument(LuceneLeafReader reader, int luceneDocId, boolean isLive, int segmentDocBase,
             final Supplier<String> getSegmentReaderDebugInfo, Path indexDirectoryPath, DocumentChangeType operation,
             FieldMappingContext mappingContext, SegmentTermIndex termIndex, boolean useRecoverySource) {
+        return getDocument(reader, luceneDocId, isLive, segmentDocBase, getSegmentReaderDebugInfo, indexDirectoryPath,
+            operation, mappingContext, termIndex, useRecoverySource, null);
+    }
+
+    private static LuceneDocumentChange getDocument(LuceneLeafReader reader, int luceneDocId, boolean isLive, int segmentDocBase,
+            final Supplier<String> getSegmentReaderDebugInfo, Path indexDirectoryPath, DocumentChangeType operation,
+            FieldMappingContext mappingContext, SegmentTermIndex termIndex, boolean useRecoverySource,
+            SegmentReadSession.Reader worker) {
         LuceneDocument document;
         try {
-            document = reader.document(luceneDocId);
+            document = worker == null ? reader.document(luceneDocId) : worker.document(luceneDocId);
         } catch (IOException e) {
             log.atError().setCause(e).setMessage("Failed to read document at Lucene index location {}")
                 .addArgument(luceneDocId).log();
@@ -231,46 +287,12 @@ public class LuceneReader {
         }
 
         String openSearchDocId = null;
-        String type = null;
-        byte[] sourceBytes = null;
-        String routing = null;
+        StoredFields fields;
+        byte[] sourceBytes;
 
         try {
-            for (var field : document.getFields()) {
-                String fieldName = field.name();
-                switch (fieldName) {
-                    case "_id": {
-                        // ES 6+ stores id separately; pre-6 baked type+id into _uid
-                        openSearchDocId = field.asUid();
-                        break;
-                    }
-                    case "_uid": {
-                        // ES 5 and earlier: _uid = "type#id"
-                        var combinedTypeId = field.stringValue().split("#", 2);
-                        type = combinedTypeId[0];
-                        openSearchDocId = combinedTypeId[1];
-                        break;
-                    }
-                    case "_source": {
-                        // All versions — keep as raw bytes to avoid String allocation
-                        sourceBytes = field.utf8Value();
-                        break;
-                    }
-                    case "_recovery_source": {
-                        // Only use as fallback when _source is missing (disabled or filtered)
-                        if (useRecoverySource && sourceBytes == null) {
-                            sourceBytes = field.utf8Value();
-                        }
-                        break;
-                    }
-                    case "_routing": {
-                        routing = field.stringValue();
-                        break;
-                    }
-                    default:
-                        break;
-                }
-            }
+            fields = StoredFields.read(document, useRecoverySource);
+            openSearchDocId = fields.id;
             if (openSearchDocId == null) {
                 log.atDebug().setMessage("Skipping document with index {} from segment {} from source {}, it does not have an referenceable id.")
                     .addArgument(luceneDocId)
@@ -280,8 +302,12 @@ public class LuceneReader {
                 return null;  // Skip documents with missing id
             }
 
-            sourceBytes = resolveSourceBytes(sourceBytes, reader, luceneDocId, document, mappingContext,
-                openSearchDocId, getSegmentReaderDebugInfo, indexDirectoryPath, termIndex);
+            byte[] jsonSource = toJsonOrNull(fields.source, openSearchDocId, indexDirectoryPath);
+            // An unconvertible source keeps its stored bytes so the sink can fail just this document. It skips the
+            // doc-values merge, which would round-trip it through a UTF-8 String and corrupt it.
+            sourceBytes = jsonSource == null && fields.source != null ? fields.source
+                : resolveSourceBytes(jsonSource, reader, luceneDocId, document, mappingContext,
+                    openSearchDocId, getSegmentReaderDebugInfo, indexDirectoryPath, termIndex);
             if (sourceBytes == null) {
                 return null;
             }
@@ -304,8 +330,86 @@ public class LuceneReader {
             return null; // Skip these
         }
 
+        // _version is a numeric doc value, not a stored field returned by document().
+        // Read it outside the catch above so an I/O failure fails the work item
+        // instead of silently dropping the document.
+        Long version = operation == DocumentChangeType.INDEX ? readVersion(reader, luceneDocId, worker) : null;
         log.atDebug().setMessage("Document {} read successfully").addArgument(openSearchDocId).log();
-        return new LuceneDocumentChange(segmentDocBase + luceneDocId, openSearchDocId, type, sourceBytes, routing, operation);
+        return new LuceneDocumentChange(segmentDocBase + luceneDocId, openSearchDocId, fields.type, sourceBytes,
+            fields.routing, operation, version);
+    }
+
+    /** The stored fields of a Lucene document that identify it and carry its source. */
+    private static final class StoredFields {
+        String id;
+        String type;
+        byte[] source;
+        String routing;
+
+        static StoredFields read(LuceneDocument document, boolean useRecoverySource) {
+            var fields = new StoredFields();
+            for (var field : document.getFields()) {
+                switch (field.name()) {
+                    case "_id":
+                        // ES 6+ stores id separately; pre-6 baked type+id into _uid
+                        fields.id = field.asUid();
+                        break;
+                    case "_uid": {
+                        // ES 5 and earlier: _uid = "type#id"
+                        var combinedTypeId = field.stringValue().split("#", 2);
+                        fields.type = combinedTypeId[0];
+                        fields.id = combinedTypeId[1];
+                        break;
+                    }
+                    case "_source":
+                        // All versions — keep as raw bytes to avoid String allocation
+                        fields.source = field.utf8Value();
+                        break;
+                    case "_recovery_source":
+                        // Only use as fallback when _source is missing (disabled or filtered)
+                        if (useRecoverySource && fields.source == null) {
+                            fields.source = field.utf8Value();
+                        }
+                        break;
+                    case "_routing":
+                        fields.routing = field.stringValue();
+                        break;
+                    default:
+                        break;
+                }
+            }
+            return fields;
+        }
+    }
+
+    private static Long readVersion(LuceneLeafReader reader, int luceneDocId, SegmentReadSession.Reader worker) {
+        try {
+            return worker == null ? (Long) reader.getNumericValue(luceneDocId, "_version") : worker.version(luceneDocId);
+        } catch (IOException e) {
+            throw Lombok.sneakyThrow(e);
+        }
+    }
+
+    /**
+     * Stored sources keep the indexing request's content type, so convert SMILE, CBOR, and YAML to JSON
+     * once, here, before anything parses or forwards them.
+     *
+     * @return JSON bytes, or null if there is no source or it cannot be converted
+     */
+    private static byte[] toJsonOrNull(byte[] sourceBytes, String docId, Path indexDirectoryPath) {
+        if (sourceBytes == null) {
+            return null;
+        }
+        try {
+            return SourceFormat.toJson(sourceBytes);
+        } catch (SourceFormat.InvalidDocumentSourceException e) {
+            log.atWarn().setCause(e)
+                .setMessage("Document {} from {} has a source that cannot be converted to JSON; passing it through")
+                .addArgument(docId)
+                .addArgument(indexDirectoryPath)
+                .log();
+            return null;
+        }
     }
 
     /**

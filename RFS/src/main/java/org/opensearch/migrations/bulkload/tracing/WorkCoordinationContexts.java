@@ -296,6 +296,9 @@ public interface WorkCoordinationContexts extends IWorkCoordinationContexts {
                 nothingAvailableCounter = meter.counterBuilder(MetricNames.NO_NEXT_WORK_AVAILABLE).build();
                 recoverableClockError = meter.counterBuilder(MetricNames.RECOVERABLE_CLOCK_ERROR).build();
                 driftError = meter.counterBuilder(MetricNames.DRIFT_ERROR).build();
+                // A process asks for work about once, so start these series at 0 for rate() to see the request.
+                assignedCounter.add(0);
+                nothingAvailableCounter.add(0);
             }
         }
 

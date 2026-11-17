@@ -159,6 +159,27 @@ spec:
               - port: prometheus
                 interval: 15s
                 path: /metrics
+                # The scrape target itself has pod/container/namespace labels,
+                # so Prometheus prefixes the original cAdvisor labels with
+                # "exported_". Restore the workload labels used by dashboards.
+                metricRelabelings:
+                  - action: replace
+                    sourceLabels: [exported_namespace]
+                    regex: "(.+)"
+                    targetLabel: namespace
+                    replacement: "$1"
+                  - action: replace
+                    sourceLabels: [exported_container]
+                    regex: "(.+)"
+                    targetLabel: container
+                    replacement: "$1"
+                  - action: replace
+                    sourceLabels: [exported_pod]
+                    regex: "(.+)"
+                    targetLabel: pod
+                    replacement: "$1"
+                  - action: labeldrop
+                    regex: "exported_(namespace|container|pod)"
           EOF
           echo "ServiceMonitor created successfully."
       restartPolicy: Never

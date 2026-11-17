@@ -1,0 +1,71 @@
+services:
+  # solr-node1 runs the embedded ZooKeeper (on port 9983) that the other nodes connect to.
+  solr-node1:
+    image: solr:6.6.6
+    container_name: solr-node1
+    ports:
+      - "8983:8983"
+    networks:
+      - solrcloud
+    volumes:
+      # Shared backup target, identical path on every node (required for SolrCloud
+      # BACKUP) and bind-mounted to the host so backups survive the containers.
+      # Solr 6 has no solr.allowPaths restriction (added in 8.11.1), so no extra env needed.
+      - ./backups:/backups
+    mem_limit: 8g
+    command: solr start -c -f -m 4g -h solr-node1 -p 8983
+    # Gate the other nodes on node1 being up. The /admin/zookeeper/status endpoint
+    # was only added in Solr 7.4, so on Solr 6 we probe /admin/info/system instead.
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8983/solr/admin/info/system"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 20s
+
+  solr-node2:
+    image: solr:6.6.6
+    container_name: solr-node2
+    ports:
+      - "8984:8984"
+    networks:
+      - solrcloud
+    volumes:
+      - ./backups:/backups
+    mem_limit: 8g
+    command: solr start -c -f -m 4g -h solr-node2 -p 8984 -z solr-node1:9983
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8984/solr/admin/info/system"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 20s
+    depends_on:
+      solr-node1:
+        condition: service_healthy
+
+  solr-node3:
+    image: solr:6.6.6
+    container_name: solr-node3
+    ports:
+      - "8985:8985"
+    networks:
+      - solrcloud
+    volumes:
+      - ./backups:/backups
+    mem_limit: 8g
+    command: solr start -c -f -m 4g -h solr-node3 -p 8985 -z solr-node1:9983
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8985/solr/admin/info/system"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 20s
+    depends_on:
+      solr-node1:
+        condition: service_healthy
+
+networks:
+  solrcloud:
+    name: solrcloud
+    driver: bridge

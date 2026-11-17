@@ -7,14 +7,18 @@ import tempfile
 import time
 
 import requests
+from kubernetes import client
 from pathlib import Path
 
+from console_link.workflow.models.utils import load_k8s_config
 from console_link.workflow.commands.autocomplete_workflows import DEFAULT_WORKFLOW_NAME
 from console_link.workflow.commands.argo_utils import DEFAULT_ARGO_SERVER_URL
 
 logger = logging.getLogger(__name__)
 
 _LABEL_CACHE_TTL = 120
+COMPONENT_LABEL = 'migrations.opensearch.org/component'
+WORKFLOW_LABEL = 'workflows.argoproj.io/workflow'
 _FILTER_OPTION_LABELS = {
     'source': 'source',
     'target': 'target',
@@ -120,6 +124,30 @@ def _get_cached_label_data(ctx):
 
     except Exception:
         return {}, []
+
+
+def fetch_component_values(namespace: str, workflow_name) -> set:
+    """Component values on the pods in scope.
+
+    Unlike the other filter labels, component is not a workflow parameter, so it is read from pods.
+    """
+    load_k8s_config()
+    selector = COMPONENT_LABEL
+    if workflow_name:
+        selector += f",{WORKFLOW_LABEL}={workflow_name}"
+    pods = client.CoreV1Api().list_namespaced_pod(namespace, label_selector=selector)
+    return {pod.metadata.labels[COMPONENT_LABEL] for pod in pods.items}
+
+
+def complete_component_value(ctx, _, incomplete):
+    """Click value completer for `--component`."""
+    workflow_name = None if ctx.params.get('all_workflows') else (
+        ctx.params.get('workflow_name') or DEFAULT_WORKFLOW_NAME)
+    try:
+        values = fetch_component_values(ctx.params.get('namespace') or 'ma', workflow_name)
+    except Exception:
+        return []
+    return [CompletionItem(value) for value in sorted(values) if value.startswith(incomplete)][:20]
 
 
 def complete_label_value(label_key):

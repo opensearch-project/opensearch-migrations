@@ -175,6 +175,12 @@ RUN MAJOR=$(echo "${ES_VERSION}" | cut -d. -f1) && \
       ${ES_HOME}/bin/elasticsearch-plugin install --batch repository-gcs; \
     fi
 
+# Install repository-azure plugin (ES 7.0+)
+RUN MAJOR=$(echo "${ES_VERSION}" | cut -d. -f1) && \
+    if [ "$MAJOR" -ge 7 ]; then \
+      ${ES_HOME}/bin/elasticsearch-plugin install --batch repository-azure; \
+    fi
+
 RUN chown -R 1000:1000 ${ES_HOME}
 
 WORKDIR ${ES_HOME}

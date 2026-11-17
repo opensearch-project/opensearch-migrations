@@ -27,6 +27,9 @@ while (( SECONDS < deadline )); do
   load_balancer_state="not-required"
   if [[ "$SERVICE_TYPE" == "LoadBalancer" ]]; then
     load_balancer_ingress="$(kubectl -n "$NAMESPACE" get service "$PROXY_NAME" -o jsonpath='{range .status.loadBalancer.ingress[*]}{.hostname}{.ip}{" "}{end}' 2>/dev/null || true)"
+    # The range leaves a trailing separator, which ends up in the CaptureProxy status and breaks
+    # any URL built from it.
+    load_balancer_ingress="${load_balancer_ingress%" "}"
     load_balancer_state="${load_balancer_ingress:-none}"
   fi
 

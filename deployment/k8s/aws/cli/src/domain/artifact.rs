@@ -96,13 +96,10 @@ pub fn build_images_script(
     builder: &str,
     image_tag: &str,
     kube_context: &str,
-    skip_test_images: bool,
 ) -> String {
-    let skip_arg = if skip_test_images {
-        "-PskipTestImages=true"
-    } else {
-        ""
-    };
+    // Test-only images (the SearchGuard Elasticsearch used by the Docker Compose and ECS
+    // solutions) are never needed on EKS, where the testClusters source is elasticsearch-oss.
+    let skip_arg = "-PskipTestImages=true";
     // `set -euo pipefail` so any sub-step failure propagates a non-zero rc.
     // The builder is reused if healthy, else (re)created via the repo's
     // eksKubernetesBuildkit backend — exactly as the reference does.
@@ -352,7 +349,6 @@ mod tests {
             "builder-x",
             "tag1",
             "migration-eks-x",
-            true,
         );
         // buildkit setup (reuse-or-create), ECR login, gradle build, skip-test.
         assert!(s.contains("docker buildx inspect \"$BUILDER_NAME\" --bootstrap"));
@@ -365,9 +361,6 @@ mod tests {
         assert!(s.contains("-PimageVersion=\"tag1\""));
         assert!(s.contains("-PskipTestImages=true"));
         assert!(s.contains("set -euo pipefail"));
-        // skip-test omitted when false.
-        let s2 = build_images_script("/r", "r", "h", "reg", "b", "t", "c", false);
-        assert!(!s2.contains("-PskipTestImages=true"));
     }
 
     #[test]

@@ -448,13 +448,19 @@ printf '%s' "$node_role_name"
         assert "aws iam get-role" not in script
 
 
+def _bash_function(script: str, name: str) -> str:
+    body = script[script.index(f"{name}() {{"):]
+    return body[:body.index("\n}\n") + 3]
+
+
 class TestBootstrapNodeAccessEntry:
     @staticmethod
     def _function() -> str:
         repo = Path(__file__).parent.parent.parent.parent
         script = (repo / "deployment/k8s/aws/aws-bootstrap.sh").read_text()
-        body = script[script.index("ensure_auto_node_access_entry() {"):]
-        return body[:body.index("\n}\n") + 3]
+        # ensure_auto_node_access_entry calls arn_partition, so include it too.
+        partition = _bash_function(script, "arn_partition")
+        return partition + _bash_function(script, "ensure_auto_node_access_entry")
 
     def test_missing_entry_is_created_and_associated(self):
         harness = """
@@ -484,7 +490,34 @@ ensure_auto_node_access_entry arn:aws:iam::123456789012:role/AutoNodeRole
                 ["/bin/bash", "-c", harness, "bash", calls.name],
                 check=False, capture_output=True, text=True)
             assert completed.returncode == 0, completed.stderr
+            assert completed.stderr == ""
             assert Path(calls.name).read_text().splitlines() == ["create", "associate"]
+
+    def test_policy_arn_uses_the_node_role_partition(self):
+        harness = """
+set -euo pipefail
+MIGRATIONS_EKS_CLUSTER_NAME=migration-cluster
+AWS_CFN_REGION=cn-northwest-1
+calls_file="$1"
+aws() {
+  [[ "$1 $2" == "eks describe-access-entry" ]] && return 0
+  if [[ "$1 $2" == "eks associate-access-policy" ]]; then
+    printf '%s\n' "$*" >> "$calls_file"
+    return
+  fi
+  return 99
+}
+""" + self._function() + """
+ensure_auto_node_access_entry arn:aws-cn:iam::123456789012:role/AutoNodeRole
+"""
+        with tempfile.NamedTemporaryFile() as calls:
+            completed = subprocess.run(
+                ["/bin/bash", "-c", harness, "bash", calls.name],
+                check=False, capture_output=True, text=True)
+            assert completed.returncode == 0, completed.stderr
+            assert completed.stderr == ""
+            assert ("--policy-arn arn:aws-cn:eks::aws:cluster-access-policy/AmazonEKSAutoNodePolicy"
+                    in Path(calls.name).read_text())
 
     def test_association_failure_is_not_ignored(self):
         harness = """
@@ -593,7 +626,7 @@ class TestBootstrapTagPropagationPolicy:
         script = self._script()
         start = script.index("ensure_auto_mode_tag_propagation_policy() {")
         end = script.index("\n\n# Deny the cluster role", start)
-        function = script[start:end]
+        function = _bash_function(script, "arn_partition") + script[start:end]
         harness = """
 set -euo pipefail
 MIGRATIONS_EKS_CLUSTER_NAME=migration-cluster

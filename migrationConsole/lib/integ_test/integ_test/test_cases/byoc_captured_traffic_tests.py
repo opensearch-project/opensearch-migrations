@@ -296,8 +296,6 @@ traffic:
       toTarget: "target"
       replayerConfig:
         speedupFactor: 30
-        observedPacketConnectionTimeout: 5
-        lookaheadTimeSeconds: 10
 """
     return base64.b64encode(config_yaml.encode("utf-8")).decode("ascii")
 

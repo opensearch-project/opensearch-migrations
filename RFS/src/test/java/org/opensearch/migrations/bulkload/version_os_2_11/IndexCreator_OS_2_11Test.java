@@ -1,12 +1,16 @@
 package org.opensearch.migrations.bulkload.version_os_2_11;
 
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
 import org.opensearch.migrations.AwarenessAttributeSettings;
+import org.opensearch.migrations.Flavor;
 import org.opensearch.migrations.MigrationMode;
+import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.InvalidResponse;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
+import org.opensearch.migrations.bulkload.common.http.HttpResponse;
 import org.opensearch.migrations.metadata.CreationResult;
 import org.opensearch.migrations.metadata.tracing.IMetadataMigrationContexts.ICreateIndexContext;
 
@@ -23,7 +27,9 @@ import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.CoreMatchers.not;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -34,6 +40,27 @@ class IndexCreator_OS_2_11Test {
         .build();
     private static final Optional<ObjectNode> INDEX_CREATE_SUCCESS = Optional.of(mock(ObjectNode.class));
     private static final String MIN_INDEX_JSON = "{ \"settings\": { } }";
+
+    /** Index metadata for a 1-shard index read from an ES 6.8 snapshot, after the built-in transforms. */
+    private static final String ES_6_8_SNAPSHOT_INDEX_JSON = "{\n" +
+        "  \"routing_num_shards\" : 1,\n" +
+        "  \"aliases\" : { },\n" +
+        "  \"mappings\" : { \"properties\": { \"body\": { \"type\": \"text\" } } },\n" +
+        "  \"settings\" : {\n" +
+        "    \"creation_date\": \"1735689600000\",\n" +
+        "    \"number_of_replicas\": \"1\",\n" +
+        "    \"number_of_shards\": \"1\",\n" +
+        "    \"provided_name\": \"v4_messages_01_2025\",\n" +
+        "    \"uuid\": \"q1w2e3r4t5y6u7i8o9p0aa\",\n" +
+        "    \"version\": { \"created\": \"6082399\" }\n" +
+        "  }\n" +
+        "}";
+
+    private static final String SERVERLESS_ROUTING_SHARDS_ERROR = "{\"error\":{\"root_cause\":[{\"type\":\"illegal_argument_exception\","
+        + "\"reason\":\"OpenSearch exception [type=illegal_argument_exception, reason=index.number_of_routing_shards [1] "
+        + "must be >= index.number_of_shards [8]]- server : [envoy]\"}],\"type\":\"illegal_argument_exception\","
+        + "\"reason\":\"OpenSearch exception [type=illegal_argument_exception, reason=index.number_of_routing_shards [1] "
+        + "must be >= index.number_of_shards [8]]- server : [envoy]\"},\"status\":400}";
 
     @Test
     void testCreate() throws Exception {
@@ -266,6 +293,158 @@ class IndexCreator_OS_2_11Test {
             finalBody.get("settings").get("analysis").get("analyzer")
                 .get("custom_tokenized_string").get("tokenizer").asText(),
             equalTo("standard"));
+    }
+
+    @Test
+    void testForCollection_usesTheCollectionClientInBothModes() throws Exception {
+        var client = mock(OpenSearchClient.class);
+        var collectionClient = mock(OpenSearchClient.class);
+        when(client.forCollection("tenant-a")).thenReturn(collectionClient);
+        when(collectionClient.createIndex(any(), any(), any())).thenReturn(INDEX_CREATE_SUCCESS);
+        when(collectionClient.hasIndex("indexName")).thenReturn(true);
+        var indexData = new IndexMetadataData_OS_2_11((ObjectNode) OBJECT_MAPPER.readTree(MIN_INDEX_JSON), "indexId", "indexName");
+        var indexCreator = new IndexCreator_OS_2_11(client).forCollection("tenant-a");
+        var awareness = new AwarenessAttributeSettings(false, 0);
+
+        var performed = indexCreator.create(indexData, MigrationMode.PERFORM, awareness, mock(ICreateIndexContext.class));
+        var simulated = indexCreator.create(indexData, MigrationMode.SIMULATE, awareness, mock(ICreateIndexContext.class));
+
+        assertThat(performed.wasSuccessful(), equalTo(true));
+        verify(collectionClient).createIndex(eq("indexName"), any(), any());
+        assertThat(simulated.getFailureType(), equalTo(CreationResult.CreationFailureType.INDEX_ALREADY_EXISTS));
+        verify(collectionClient).hasIndex("indexName");
+        verify(client, never()).createIndex(any(), any(), any());
+        verify(client, never()).hasIndex(any());
+    }
+
+    @Test
+    void testCreate_retriesWithoutRoutingShardsWhenTargetRejectsThem() throws Exception {
+        // opensearch-migrations#3440: the snapshot's top-level "routing_num_shards" is copied into
+        // settings.number_of_routing_shards. If the target rejects it (here with the error
+        // Serverless returns), the setting is removed and creation is retried.
+        var client = mock(OpenSearchClient.class);
+        when(client.createIndex(any(), any(), any())).thenAnswer(invocation -> {
+            ObjectNode body = invocation.getArgument(1);
+            if (body.path("settings").has("number_of_routing_shards")) {
+                throw new InvalidResponse("Create index failed", new HttpResponse(400, "Bad Request", Map.of(), SERVERLESS_ROUTING_SHARDS_ERROR));
+            }
+            return INDEX_CREATE_SUCCESS;
+        });
+
+        var result = create(client, ES_6_8_SNAPSHOT_INDEX_JSON, "v4_messages_01_2025");
+
+        assertThat(String.valueOf(result.getException()), result.wasSuccessful(), equalTo(true));
+        var requestBodyCapture = ArgumentCaptor.forClass(ObjectNode.class);
+        verify(client, times(2)).createIndex(any(), requestBodyCapture.capture(), any());
+        var finalIndexBody = requestBodyCapture.getValue().toPrettyString();
+        assertThat(finalIndexBody, not(containsString("number_of_routing_shards")));
+        assertThat(finalIndexBody, containsString("number_of_shards"));
+    }
+
+    @Test
+    void testCreate_serverlessTarget_doesNotSendRoutingShardsOrInternalSettings() throws Exception {
+        var client = mock(OpenSearchClient.class);
+        when(client.getClusterVersion()).thenReturn(Version.builder().flavor(Flavor.AMAZON_SERVERLESS_OPENSEARCH).major(2).build());
+        when(client.createIndex(any(), any(), any())).thenReturn(INDEX_CREATE_SUCCESS);
+
+        var result = create(client, ES_6_8_SNAPSHOT_INDEX_JSON, "v4_messages_01_2025");
+
+        assertThat(result.wasSuccessful(), equalTo(true));
+        var requestBodyCapture = ArgumentCaptor.forClass(ObjectNode.class);
+        verify(client).createIndex(any(), requestBodyCapture.capture(), any());
+        var settings = requestBodyCapture.getValue().get("settings");
+        assertThat(settings.toString(), equalTo("{\"number_of_replicas\":\"1\",\"number_of_shards\":\"1\"}"));
+    }
+
+    @Test
+    void testCreate_openSearchTarget_copiesRoutingShardsAndStripsInternalSettings() throws Exception {
+        var client = mock(OpenSearchClient.class);
+        when(client.getClusterVersion()).thenReturn(Version.fromString("OS 2.19.0"));
+        when(client.createIndex(any(), any(), any())).thenReturn(INDEX_CREATE_SUCCESS);
+
+        var result = create(client, ES_6_8_SNAPSHOT_INDEX_JSON, "v4_messages_01_2025");
+
+        assertThat(result.wasSuccessful(), equalTo(true));
+        var requestBodyCapture = ArgumentCaptor.forClass(ObjectNode.class);
+        verify(client).createIndex(any(), requestBodyCapture.capture(), any());
+        var settings = requestBodyCapture.getValue().get("settings");
+        assertThat(settings.toString(),
+            equalTo("{\"number_of_replicas\":\"1\",\"number_of_shards\":\"1\",\"number_of_routing_shards\":1}"));
+    }
+
+    private static final String KNN_ENGINE_INDEX_JSON = "{\n" +
+        "  \"aliases\" : { },\n" +
+        "  \"mappings\" : {\n" +
+        "    \"dynamic_templates\": [ { \"vectors\": { \"match\": \"*_vec\", \"mapping\": {\n" +
+        "      \"type\": \"knn_vector\", \"dimension\": 4,\n" +
+        "      \"method\": { \"name\": \"hnsw\", \"engine\": \"faiss\", \"space_type\": \"l2\" } } } } ],\n" +
+        "    \"properties\": {\n" +
+        "      \"embedding\": { \"type\": \"knn_vector\", \"dimension\": 4,\n" +
+        "        \"method\": { \"name\": \"hnsw\", \"engine\": \"faiss\", \"space_type\": \"l2\", \"parameters\": { \"m\": 16 } } },\n" +
+        "      \"doc\": { \"properties\": { \"inner\": { \"type\": \"knn_vector\", \"dimension\": 4,\n" +
+        "        \"method\": { \"name\": \"hnsw\", \"engine\": \"faiss\" } } } },\n" +
+        "      \"engine\": { \"type\": \"keyword\" }\n" +
+        "    }\n" +
+        "  },\n" +
+        "  \"settings\" : { }\n" +
+        "}";
+
+    private static final String NEXTGEN_KNN_ENGINE_ERROR = "{\"error\":{\"root_cause\":[{\"type\":\"illegal_argument_exception\","
+        + "\"reason\":\"OpenSearch exception [type=illegal_argument_exception, reason=Field parameter 'engine' is not supported]"
+        + "- server : [envoy]\"}],\"type\":\"illegal_argument_exception\",\"reason\":\"OpenSearch exception "
+        + "[type=illegal_argument_exception, reason=Field parameter 'engine' is not supported]- server : [envoy]\"},\"status\":400}";
+
+    @Test
+    void testCreate_retriesWithoutKnnVectorEnginesWhenTargetRejectsThem() throws Exception {
+        var client = mock(OpenSearchClient.class);
+        when(client.createIndex(any(), any(), any())).thenAnswer(invocation -> {
+            ObjectNode body = invocation.getArgument(1);
+            if (body.get("mappings").toString().contains("\"engine\":\"faiss\"")) {
+                throw new InvalidResponse("Create index failed", new HttpResponse(400, "Bad Request", Map.of(), NEXTGEN_KNN_ENGINE_ERROR));
+            }
+            return INDEX_CREATE_SUCCESS;
+        });
+
+        var result = create(client, KNN_ENGINE_INDEX_JSON, "vectors_faiss");
+
+        assertThat(String.valueOf(result.getException()), result.wasSuccessful(), equalTo(true));
+        var requestBodyCapture = ArgumentCaptor.forClass(ObjectNode.class);
+        verify(client, times(2)).createIndex(any(), requestBodyCapture.capture(), any());
+        var mappings = requestBodyCapture.getValue().get("mappings");
+        assertThat(mappings.toString(), not(containsString("faiss")));
+        assertThat(mappings.at("/properties/embedding/method").toString(),
+            equalTo("{\"name\":\"hnsw\",\"space_type\":\"l2\",\"parameters\":{\"m\":16}}"));
+        assertThat(mappings.at("/properties/doc/properties/inner/method").toString(), equalTo("{\"name\":\"hnsw\"}"));
+        assertThat(mappings.at("/dynamic_templates/0/vectors/mapping/method").has("engine"), equalTo(false));
+        assertThat("a field named engine is not a knn method parameter",
+            mappings.at("/properties/engine/type").asText(), equalTo("keyword"));
+    }
+
+    @Test
+    void testCreate_keepsKnnVectorEnginesWhenTargetAcceptsThem() throws Exception {
+        var client = mock(OpenSearchClient.class);
+        when(client.createIndex(any(), any(), any())).thenReturn(INDEX_CREATE_SUCCESS);
+
+        var result = create(client, KNN_ENGINE_INDEX_JSON, "vectors_faiss");
+
+        assertThat(result.wasSuccessful(), equalTo(true));
+        var requestBodyCapture = ArgumentCaptor.forClass(ObjectNode.class);
+        verify(client).createIndex(any(), requestBodyCapture.capture(), any());
+        var mappings = requestBodyCapture.getValue().get("mappings");
+        assertThat(mappings.at("/properties/embedding/method/engine").asText(), equalTo("faiss"));
+        assertThat(mappings.at("/dynamic_templates/0/vectors/mapping/method/engine").asText(), equalTo("faiss"));
+    }
+
+    @Test
+    void testCreate_knnEngineRejectedWithNoEngineToRemove_fails() throws Exception {
+        var client = mock(OpenSearchClient.class);
+        when(client.createIndex(any(), any(), any()))
+            .thenThrow(new InvalidResponse("Create index failed", new HttpResponse(400, "Bad Request", Map.of(), NEXTGEN_KNN_ENGINE_ERROR)));
+
+        var result = create(client, MIN_INDEX_JSON, "indexName");
+
+        assertThat(result.wasSuccessful(), equalTo(false));
+        verify(client, times(1)).createIndex(any(), any(), any());
     }
 
     @SneakyThrows

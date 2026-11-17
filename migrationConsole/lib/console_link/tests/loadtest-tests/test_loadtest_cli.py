@@ -1173,7 +1173,10 @@ class TestRenderedChartMatchesTheValues:
         return copy
 
     @staticmethod
-    def _rendered():
+    def _render_documents(
+        template_file="templates/k6-workflowtemplates.yaml",
+        extra_helm_args=(),
+    ):
         helm = shutil.which("helm")
         if helm is None:
             pytest.skip("helm is not installed")
@@ -1183,12 +1186,24 @@ class TestRenderedChartMatchesTheValues:
                 chart, Path(tmp))
             out = subprocess.run(
                 [helm, "template", "t", str(renderable), "--namespace", "ma",
-                 "--show-only", "templates/k6-workflowtemplates.yaml"],
+                 "--show-only", template_file, *extra_helm_args],
                 capture_output=True, text=True)
         if out.returncode != 0:
             pytest.fail(f"helm template failed:\n{out.stderr}")
-        return {d["metadata"]["name"]: d
-                for d in yaml.safe_load_all(out.stdout) if d and d.get("kind") == "WorkflowTemplate"}
+        return [document for document in yaml.safe_load_all(out.stdout) if document]
+
+    @staticmethod
+    def _rendered(
+        template_file="templates/k6-workflowtemplates.yaml",
+        extra_helm_args=(),
+    ):
+        return {
+            document["metadata"]["name"]: document
+            for document in TestRenderedChartMatchesTheValues._render_documents(
+                template_file, extra_helm_args
+            )
+            if document.get("kind") == "WorkflowTemplate"
+        }
 
     @staticmethod
     def _runner_env(template, defaults):
@@ -1202,6 +1217,180 @@ class TestRenderedChartMatchesTheValues:
 
     def test_every_profile_renders_a_template(self):
         assert set(self._rendered()) == {f"k6-{p}" for p in _chart_values()["profiles"]}
+
+    def test_dedicated_pool_applies_to_load_runners_but_not_initializers(self):
+        templates = self._rendered(extra_helm_args=(
+            "--set-string", "testRun.nodePoolName=k6-work-pool",
+        ))
+        for name, template in sorted(templates.items()):
+            defaults = {
+                parameter["name"]: parameter.get("value", "")
+                for parameter in template["spec"]["arguments"]["parameters"]
+            }
+            manifest = template["spec"]["templates"][0]["resource"]["manifest"]
+            substituted = re.sub(
+                r"\{\{workflow\.parameters\.([A-Za-z0-9_-]+)\}\}",
+                lambda match: defaults[match.group(1)],
+                manifest,
+            ).replace("{{workflow.name}}", "a-run")
+            test_run = yaml.safe_load(substituted)["spec"]
+
+            assert "nodeSelector" not in test_run["initializer"], name
+            assert test_run["runner"]["nodeSelector"] == {
+                "migrations.opensearch.org/workload-pool": "k6-work-pool"
+            }, name
+
+    def test_pod_identity_auth_configures_load_runners_but_not_archive_initializers(self):
+        pod_identity_args = (
+            "--set", "podIdentityAuth.enabled=true",
+            "--set-string", "podIdentityAuth.region=us-east-2",
+            "--set-string", "podIdentityAuth.signingEndpoint=https://source.example.com",
+        )
+        templates = self._rendered(extra_helm_args=pod_identity_args)
+        for name, template in sorted(templates.items()):
+            defaults = {
+                parameter["name"]: parameter.get("value", "")
+                for parameter in template["spec"]["arguments"]["parameters"]
+            }
+            manifest = template["spec"]["templates"][0]["resource"]["manifest"]
+            substituted = re.sub(
+                r"\{\{workflow\.parameters\.([A-Za-z0-9_-]+)\}\}",
+                lambda match: defaults[match.group(1)],
+                manifest,
+            ).replace("{{workflow.name}}", "a-run")
+            test_run = yaml.safe_load(substituted)["spec"]
+
+            initializer = test_run["initializer"]
+            assert "serviceAccountName" not in initializer, name
+            assert "volumes" not in initializer, name
+            assert "volumeMounts" not in initializer, name
+            runner = test_run["runner"]
+            assert runner["serviceAccountName"] == "argo-workflow-executor", name
+            assert runner["volumes"][0]["configMap"]["name"] == "k6-pod-identity-wrapper", name
+            assert runner["volumeMounts"][0]["mountPath"] == "/opt/k6-pod-identity/bin", name
+            env = {item["name"]: item["value"] for item in runner["env"]}
+            assert env["K6_AUTH_MODE"] == "sigv4", name
+            assert env["AWS_REGION"] == "us-east-2", name
+            assert env["SIGV4_SERVICE"] == "es", name
+            assert env["SIGV4_SIGNING_ENDPOINT"] == "https://source.example.com", name
+            assert env["PATH"].startswith("/opt/k6-pod-identity/bin:"), name
+
+    def test_pod_identity_wrapper_fetches_temporary_credentials_without_a_secret(self):
+        documents = self._render_documents(
+            "templates/pod-identity-auth.yaml",
+            (
+                "--set", "podIdentityAuth.enabled=true",
+                "--set-string", "podIdentityAuth.region=us-east-2",
+                "--set-string", "podIdentityAuth.signingEndpoint=https://source.example.com",
+            ),
+        )
+        assert len(documents) == 1
+        config_map = documents[0]
+        assert config_map["kind"] == "ConfigMap"
+        script = config_map["data"]["k6"]
+        assert "AWS_CONTAINER_CREDENTIALS_FULL_URI" in script
+        assert "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE" in script
+        assert "exec /usr/bin/k6" in script
+
+    def test_chart_defaults_to_repository_patched_operator(self):
+        operator = _chart_values()["k6-operator"]["manager"]["image"]
+        assert operator == {
+            "registry": "docker.io",
+            "repository": "migrations/k6_operator",
+            "tag": "latest",
+            "pullPolicy": "IfNotPresent",
+        }
+
+        installer = (
+            _repo_dir("deployment/k8s") / "installK6Chart.sh"
+        ).read_text()
+        # Default images follow the build's tag (LOCAL_IMAGE_TAG / K6_IMAGE_TAG), latest otherwise.
+        assert 'IMAGE_TAG="${K6_IMAGE_TAG:-${LOCAL_IMAGE_TAG:-latest}}"' in installer
+        assert "migrations_k6_operator_${IMAGE_TAG}" in installer
+        assert "k6-operator.manager.image.repository" in installer
+        assert "k6-operator.manager.image.tag" in installer
+
+    def test_connection_mode_suite_renders_required_inputs_and_replay_stable_bulk_ids(self):
+        suite = self._rendered(
+            "templates/k6-ingest-connection-modes.yaml"
+        )["k6-ingest-connection-modes"]
+        arguments = {
+            parameter["name"]: parameter
+            for parameter in suite["spec"]["arguments"]["parameters"]
+        }
+        assert "value" not in arguments["runs"]
+
+        run_tester = next(
+            template for template in suite["spec"]["templates"]
+            if template["name"] == "run-tester"
+        )
+        assert run_tester["activeDeadlineSeconds"] == 14400
+        child = yaml.safe_load(run_tester["resource"]["manifest"])
+        child_parameters = {
+            parameter["name"]: parameter["value"]
+            for parameter in child["spec"]["arguments"]["parameters"]
+        }
+        assert (
+            child_parameters["DOCUMENT_ID_PREFIX"] ==
+            "{{workflow.name}}-{{inputs.parameters.name}}"
+        )
+
+    def test_connection_mode_suite_renders_index_shard_input(self):
+        suite = self._rendered(
+            "templates/k6-ingest-connection-modes.yaml"
+        )["k6-ingest-connection-modes"]
+        arguments = {
+            parameter["name"]: parameter
+            for parameter in suite["spec"]["arguments"]["parameters"]
+        }
+        assert arguments["INDEX_NUMBER_OF_SHARDS"]["value"] == "1"
+        assert arguments["PREPARE_INDEX"]["value"] == "true"
+        prepare_task = next(
+            task for task in suite["spec"]["templates"][0]["dag"]["tasks"]
+            if task["name"] == "prepare-index"
+        )
+        assert prepare_task["when"] == "{{workflow.parameters.PREPARE_INDEX}} == true"
+        for task_name in ("tester", "pod-churn"):
+            task = next(
+                task for task in suite["spec"]["templates"][0]["dag"]["tasks"]
+                if task["name"] == task_name
+            )
+            assert task["depends"] == "prepare-index.Succeeded || prepare-index.Skipped"
+        prepare_index = next(
+            template for template in suite["spec"]["templates"]
+            if template["name"] == "prepare-index"
+        )
+        prepare_env = {
+            item["name"]: item["value"]
+            for item in prepare_index["container"]["env"]
+        }
+        assert prepare_env["INDEX_NUMBER_OF_SHARDS"] == (
+            "{{workflow.parameters.INDEX_NUMBER_OF_SHARDS}}"
+        )
+
+    def test_connection_mode_index_setup_uses_pod_identity_when_enabled(self):
+        suite = self._rendered(
+            "templates/k6-ingest-connection-modes.yaml",
+            (
+                "--set", "podIdentityAuth.enabled=true",
+                "--set-string", "podIdentityAuth.region=us-east-2",
+                "--set-string", "podIdentityAuth.signingEndpoint=https://source.example.com",
+            ),
+        )["k6-ingest-connection-modes"]
+        assert suite["spec"]["serviceAccountName"] == "argo-workflow-executor"
+        prepare_index = next(
+            template for template in suite["spec"]["templates"]
+            if template["name"] == "prepare-index"
+        )
+        assert prepare_index["volumes"][0]["configMap"]["name"] == "k6-pod-identity-wrapper"
+        container = prepare_index["container"]
+        assert container["command"] == ["/opt/k6-pod-identity/bin/k6"]
+        assert container["volumeMounts"][0]["mountPath"] == "/opt/k6-pod-identity/bin"
+        env = {item["name"]: item["value"] for item in container["env"]}
+        assert env["K6_AUTH_MODE"] == "sigv4"
+        assert env["AWS_REGION"] == "us-east-2"
+        assert env["SIGV4_SERVICE"] == "es"
+        assert env["SIGV4_SIGNING_ENDPOINT"] == "https://source.example.com"
 
     def test_the_parameters_and_the_runner_env_are_the_same_set(self):
         for name, template in sorted(self._rendered().items()):

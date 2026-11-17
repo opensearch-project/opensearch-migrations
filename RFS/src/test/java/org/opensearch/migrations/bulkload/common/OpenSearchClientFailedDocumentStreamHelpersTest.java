@@ -102,16 +102,15 @@ class OpenSearchClientFailedDocumentStreamHelpersTest {
         assertThat(r.getDocumentId(), equalTo("doc-42"));
         assertThat(r.getFailureType(), equalTo("boom"));
         assertThat(r.getFailureClass(), is(FailureClass.NON_RETRYABLE));
-        assertThat(r.getRequestItem(), notNullValue());
+        assertThat(r.getTarget(), notNullValue());
         assertThat(r.getResponseItem(), notNullValue());
         assertThat(r.getTimestamp(), notNullValue());
     }
 
     @Test
-    void emitFailedDocumentStreamRecord_usesOriginalSourceForDocumentBody() {
-        // When the op carries an originalSource (the pre-transformation, source-index
-        // document), the failed document stream record's requestItem must reflect that original body rather
-        // than the transformed document that was actually sent.
+    void emitFailedDocumentStreamRecord_keepsBothTheSourceAndTheSentDocument() {
+        // When the op carries an originalSource (the pre-transformation, source-index document), the record keeps
+        // it in its source portion, and the transformed document that was actually sent in its target portion.
         when(failedDocumentStreamSink.write(any())).thenReturn(Mono.empty());
         client.setFailedDocumentStreamContext(failedDocumentStreamSink, "s", "w");
         var op = IndexOp.builder()
@@ -125,8 +124,10 @@ class OpenSearchClientFailedDocumentStreamHelpersTest {
 
         ArgumentCaptor<FailedDocumentStreamRecord> rec = ArgumentCaptor.forClass(FailedDocumentStreamRecord.class);
         verify(failedDocumentStreamSink).write(rec.capture());
-        var requestItem = rec.getValue().getRequestItem();
-        assertThat(requestItem.get("document").get("field").asText(), equalTo("original"));
+        assertThat(rec.getValue().getSource().get("body").get("field").asText(), equalTo("original"));
+        assertThat(rec.getValue().getSource().get("documentId").asText(), equalTo("doc-7"));
+        assertThat(rec.getValue().getTarget().get("body").get("field").asText(), equalTo("transformed"));
+        assertThat(rec.getValue().getTarget().get("effectiveIndex").asText(), equalTo("idx"));
     }
 
     @Test
@@ -145,8 +146,8 @@ class OpenSearchClientFailedDocumentStreamHelpersTest {
 
         ArgumentCaptor<FailedDocumentStreamRecord> rec = ArgumentCaptor.forClass(FailedDocumentStreamRecord.class);
         verify(failedDocumentStreamSink).write(rec.capture());
-        var requestItem = rec.getValue().getRequestItem();
-        assertThat(requestItem.get("document").get("field").asText(), equalTo("sent"));
+        assertThat(rec.getValue().getSource(), nullValue());
+        assertThat(rec.getValue().getTarget().get("body").get("field").asText(), equalTo("sent"));
     }
 
     @Test
@@ -215,7 +216,8 @@ class OpenSearchClientFailedDocumentStreamHelpersTest {
         verify(failedDocumentStreamSink).write(rec.capture());
         var r = rec.getValue();
         assertThat(r.getDocumentId(), equalTo("doc-only"));
-        assertThat(r.getRequestItem(), nullValue());
+        assertThat(r.getSource(), nullValue());
+        assertThat(r.getTarget(), nullValue());
     }
 
     @Test
