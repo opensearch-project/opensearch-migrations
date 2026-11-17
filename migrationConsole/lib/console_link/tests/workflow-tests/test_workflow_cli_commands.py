@@ -2065,14 +2065,14 @@ class TestConfigureCommands:
         store.save_secret.return_value = 'Secret created: azure-creds'
         return store
 
-    @pytest.mark.parametrize('selector, key, prompt', [
-        ('--account-key', 'accountKey', 'Account key'),
-        ('--sas-token', 'sasToken', 'SAS token'),
+    @pytest.mark.parametrize('selector, key, prompt, stored', [
+        ('--account-key', 'accountKey', 'Account key', '?sv=abc&sig=xyz'),
+        ('--sas-token', 'sasToken', 'SAS token', 'sv=abc&sig=xyz'),
     ])
     @patch('console_link.workflow.commands.configure.get_azure_credentials_secret_store')
     @patch('console_link.workflow.commands.configure.get_credentials_secret_store')
     def test_configure_credentials_create_azure_prompts_for_value(
-        self, mock_get_secret_store, mock_get_azure_store, selector, key, prompt,
+        self, mock_get_secret_store, mock_get_azure_store, selector, key, prompt, stored,
     ):
         runner = CliRunner()
         azure_store = self._azure_secret_store()
@@ -2089,7 +2089,7 @@ class TestConfigureCommands:
         assert 'Repeat for confirmation' in result.output
         assert '?sv=abc&sig=xyz' not in result.output
         assert 'Credentials created: azure-creds' in result.output
-        azure_store.save_secret.assert_called_once_with('azure-creds', {key: '?sv=abc&sig=xyz'})
+        azure_store.save_secret.assert_called_once_with('azure-creds', {key: stored})
         mock_get_secret_store.assert_not_called()
 
     @pytest.mark.parametrize('selector, key', [
@@ -2116,7 +2116,24 @@ class TestConfigureCommands:
         azure_store.save_secret.assert_called_once_with('azure-creds', {key: 'c2VjcmV0LWtleQ=='})
         mock_get_secret_store.assert_not_called()
 
-    @pytest.mark.parametrize('stdin_input', ['', '\n', 'line-one\nline-two\n', 'line-one\rline-two'])
+    @patch('console_link.workflow.commands.configure.get_azure_credentials_secret_store')
+    def test_configure_credentials_create_azure_stdin_strips_leading_question_mark_from_sas(
+        self, mock_get_azure_store,
+    ):
+        runner = CliRunner()
+        azure_store = self._azure_secret_store()
+        mock_get_azure_store.return_value = azure_store
+
+        result = runner.invoke(
+            workflow_cli,
+            ['configure', 'credentials', 'create', '--azure', '--sas-token', '--stdin', 'azure-creds'],
+            input='?sv=abc&sig=xyz\n',
+        )
+
+        assert result.exit_code == 0
+        azure_store.save_secret.assert_called_once_with('azure-creds', {'sasToken': 'sv=abc&sig=xyz'})
+
+    @pytest.mark.parametrize('stdin_input', ['', '\n', '?\n', 'line-one\nline-two\n', 'line-one\rline-two'])
     @patch('console_link.workflow.commands.configure.get_azure_credentials_secret_store')
     def test_configure_credentials_create_azure_stdin_rejects_empty_or_multiline(
         self, mock_get_azure_store, stdin_input,

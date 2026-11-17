@@ -335,16 +335,23 @@ def _get_basic_auth_credentials(stdin: bool, silent: bool = False):
     return _prompt_basic_auth_credentials()
 
 
+def _without_sas_prefix(key: str, value: str) -> str:
+    # Argo appends its own "?" to the container URL, so a pasted "?sv=..." would become "??sv=...".
+    return value[1:] if key == "sasToken" and value.startswith("?") else value
+
+
 def _get_azure_credentials(key: str, stdin: bool, silent: bool = False):
     if silent and not stdin:
         raise click.ClickException("--silent can only be used with --stdin.")
     if stdin:
-        value = _read_secret_stdin(silent).rstrip('\r\n')
+        value = _without_sas_prefix(key, _read_secret_stdin(silent).rstrip('\r\n'))
         if not value or '\n' in value or '\r' in value:
             raise click.ClickException(AZURE_STDIN_SECRET_FORMAT_ERROR)
     else:
         prompt = "Account key" if key == "accountKey" else "SAS token"
-        value = click.prompt(prompt, hide_input=True, confirmation_prompt=True)
+        value = _without_sas_prefix(key, click.prompt(prompt, hide_input=True, confirmation_prompt=True))
+        if not value:
+            raise click.ClickException(f"{prompt} is empty.")
     return {key: value}
 
 
