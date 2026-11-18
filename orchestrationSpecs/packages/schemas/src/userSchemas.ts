@@ -1397,6 +1397,18 @@ export const DEFAULT_KAFKA_TOPIC_SPEC_OVERRIDES = {
     }
 } as const;
 
+export const DEFAULT_KAFKA_NODE_POOL_SPEC_OVERRIDES = {
+    // 3 is the minimum broker count that satisfies RF=3/minISR=2 below.
+    replicas: 3,
+    roles: ["controller", "broker"],
+    storage: {
+        type: "persistent-claim",
+        // Smoke-test size. Real deployments should override.
+        size: "2Gi",
+        deleteClaim: true,
+    },
+} as const;
+
 // These defaults are resolved during initialization so workflow templates do not
 // need to invent their own Kafka defaults. That keeps default ownership here,
 // even though some workflow templates currently unpack pieces of the resolved
@@ -1431,15 +1443,7 @@ const DEFAULT_AUTO_CREATE_KAFKA = {
         }
     },
     nodePoolSpecOverrides: {
-        // 3 is the minimum broker count that satisfies RF=3/minISR=2 above.
-        replicas: 3,
-        roles: ["controller", "broker"],
-        storage: {
-            type: "persistent-claim",
-            // Smoke-test size. Real deployments should override.
-            size: "2Gi",
-            deleteClaim: true,
-        },
+        ...DEFAULT_KAFKA_NODE_POOL_SPEC_OVERRIDES,
         // Zone and host spread are not defaults here: the workflow generates them from the
         // deployment's workloadZoneSpread setting unless template.pod.topologySpreadConstraints is
         // set explicitly in these overrides, in which case that list is used as given.
@@ -2393,15 +2397,16 @@ export const KAFKA_CLUSTER_CREATION_CONFIG = z.preprocess(
     z.object({
         auth: KAFKA_AUTO_CREATE_AUTH_CONFIG.optional()
             .describe("Workflow-owned Kafka client auth for auto-created Strimzi clusters. "
-                + "If omitted, transform-time resolution currently defaults workflow-managed Kafka to "
-                + "`scram-sha-512` as the secure-by-default policy. This default is intentionally "
+                + "If omitted, transform-time resolution defaults workflow-managed Kafka to "
+                + "`scram-sha-512` over its TLS listener as the secure-by-default policy. This default is intentionally "
                 + "resolved outside the deep-merged Strimzi object defaults so auth policy can change "
                 + "without being hidden inside the structural Kafka/NodePool/Topic default merge.")
             .effectiveDefault({
                 label: "scram-sha-512",
                 value: {type: "scram-sha-512"},
-                description: "Omitting this field uses workflow-managed Kafka SCRAM-SHA-512 authentication.",
-            }),
+                description: "Omitting this field uses workflow-managed Kafka SCRAM-SHA-512 authentication over TLS.",
+            })
+            .expert(),
         // Intended contract: users provide Strimzi-shaped partial Kafka.spec values and
         // initialization deep-merges them with the baseline defaults above.
         //

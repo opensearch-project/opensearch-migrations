@@ -183,6 +183,45 @@
           "storage": {
             "$ref": "#/components/schemas/io.strimzi.api.kafka.model.storage.Storage"
           },
+          "resources": {
+            "type": "object",
+            "properties": {
+              "claims": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "limits": {
+                "type": "object",
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ]
+                }
+              },
+              "requests": {
+                "type": "object",
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ]
+                }
+              }
+            },
+            "additionalProperties": false
+          },
           "template": {
             "type": "object",
             "properties": {
@@ -235,6 +274,9 @@
       "io.strimzi.api.kafka.model.storage.PersistentClaimStorage": {
         "type": "object",
         "properties": {
+          "class": {
+            "type": "string"
+          },
           "id": {
             "type": "integer"
           },

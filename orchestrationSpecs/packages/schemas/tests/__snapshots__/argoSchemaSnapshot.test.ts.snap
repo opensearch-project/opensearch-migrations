@@ -58,14 +58,15 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           ]
                         }
                       ],
-                      "description": "Workflow-owned Kafka client auth for auto-created Strimzi clusters. If omitted, transform-time resolution currently defaults workflow-managed Kafka to \`scram-sha-512\` as the secure-by-default policy. This default is intentionally resolved outside the deep-merged Strimzi object defaults so auth policy can change without being hidden inside the structural Kafka/NodePool/Topic default merge.",
+                      "description": "Workflow-owned Kafka client auth for auto-created Strimzi clusters. If omitted, transform-time resolution defaults workflow-managed Kafka to \`scram-sha-512\` over its TLS listener as the secure-by-default policy. This default is intentionally resolved outside the deep-merged Strimzi object defaults so auth policy can change without being hidden inside the structural Kafka/NodePool/Topic default merge.",
                       "x-effective-default": {
                         "label": "scram-sha-512",
                         "value": {
                           "type": "scram-sha-512"
                         },
-                        "description": "Omitting this field uses workflow-managed Kafka SCRAM-SHA-512 authentication."
-                      }
+                        "description": "Omitting this field uses workflow-managed Kafka SCRAM-SHA-512 authentication over TLS."
+                      },
+                      "x-expert": true
                     },
                     "clusterSpecOverrides": {
                       "type": "object",
@@ -8802,14 +8803,15 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                             ]
                           }
                         ],
-                        "description": "Workflow-owned Kafka client auth for auto-created Strimzi clusters. If omitted, transform-time resolution currently defaults workflow-managed Kafka to \`scram-sha-512\` as the secure-by-default policy. This default is intentionally resolved outside the deep-merged Strimzi object defaults so auth policy can change without being hidden inside the structural Kafka/NodePool/Topic default merge.",
+                        "description": "Workflow-owned Kafka client auth for auto-created Strimzi clusters. If omitted, transform-time resolution defaults workflow-managed Kafka to \`scram-sha-512\` over its TLS listener as the secure-by-default policy. This default is intentionally resolved outside the deep-merged Strimzi object defaults so auth policy can change without being hidden inside the structural Kafka/NodePool/Topic default merge.",
                         "x-effective-default": {
                           "label": "scram-sha-512",
                           "value": {
                             "type": "scram-sha-512"
                           },
-                          "description": "Omitting this field uses workflow-managed Kafka SCRAM-SHA-512 authentication."
-                        }
+                          "description": "Omitting this field uses workflow-managed Kafka SCRAM-SHA-512 authentication over TLS."
+                        },
+                        "x-expert": true
                       },
                       "clusterSpecOverrides": {
                         "$ref": "#/$defs/StrimziKafkaSpec",
@@ -8818,8 +8820,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       },
                       "nodePoolSpecOverrides": {
                         "$ref": "#/$defs/StrimziKafkaNodePoolSpec",
-                        "description": "Strimzi KafkaNodePool.spec overrides merged into the workflow-managed node pool resource.",
-                        "x-expert": true
+                        "description": "Kafka broker count, storage, resources, and advanced Strimzi KafkaNodePool.spec overrides merged into the workflow-managed node pool resource.",
+                        "x-essential": true
                       }
                     },
                     "description": "Workflow-managed Strimzi Kafka cluster creation. Structural defaults for broker and node-pool settings are deep-merged here, while the auth default is resolved separately during transform-time policy application."
@@ -12343,6 +12345,45 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
         "storage": {
           "$ref": "#/$defs/io.strimzi.api.kafka.model.storage.Storage"
         },
+        "resources": {
+          "type": "object",
+          "properties": {
+            "claims": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            },
+            "limits": {
+              "type": "object",
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "string"
+                  }
+                ]
+              }
+            },
+            "requests": {
+              "type": "object",
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "string"
+                  }
+                ]
+              }
+            }
+          },
+          "additionalProperties": false
+        },
         "template": {
           "type": "object",
           "properties": {
@@ -12410,13 +12451,15 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
       "properties": {
         "type": {
           "type": "string",
-          "const": "jbod"
+          "const": "jbod",
+          "x-essential": true
         },
         "volumes": {
           "type": "array",
           "items": {
             "$ref": "#/$defs/io.strimzi.api.kafka.model.storage.PersistentClaimStorage"
-          }
+          },
+          "x-expert": true
         }
       },
       "additionalProperties": false
@@ -12424,18 +12467,41 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
     "io.strimzi.api.kafka.model.storage.PersistentClaimStorage": {
       "type": "object",
       "properties": {
+        "class": {
+          "type": "string",
+          "description": "Kubernetes StorageClass used to provision each Kafka node volume. Choose a class whose throughput, IOPS, availability zone, expansion, and reclaim behavior fit the workload.",
+          "x-essential": true
+        },
         "id": {
-          "type": "integer"
+          "type": "integer",
+          "x-expert": true
         },
         "type": {
           "type": "string",
-          "const": "persistent-claim"
+          "const": "persistent-claim",
+          "x-essential": true
         },
         "size": {
-          "type": "string"
+          "type": "string",
+          "default": "2Gi",
+          "description": "Persistent volume capacity for each Kafka node. The 2Gi default is only suitable for smoke tests.",
+          "x-essential": true,
+          "x-effective-default": {
+            "label": "2Gi",
+            "value": "2Gi",
+            "description": "Each broker uses a 2Gi persistent volume unless overridden."
+          }
         },
         "deleteClaim": {
-          "type": "boolean"
+          "type": "boolean",
+          "default": true,
+          "description": "Controls the Kafka node PVC, not individual Kafka records. When true (the workflow default), Strimzi deletes the PVC when that Kafka node is removed; the backing volume then follows its PersistentVolume reclaim policy. When false, Strimzi retains the PVC. A replacement Strimzi Kafka resource can reuse retained volumes only as a deliberate recovery of the same logical cluster, using the original cluster identity and configuration plus the correct PVC/PV-to-node mapping. This is not an automatic backup or a way to attach old data to an unrelated new cluster. Explicit storage deletion, including workflow reset --delete-storage, can still remove retained claims.",
+          "x-essential": true,
+          "x-effective-default": {
+            "label": "delete storage with removed Kafka nodes",
+            "value": true,
+            "description": "The workflow defaults to deleting a Kafka node's PVC when the node is removed."
+          }
         }
       },
       "additionalProperties": false
@@ -12522,7 +12588,115 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
       "$ref": "#/$defs/io.strimzi.api.kafka.model.KafkaSpec"
     },
     "StrimziKafkaNodePoolSpec": {
-      "$ref": "#/$defs/io.strimzi.api.kafka.model.nodepool.KafkaNodePoolSpec"
+      "type": "object",
+      "properties": {
+        "replicas": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 3,
+          "description": "Number of Kafka broker/controller pods. Size this explicitly for the required throughput and availability.",
+          "x-essential": true,
+          "x-effective-default": {
+            "label": "3 brokers",
+            "value": 3,
+            "description": "Workflow-managed Kafka uses three dual-role broker/controller pods unless overridden."
+          }
+        },
+        "roles": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "broker",
+              "controller"
+            ]
+          },
+          "x-expert": true
+        },
+        "storage": {
+          "$ref": "#/$defs/io.strimzi.api.kafka.model.storage.Storage",
+          "default": {
+            "type": "persistent-claim",
+            "size": "2Gi",
+            "deleteClaim": true
+          },
+          "description": "Persistent storage allocated to each Kafka node. The 2Gi workflow default is intended for smoke tests; size production storage for ingestion rate and retention duration.",
+          "x-essential": true,
+          "x-effective-default": {
+            "label": "2Gi persistent volume per broker",
+            "value": {
+              "type": "persistent-claim",
+              "size": "2Gi",
+              "deleteClaim": true
+            },
+            "description": "Workflow-managed Kafka uses a 2Gi persistent volume per broker unless overridden."
+          }
+        },
+        "resources": {
+          "type": "object",
+          "properties": {
+            "claims": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "x-expert": true
+            },
+            "limits": {
+              "type": "object",
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "string"
+                  }
+                ]
+              },
+              "description": "Maximum CPU and memory available to each Kafka broker/controller pod.",
+              "x-essential": true
+            },
+            "requests": {
+              "type": "object",
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "string"
+                  }
+                ]
+              },
+              "description": "CPU and memory reserved for each Kafka broker/controller pod.",
+              "x-essential": true
+            }
+          },
+          "additionalProperties": false,
+          "description": "CPU and memory requests and limits for each Kafka broker/controller pod.",
+          "x-essential": true
+        },
+        "template": {
+          "type": "object",
+          "properties": {
+            "pod": {
+              "type": "object",
+              "properties": {
+                "affinity": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "additionalProperties": true
+            }
+          },
+          "additionalProperties": true,
+          "x-expert": true
+        }
+      },
+      "additionalProperties": false
     },
     "StrimziKafkaTopicSpec": {
       "type": "object",
@@ -12559,17 +12733,28 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
               "enum": [
                 "delete",
                 "compact"
-              ]
+              ],
+              "x-expert": true
             },
             "retention.ms": {
-              "type": "integer"
+              "type": "integer",
+              "default": 604800000,
+              "description": "How long Kafka retains topic records, in milliseconds. The seven-day workflow default must cover the expected capture-to-replay interval; increasing it also increases required broker storage.",
+              "x-essential": true,
+              "x-effective-default": {
+                "label": "7 days",
+                "value": 604800000,
+                "description": "Topics retain records for seven days unless overridden."
+              }
             },
             "segment.bytes": {
-              "type": "integer"
+              "type": "integer",
+              "x-expert": true
             }
           },
           "additionalProperties": false,
-          "x-expert": true
+          "description": "Kafka topic retention and advanced topic configuration.",
+          "x-essential": true
         }
       },
       "additionalProperties": false

@@ -24,6 +24,24 @@ function getTopicProperties(schema: any) {
         .properties.topics.additionalProperties.properties;
 }
 
+function resolveRef(schema: any, root: any): any {
+    if (!schema?.$ref?.startsWith("#/")) {
+        return schema;
+    }
+    return schema.$ref
+        .slice(2)
+        .split("/")
+        .reduce((current: any, part: string) => current?.[part], root);
+}
+
+function getNodePoolProperties(schema: any) {
+    return resolveRef((schema as any).$defs.StrimziKafkaNodePoolSpec, schema).properties;
+}
+
+function getPersistentStorageProperties(schema: any) {
+    return (schema as any).$defs["io.strimzi.api.kafka.model.storage.PersistentClaimStorage"].properties;
+}
+
 const validConfig = {
     sourceClusters: {
         source: {
@@ -128,13 +146,76 @@ describe("unified schema builder", () => {
             },
         });
         expect(topicSpec.properties.replicas["x-expert"]).toBeUndefined();
-        expect(topicSpec.properties.config["x-expert"]).toBe(true);
+        expect(topicSpec.properties.config["x-expert"]).toBeUndefined();
+        expect(topicSpec.properties.config["x-essential"]).toBe(true);
+        expect(topicSpec.properties.config.properties["retention.ms"]).toMatchObject({
+            type: "integer",
+            default: 604800000,
+            "x-essential": true,
+            "x-effective-default": {
+                label: "7 days",
+                value: 604800000,
+            },
+        });
+        expect(topicSpec.properties.config.properties["retention.ms"]["x-expert"]).toBeUndefined();
+        expect(topicSpec.properties.config.properties["segment.bytes"]["x-expert"]).toBe(true);
+        expect(getAutoCreateProperties(schema).auth["x-expert"]).toBe(true);
+        expect(getAutoCreateProperties(schema).auth.description).toContain("over its TLS listener");
         expect(getAutoCreateProperties(schema).clusterSpecOverrides["x-expert"])
             .toBe(true);
+        expect(getAutoCreateProperties(schema).nodePoolSpecOverrides).toMatchObject({
+            "x-essential": true,
+        });
         expect(getAutoCreateProperties(schema).nodePoolSpecOverrides["x-expert"])
-            .toBe(true);
+            .toBeUndefined();
         expect(getTopicProperties(schema).specOverrides["x-expert"])
             .toBeUndefined();
+
+        const nodePoolProperties = getNodePoolProperties(schema);
+        expect(nodePoolProperties.replicas).toMatchObject({
+            default: 3,
+            "x-essential": true,
+            "x-effective-default": {
+                label: "3 brokers",
+                value: 3,
+            },
+        });
+        expect(nodePoolProperties.replicas["x-expert"]).toBeUndefined();
+        expect(nodePoolProperties.storage["x-expert"]).toBeUndefined();
+        expect(nodePoolProperties.storage["x-essential"]).toBe(true);
+        expect(nodePoolProperties.resources["x-expert"]).toBeUndefined();
+        expect(nodePoolProperties.resources["x-essential"]).toBe(true);
+        expect(nodePoolProperties.resources.properties.requests["x-expert"]).toBeUndefined();
+        expect(nodePoolProperties.resources.properties.limits["x-expert"]).toBeUndefined();
+        expect(nodePoolProperties.resources.properties.claims["x-expert"]).toBe(true);
+        expect(nodePoolProperties.roles["x-expert"]).toBe(true);
+        expect(nodePoolProperties.template["x-expert"]).toBe(true);
+
+        const storageProperties = getPersistentStorageProperties(schema);
+        expect(storageProperties.type["x-expert"]).toBeUndefined();
+        expect(storageProperties.size).toMatchObject({
+            default: "2Gi",
+            "x-essential": true,
+            "x-effective-default": {
+                label: "2Gi",
+                value: "2Gi",
+            },
+        });
+        expect(storageProperties.class["x-expert"]).toBeUndefined();
+        expect(storageProperties.deleteClaim).toMatchObject({
+            default: true,
+            "x-essential": true,
+            "x-effective-default": {
+                label: "delete storage with removed Kafka nodes",
+                value: true,
+            },
+        });
+        expect(storageProperties.deleteClaim.description).toContain("not an automatic backup");
+        expect(storageProperties.deleteClaim.description).toContain("replacement Strimzi Kafka resource");
+        expect(storageProperties.deleteClaim.description).toContain("same logical cluster");
+        expect(storageProperties.id["x-expert"]).toBe(true);
+        expect((schema as any).$defs["io.strimzi.api.kafka.model.storage.JbodStorage"]
+            .properties.type.default).toBeUndefined();
 
         expect(JSON.stringify({
             mode: schema["x-orchestration-specs-strimzi-schema-mode"],

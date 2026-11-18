@@ -1957,6 +1957,7 @@ describe("editConfig state", () => {
             value: "unset",
             presence: "optional",
             status: "ok",
+            expert: true,
             effectiveDefault: {
                 label: "scram-sha-512",
             },
@@ -1976,6 +1977,8 @@ describe("editConfig state", () => {
         expect(findNode(state.nodes, "edit:traffic.kafkaClusters.default.autoCreate.nodePoolSpecOverrides"),).toMatchObject({
             valueKind: "object",
             presence: "optional",
+            expert: false,
+            essential: true,
         });
         expect(findNode(state.nodes, "edit:traffic.kafkaClusters.default.topics")).toMatchObject({
             valueKind: "record",
@@ -2833,7 +2836,21 @@ describe("editConfig state", () => {
         });
         expect(findNode(state.nodes, "edit:traffic.kafkaClusters.kafka.autoCreate.nodePoolSpecOverrides.storage"),).toMatchObject({
             valueKind: "union",
-            value: "unset",
+            expert: false,
+            essential: true,
+        });
+        expect(findNode(state.nodes, "edit:traffic.kafkaClusters.kafka.autoCreate.nodePoolSpecOverrides.replicas"),).toMatchObject({
+            valueKind: "scalar",
+            valueType: "number",
+            value: 3,
+            valueDefaulted: true,
+            expert: false,
+            essential: true,
+        });
+        expect(findNode(state.nodes, "edit:traffic.kafkaClusters.kafka.autoCreate.nodePoolSpecOverrides.resources"),).toMatchObject({
+            valueKind: "object",
+            expert: false,
+            essential: true,
         });
         expect(findNode(state.nodes, "edit:traffic.kafkaClusters.kafka.topics.capture.specOverrides"),).toMatchObject({
             valueKind: "object",
@@ -2865,6 +2882,18 @@ describe("editConfig state", () => {
             },
         });
         expect(findNode(state.nodes, "edit:traffic.kafkaClusters.kafka.topics.capture.specOverrides.config"),).toMatchObject({
+            expert: false,
+            essential: true,
+        });
+        expect(findNode(state.nodes, "edit:traffic.kafkaClusters.kafka.topics.capture.specOverrides.config.retention.ms"),).toMatchObject({
+            valueKind: "scalar",
+            valueType: "number",
+            value: 604800000,
+            valueDefaulted: true,
+            expert: false,
+            essential: true,
+        });
+        expect(findNode(state.nodes, "edit:traffic.kafkaClusters.kafka.topics.capture.specOverrides.config.segment.bytes"),).toMatchObject({
             expert: true,
         });
         expect(findNode(state.nodes, "edit:traffic.kafkaClusters.kafka.topics.capture.specOverrides.config.cleanup.policy",),).toMatchObject({
