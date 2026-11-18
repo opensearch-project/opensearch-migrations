@@ -195,6 +195,10 @@ transform to resend failed documents from the backfill stage.
 
 ## CLI
 
+> This section records the design rationale for the workflow interface. For
+> current commands and usage, see the
+> [Workflow CLI guide](../migrationConsole/lib/console_link/README.md#workflow-cli).
+
 ### Interface Options
 
 The migration console container currently provides the primary access to
@@ -632,8 +636,7 @@ in the `Test0003ApprovalGateIntegration` integration test.
 
 ### Logging
 
-With K8s, we need to manage log offloading ourselves more than we did for ECS.
-With the fluentbit stateful set that we’re running, we should be able to project
+We manage log offloading with a Fluent Bit stateful set that projects
 all of our logs as unique streams that include not just the pod name, but
 additional metadata that the workflow can attach. Specifically, the workflow run
 number (3rd attempt), the service, and configuration’s name (e.g.

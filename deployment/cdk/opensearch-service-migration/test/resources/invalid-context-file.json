@@ -1,8 +1,0 @@
-"unit-test-1": {
-"stage": "unittest",
-"vpcEnabled": true,
-"migrationAssistanceEnabled": true,
-"kafkaBrokerServiceEnabled": true,
-"otelMetricsCollectorEnabled": false,
-"otelTraceCollectorEnabled": false
-}

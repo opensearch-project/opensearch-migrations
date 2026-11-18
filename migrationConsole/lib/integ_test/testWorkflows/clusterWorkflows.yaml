@@ -1785,6 +1785,14 @@ spec:
                           cp /opt/solr/contrib/s3-repository/lib/*.jar /opt/solr/dist/
                           /opt/docker-solr/scripts/init-var-solr
                           exec solr -f -force -cloud -DzkRun
+                      # Embedded ZooKeeper can occasionally fail while leaving Jetty alive.
+                      # Restart the container instead of waiting for an unready pod to time out.
+                      startupProbe:
+                        httpGet:
+                          path: /solr/admin/info/system?wt=json
+                          port: 8983
+                        periodSeconds: 5
+                        failureThreshold: 18
                       readinessProbe:
                         httpGet:
                           path: /solr/admin/info/system?wt=json
