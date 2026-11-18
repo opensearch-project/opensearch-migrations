@@ -1,7 +1,38 @@
 plugins {
     id 'base'
 }
-// CLI build infrastructure removed — see PR description.
-// The Rust CLI source remains under cli/ for development use (`cargo build`
-// from the crate directory). The packaged-tarball and cross-compile Gradle
-// tasks are removed until the CLI is ready for release distribution.
+
+def repositoryRoot = rootProject.layout.projectDirectory
+
+def bashTests = [
+    testMirrorToEcrUtils           : [
+        'test/mirrorToEcrUtils.sh',
+        'Tests the bounded ECR mirror worker pool and digest fast paths',
+    ],
+    testBootstrapMirror            : [
+        'test/bootstrapMirror.sh',
+        'Tests bootstrap mirror scheduling, concurrency, and ECR polling',
+    ],
+    testBootstrapGrantEksAccessOnly: [
+        'test/awsBootstrapGrantEksAccessOnly.sh',
+        'Tests the source and assembled bootstrap grant-only flow',
+    ],
+    testBootstrapCfnResume         : [
+        'test/awsBootstrapCfnResume.sh',
+        'Tests reconnecting to an in-progress CloudFormation deployment',
+    ],
+]
+
+bashTests.each { taskName, spec ->
+    def (script, desc) = spec
+    tasks.register(taskName, Exec) {
+        description = desc
+        group = 'verification'
+        workingDir repositoryRoot.asFile
+        commandLine 'bash', repositoryRoot.file(script).asFile
+    }
+}
+
+tasks.named('check') {
+    dependsOn bashTests.keySet()
+}

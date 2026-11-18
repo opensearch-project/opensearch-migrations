@@ -5,13 +5,20 @@
 # Copies all required container images and helm charts from public registries
 # to a private ECR registry. Run this from a machine with internet access.
 #
-# Can be run standalone or sourced by the migration-assistant CLI (which calls
-# mirror_images_to_ecr and mirror_charts_to_ecr directly).
+# Can be run standalone or sourced by aws-bootstrap.sh, which calls
+# mirror_images_to_ecr and mirror_charts_to_ecr directly.
 #
 # Usage: ./mirrorToEcr.sh <ecr-host> [--region <region>]
 # Example: ./mirrorToEcr.sh 123456789012.dkr.ecr.us-east-2.amazonaws.com
 # =============================================================================
 set -euo pipefail
+
+if ! type mirror_image_is_current >/dev/null 2>&1; then
+  _mirror_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  # shellcheck source=mirrorToEcrUtils.sh
+  . "${_mirror_script_dir}/mirrorToEcrUtils.sh"
+  unset _mirror_script_dir
+fi
 
 default_private_ecr_manifest() {
   local script_dir
@@ -118,13 +125,16 @@ copy_image() {
     done
   ;; esac
 
-  aws ecr create-repository --repository-name "$ecr_repo" --region "$region" 2>/dev/null || true
-
   # Prepend pull-through cache source if available (fastest path — same-region ECR to ECR)
   local ptc_src
   ptc_src=$(ptc_rewrite "$ptc" "$image") && sources="$ptc_src ${sources}"
 
   for src in $sources; do
+    if mirror_image_is_current "$src" "$dest"; then
+      [ "$src" != "$image" ] && echo "  ℹ️  $image (via $src)"
+      echo "  ✅ $image (already mirrored)"
+      return 0
+    fi
     for attempt in 1 2 3 4 5; do
       if crane copy "$src" "$dest" 2>/dev/null; then
         [ "$src" != "$image" ] && echo "  ℹ️  $image (via $src)"
@@ -136,11 +146,8 @@ copy_image() {
   echo "  ❌ $image" >&2; return 1
 }
 
-# Mirror container images to ECR (parallel).
-# Args: <ecr-host> <region> <images-string>
-mirror_images_to_ecr() {
-  local ecr_host="$1" region="$2" images="$3"
-  local dockerhub_mirrors="${DOCKERHUB_MIRRORS:-mirror.gcr.io docker.io public.ecr.aws}"
+prepare_image_mirror_auth() {
+  local ecr_host="$1" region="$2"
 
   ensure_crane
 
@@ -152,29 +159,39 @@ mirror_images_to_ecr() {
   aws ecr-public get-login-password --region us-east-1 2>/dev/null | \
     crane auth login public.ecr.aws -u AWS --password-stdin 2>/dev/null || true
 
-  # ECR pull-through cache (optional, from Jenkins host environment)
-  local ptc="${ECR_PULL_THROUGH_ENDPOINT:-}"
-  if [ -n "$ptc" ]; then
-    echo "ECR pull-through cache enabled: $ptc"
+  if [[ -n "${ECR_PULL_THROUGH_ENDPOINT:-}" ]]; then
+    echo "ECR pull-through cache enabled: $ECR_PULL_THROUGH_ENDPOINT"
     aws ecr get-login-password --region "$region" 2>/dev/null | \
-      crane auth login "$ptc" -u AWS --password-stdin 2>/dev/null || true
+      crane auth login "$ECR_PULL_THROUGH_ENDPOINT" -u AWS --password-stdin 2>/dev/null || true
   fi
+}
+
+mirror_manifest_image_task() {
+  local image="$1" ecr_host="$2" region="$3"
+  copy_image "$ecr_host" "$region" \
+    "${DOCKERHUB_MIRRORS:-mirror.gcr.io docker.io public.ecr.aws}" \
+    "${ECR_PULL_THROUGH_ENDPOINT:-}" "$image"
+}
+
+# Mirror container images to ECR (parallel).
+# Args: <ecr-host> <region> <images-string>
+mirror_images_to_ecr() {
+  local ecr_host="$1" region="$2" images="$3"
+  prepare_image_mirror_auth "$ecr_host" "$region"
 
   echo ""
   echo "=== Mirroring container images ==="
-  local _imglist _max_jobs=4 _failfile
+  local _imglist _max_jobs _failfile _image_count
   _imglist=$(mktemp)
   _failfile=$(mktemp)
   echo "$images" | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//' | grep -v '^#' | grep -v '^$' > "$_imglist"
-  while IFS= read -r image; do
-    # Throttle to $_max_jobs concurrent copies
-    while [ "$(jobs -rp | wc -l)" -ge "$_max_jobs" ]; do
-      wait -n 2>/dev/null || true
-    done
-    ( copy_image "$ecr_host" "$region" "$dockerhub_mirrors" "$ptc" "$image" || echo "$image" >> "$_failfile" ) &
-  done < "$_imglist"
+  ensure_mirror_ecr_repositories "$region" "$(cat "$_imglist")"
+  _image_count=$(wc -l < "$_imglist" | tr -d ' ')
+  _max_jobs=$(mirror_copy_concurrency "$_image_count")
+  echo "Using $_max_jobs concurrent image copies (set MIRROR_CONCURRENCY to override)."
+  mirror_run_task_queue "$_imglist" "$_max_jobs" "$_failfile" \
+    mirror_manifest_image_task "$ecr_host" "$region" || true
   rm -f "$_imglist"
-  wait
   if [ -s "$_failfile" ]; then
     echo "" >&2
     echo "❌ The following image copies failed:" >&2
@@ -217,6 +234,11 @@ mirror_charts_to_ecr() {
     repo="${repo#"${repo%%[![:space:]]*}"}"; repo="${repo%"${repo##*[![:space:]]}"}"
     [ -z "$name" ] && continue
 
+    if mirror_ecr_tag_exists "$region" "charts/${name}" "$version"; then
+      echo "  ✅ $name $version (already mirrored)"
+      continue
+    fi
+
     echo "  Pulling $name $version from $repo..."
     # Retry transient pull failures (DNS, github.io 5xx, OCI registry blip)
     # the way image pulls already do. stdin from /dev/null so a credential
@@ -235,6 +257,7 @@ mirror_charts_to_ecr() {
       echo "  ❌ FAILED to pull $name $version after 5 attempts" >&2
       sed 's/^/    /' "$_pull_err" >&2
       rm -f "$_pull_err"
+      _chart_fail=1
       continue
     fi
     rm -f "$_pull_err"
@@ -253,7 +276,10 @@ mirror_charts_to_ecr() {
     echo "  ✅ $name $version"
   done < "$_chartlist"
   rm -f "$_chartlist"
-  [ "$_chart_fail" -eq 0 ] || echo "⚠️  Some chart copies failed" >&2
+  if [[ "$_chart_fail" -ne 0 ]]; then
+    echo "❌ Some chart copies failed" >&2
+    return 1
+  fi
 
   echo ""
   echo "=== Mirroring complete ==="

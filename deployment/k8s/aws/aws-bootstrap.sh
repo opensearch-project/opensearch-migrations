@@ -829,6 +829,130 @@ fi
 # generates later (tags, private ECR), so keep this copy for the cluster check after CFN.
 user_helm_values="$extra_helm_values"
 
+# --- source helper scripts (inlined by assemble-bootstrap.sh for release) ---
+# @source deployment/k8s/charts/aggregates/migrationAssistantWithArgo/scripts/mirrorToEcrUtils.sh
+# @source deployment/k8s/charts/aggregates/migrationAssistantWithArgo/scripts/mirrorToEcr.sh
+# @source deployment/k8s/charts/aggregates/migrationAssistantWithArgo/scripts/generatePrivateEcrValues.sh
+# @source deployment/k8s/charts/aggregates/migrationAssistantWithArgo/scripts/bootstrapMirror.sh
+_bootstrap_source_helpers() {
+  local scripts_dir="${base_dir}/deployment/k8s/charts/aggregates/migrationAssistantWithArgo/scripts"
+  # shellcheck source=../../../charts/aggregates/migrationAssistantWithArgo/scripts/mirrorToEcrUtils.sh
+  . "$scripts_dir/mirrorToEcrUtils.sh"
+  # shellcheck source=../../../charts/aggregates/migrationAssistantWithArgo/scripts/mirrorToEcr.sh
+  . "$scripts_dir/mirrorToEcr.sh"
+  # shellcheck source=../../../charts/aggregates/migrationAssistantWithArgo/scripts/generatePrivateEcrValues.sh
+  . "$scripts_dir/generatePrivateEcrValues.sh"
+  # shellcheck source=../../../charts/aggregates/migrationAssistantWithArgo/scripts/bootstrapMirror.sh
+  . "$scripts_dir/bootstrapMirror.sh"
+}
+# Only source if functions aren't already defined (i.e., not assembled).
+if ! type mirror_bootstrap_artifacts &>/dev/null; then
+  _bootstrap_source_helpers
+fi
+
+mirror_pid=""
+mirror_registry_file=""
+ecr_values_file=""
+mirror_inputs_prepared=false
+include_ma_images=false
+
+cleanup_bootstrap_mirroring() {
+  [[ "${BASH_SUBSHELL:-0}" -eq 0 ]] || return
+  if [[ -n "$mirror_pid" ]] && kill -0 "$mirror_pid" 2>/dev/null; then
+    echo "Stopping in-flight ECR mirroring..." >&2
+    kill "$mirror_pid" 2>/dev/null || true
+    wait "$mirror_pid" 2>/dev/null || true
+  fi
+  [[ -z "$mirror_registry_file" ]] || rm -f "$mirror_registry_file"
+  [[ -z "$ecr_values_file" ]] || rm -f "$ecr_values_file"
+}
+trap cleanup_bootstrap_mirroring EXIT
+
+prepare_bootstrap_mirroring() {
+  [[ "$mirror_inputs_prepared" == "true" ]] && return
+
+  echo "Preparing private ECR mirror inputs..."
+  mirror_manifest_file=$(resolve_mirror_manifest_file)
+  echo "Using ECR mirror manifest: ${mirror_manifest_file}"
+  load_private_ecr_manifest "$mirror_manifest_file"
+
+  include_ma_images=true
+  if [[ "$build" == "true" && -z "$ma_images_source" ]]; then
+    include_ma_images=false
+  fi
+
+  mirror_registry_file=$(mktemp)
+  ecr_values_file=$(mktemp)
+  if [[ -n "$extra_helm_values" ]]; then
+    extra_helm_values="$extra_helm_values,$ecr_values_file"
+  else
+    extra_helm_values="$ecr_values_file"
+  fi
+  mirror_inputs_prepared=true
+}
+
+start_bootstrap_mirroring() {
+  local registry_source="$1" registry_value="$2"
+  [[ -n "$mirror_pid" ]] && return
+  prepare_bootstrap_mirroring
+
+  (
+    local registry_uri mirror_child_pid="" mirror_rc=0
+    stop_mirror_child() {
+      if [[ -n "$mirror_child_pid" ]] && kill -0 "$mirror_child_pid" 2>/dev/null; then
+        kill "$mirror_child_pid" 2>/dev/null || true
+        wait "$mirror_child_pid" 2>/dev/null || true
+      fi
+    }
+    trap 'stop_mirror_child; exit 129' HUP
+    trap 'stop_mirror_child; exit 130' INT
+    trap 'stop_mirror_child; exit 143' TERM
+    trap 'stop_mirror_child' EXIT
+
+    if [[ "$registry_source" == "repository" ]]; then
+      registry_uri=$(wait_for_ecr_repository_uri "$region" "$registry_value")
+    else
+      registry_uri="$registry_value"
+    fi
+    printf '%s\n' "$registry_uri" > "$mirror_registry_file"
+    echo "Starting private ECR mirroring against $registry_uri..."
+    mirror_bootstrap_artifacts "$registry_uri" "$region" "$IMAGES" "$CHARTS" \
+      "$include_ma_images" "$BOOTSTRAP_ARTIFACT_VERSION" "$IMAGE_TAG" \
+      "$ma_images_source" "$ecr_values_file" &
+    mirror_child_pid=$!
+    wait "$mirror_child_pid" || mirror_rc=$?
+    mirror_child_pid=""
+    trap - EXIT HUP INT TERM
+    exit "$mirror_rc"
+  ) &
+  mirror_pid=$!
+}
+
+wait_for_bootstrap_mirroring() {
+  local mirrored_registry
+  [[ -n "$mirror_pid" ]] || return
+
+  echo "Waiting for private ECR mirroring to finish..."
+  if ! wait "$mirror_pid"; then
+    mirror_pid=""
+    echo "Private ECR mirroring failed." >&2
+    exit 1
+  fi
+  mirror_pid=""
+
+  mirrored_registry=$(cat "$mirror_registry_file")
+  if [[ "$mirrored_registry" != "$MIGRATIONS_ECR_REGISTRY" ]]; then
+    echo "Error: Mirrored into '$mirrored_registry', but CloudFormation exported" >&2
+    echo "       '$MIGRATIONS_ECR_REGISTRY'." >&2
+    exit 1
+  fi
+  echo "Private ECR mirroring completed successfully."
+}
+
+if [[ "$push_images_to_ecr" == "true" && "$grant_eks_access_only" != "true" ]]; then
+  prepare_bootstrap_mirroring
+fi
+
 # --- CFN deployment (optional) ---
 if [[ "$deploy_cfn" == "true" ]]; then
   # Determine template source
@@ -914,14 +1038,22 @@ if [[ "$deploy_cfn" == "true" ]]; then
   echo "Deploying CloudFormation stack: $cfn_stack_name"
 
   # Check for stack states that prevent deployment
+  cfn_operation_in_progress=false
   if aws cloudformation describe-stacks --stack-name "$cfn_stack_name" ${region:+--region "$region"} >/dev/null 2>&1; then
     _stack_status=$(aws cloudformation describe-stacks --stack-name "$cfn_stack_name" ${region:+--region "$region"} \
       --query 'Stacks[0].StackStatus' --output text 2>/dev/null)
-    if [[ "$_stack_status" == *_IN_PROGRESS ]]; then
-      echo "Error: Stack $cfn_stack_name is in $_stack_status state." >&2
-      echo "Wait for the current operation to complete before re-running." >&2
-      exit 1
-    fi
+    case "$_stack_status" in
+      CREATE_IN_PROGRESS|UPDATE_IN_PROGRESS|UPDATE_COMPLETE_CLEANUP_IN_PROGRESS|IMPORT_IN_PROGRESS)
+        echo "Stack $cfn_stack_name is already in $_stack_status state."
+        echo "Attaching to the in-progress operation instead of starting another update."
+        cfn_operation_in_progress=true
+        ;;
+      *_IN_PROGRESS)
+        echo "Error: Stack $cfn_stack_name is in $_stack_status state." >&2
+        echo "Wait for that operation to finish before re-running." >&2
+        exit 1
+        ;;
+    esac
     if [[ "$_stack_status" == "DELETE_FAILED" || "$_stack_status" == "UPDATE_ROLLBACK_FAILED" ]]; then
       echo "Error: Stack $cfn_stack_name is in $_stack_status state." >&2
       echo "Manual intervention required before re-running." >&2
@@ -974,8 +1106,48 @@ if [[ "$deploy_cfn" == "true" ]]; then
     return $rc
   }
 
-  run_cfn_deploy \
-    || { echo "CloudFormation deployment failed for: $cfn_stack_name"; exit 1; }
+  wait_for_cfn_operation() {
+    local stream_pid stack_status rc=0
+    local poll_interval="${CFN_POLL_INTERVAL:-10}"
+    stream_cfn_events &
+    stream_pid=$!
+    while true; do
+      stack_status=$(aws cloudformation describe-stacks \
+        --stack-name "$cfn_stack_name" \
+        ${region:+--region "$region"} \
+        --query 'Stacks[0].StackStatus' \
+        --output text 2>/dev/null || true)
+      case "$stack_status" in
+        *_IN_PROGRESS)
+          sleep "$poll_interval"
+          ;;
+        CREATE_COMPLETE|UPDATE_COMPLETE|IMPORT_COMPLETE)
+          break
+          ;;
+        *)
+          echo "CloudFormation operation ended in $stack_status." >&2
+          rc=1
+          break
+          ;;
+      esac
+    done
+    kill "$stream_pid" 2>/dev/null || true
+    wait "$stream_pid" 2>/dev/null || true
+    return "$rc"
+  }
+
+  if [[ "$push_images_to_ecr" == "true" ]]; then
+    start_bootstrap_mirroring \
+      repository "migration-ecr-${stage_filter}-${region}"
+  fi
+
+  if [[ "$cfn_operation_in_progress" == "true" ]]; then
+    wait_for_cfn_operation \
+      || { echo "CloudFormation deployment failed for: $cfn_stack_name"; exit 1; }
+  else
+    run_cfn_deploy \
+      || { echo "CloudFormation deployment failed for: $cfn_stack_name"; exit 1; }
+  fi
 
   echo "CloudFormation stack deployed successfully: $cfn_stack_name"
 fi
@@ -1010,6 +1182,10 @@ if [[ ${#missing_vars[@]} -gt 0 ]]; then
   printf '  %s\n' "${missing_vars[@]}" >&2
   echo "This may indicate the stack was deployed with an older template version." >&2
   exit 1
+fi
+
+if [[ "$push_images_to_ecr" == "true" && "$grant_eks_access_only" != "true" && -z "$mirror_pid" ]]; then
+  start_bootstrap_mirroring registry "$MIGRATIONS_ECR_REGISTRY"
 fi
 
 # Show resolved configuration and sources
@@ -2094,106 +2270,11 @@ fi
 
 
 
-# --- source helper scripts (inlined by assemble-bootstrap.sh for release) ---
-# @source deployment/k8s/charts/aggregates/migrationAssistantWithArgo/scripts/mirrorToEcr.sh
-# @source deployment/k8s/charts/aggregates/migrationAssistantWithArgo/scripts/generatePrivateEcrValues.sh
-_bootstrap_source_helpers() {
-  local scripts_dir="${base_dir}/deployment/k8s/charts/aggregates/migrationAssistantWithArgo/scripts"
-  # shellcheck source=../../../charts/aggregates/migrationAssistantWithArgo/scripts/mirrorToEcr.sh
-  . "$scripts_dir/mirrorToEcr.sh"
-  # shellcheck source=../../../charts/aggregates/migrationAssistantWithArgo/scripts/generatePrivateEcrValues.sh
-  . "$scripts_dir/generatePrivateEcrValues.sh"
-}
-# Only source if functions aren't already defined (i.e., not assembled)
-if ! type mirror_images_to_ecr &>/dev/null; then
-  _bootstrap_source_helpers
-fi
-
-# --- mirror public images to private ECR (optional) ---
-# Run before build so that buildkit image is available in ECR for isolated clusters.
+# --- join private ECR mirroring before its artifacts are consumed ---
+# CloudFormation and cluster configuration have run concurrently with this work.
 if [[ "$push_images_to_ecr" == "true" ]]; then
-  echo "Mirroring public images and helm charts to private ECR..."
-  ECR_HOST="${MIGRATIONS_ECR_REGISTRY%%/*}"
-  mirror_manifest_file=$(resolve_mirror_manifest_file)
-  echo "Using ECR mirror manifest: ${mirror_manifest_file}"
-  load_private_ecr_manifest "$mirror_manifest_file"
-  mirror_images_to_ecr "$ECR_HOST" "${AWS_CFN_REGION}" "$IMAGES"
-  mirror_charts_to_ecr "$ECR_HOST" "${AWS_CFN_REGION}" "$CHARTS"
-
-  echo "Generating private ECR helm values override..."
-  ecr_values_file=$(mktemp)
-  generate_private_ecr_values "$ECR_HOST" > "$ecr_values_file"
-  if [[ -n "$extra_helm_values" ]]; then
-    extra_helm_values="$extra_helm_values,$ecr_values_file"
-  else
-    extra_helm_values="$ecr_values_file"
-  fi
-  echo "Private ECR values written to $ecr_values_file"
-fi
-
-# Mirror MA images — runs regardless of whether base mirror was parallel or sequential
-if [[ "$push_images_to_ecr" == "true" ]]; then
-  # Mirror MA images to the private ECR repo with expected tags
-  # Skip if --build is set without --ma-images-source — locally-built images take precedence
-  if [[ "$build" != "true" || -n "$ma_images_source" ]]; then
-    echo "Mirroring MA images to private ECR..."
-    export PATH="${HOME}/bin:${PATH}"
-
-    # crane copy with exponential backoff retry
-    crane_copy_retry() {
-      local src="$1" dst="$2"
-      local attempt
-      for attempt in 1 2 3 4 5; do
-        if crane copy "$src" "$dst" 2>&1 | tail -1; then
-          return 0
-        fi
-        sleep $((5 * 2**(attempt-1)))  # exponential backoff: 5s, 10s, 20s, 40s, 80s
-      done
-      echo "  ❌ FAILED: $src → $dst" >&2
-      return 1
-    }
-
-    # MA image mapping: build_tag_name|public_ecr_suffix
-    # build_tag_name: what the build system produces (migrations_<name>_latest)
-    # public_ecr_suffix: the public.ecr.aws image name suffix (opensearch-migrations-<suffix>)
-    MA_IMAGES="capture_proxy|traffic-capture-proxy
-traffic_replayer|traffic-replayer
-reindex_from_snapshot|reindex-from-snapshot
-migration_console|console"
-
-    if [[ -n "${ma_images_source:-}" ]]; then
-      # Copy from another ECR registry using build tag names
-      echo "$MA_IMAGES" | while IFS='|' read -r build_name _; do
-        src="${ma_images_source}:migrations_${build_name}_latest"
-        dst="${MIGRATIONS_ECR_REGISTRY}:migrations_${build_name}_latest"
-        echo "  $build_name → $dst"
-        crane_copy_retry "$src" "$dst"
-      done
-    else
-      # Copy from public ECR, trying pull-through cache first when available
-      _ecr_public_authed=false
-      echo "$MA_IMAGES" | while IFS='|' read -r build_name public_suffix; do
-        dst="${MIGRATIONS_ECR_REGISTRY}:migrations_${build_name}_latest"
-        echo "  $public_suffix → $dst"
-        if [[ -n "${ECR_PULL_THROUGH_ENDPOINT:-}" ]] && \
-           crane_copy_retry "${ECR_PULL_THROUGH_ENDPOINT}/ecr-public/opensearchproject/opensearch-migrations-${public_suffix}:${BOOTSTRAP_ARTIFACT_VERSION}" "$dst" 2>/dev/null; then
-          continue
-        fi
-        if [[ "$_ecr_public_authed" != "true" ]]; then
-          aws ecr-public get-login-password --region us-east-1 2>/dev/null | \
-            crane auth login public.ecr.aws -u AWS --password-stdin 2>/dev/null || true
-          _ecr_public_authed=true
-        fi
-        crane_copy_retry "public.ecr.aws/opensearchproject/opensearch-migrations-${public_suffix}:${BOOTSTRAP_ARTIFACT_VERSION}" "$dst"
-      done
-    fi
-    # Tag mirrored images with the immutable IMAGE_TAG
-    echo "Tagging MA images with $IMAGE_TAG..."
-    echo "$MA_IMAGES" | while IFS='|' read -r build_name _; do
-      crane_copy_retry "${MIGRATIONS_ECR_REGISTRY}:migrations_${build_name}_latest" \
-        "${MIGRATIONS_ECR_REGISTRY}:migrations_${build_name}_${IMAGE_TAG}"
-    done
-  else
+  wait_for_bootstrap_mirroring
+  if [[ "$include_ma_images" != "true" ]]; then
     echo "Skipping MA image mirroring — --build will push locally-built images."
   fi
 

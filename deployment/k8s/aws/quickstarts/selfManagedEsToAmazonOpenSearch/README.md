@@ -869,9 +869,6 @@ Remove things in this order so nothing is left orphaned.
    aws cloudformation delete-stack --stack-name "$STACK_NAME" --region "$AWS_REGION"
    ```
 
-Alternatively, `migration-assistant cleanup --stage "$STAGE"` from
-`deployment/k8s/aws/cli/bin/` handles step 4.
-
 ---
 
 ## Troubleshooting first steps
@@ -883,4 +880,4 @@ Alternatively, `migration-assistant cleanup --stage "$STAGE"` from
 | 401 through the proxy | The client isn't sending the *source's* credentials. The proxy only forwards them. |
 | 403 from the target (console or replayer) | First the SigV4 `service` in `workflow configure view`: `es` for a domain, `aoss` for a collection. Then the target's access policy, the FGAC mapping or the AOSS data access policy: it must include `$MA_POD_ROLE_ARN`. |
 | Lag grows | Follow the runbook's decision trees, in [`observabilityOperations.md`](../../../../../docs/captureAndReplay/observabilityOperations.md#decision-trees). |
-| Anything else | `migration-assistant diag`, or `kubectl -n ma get events --sort-by=.lastTimestamp`. |
+| Anything else | Review the `aws-bootstrap.sh` failure diagnostics, or run `kubectl -n ma get events --sort-by=.lastTimestamp`. |
