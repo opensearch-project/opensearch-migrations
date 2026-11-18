@@ -567,7 +567,7 @@
           [
             {
               "template": "markpendingifchanged",
-              "when": "{{=steps.tryApply.status == 'Succeeded'}}",
+              "when": "{{=sprig.dig('tryApply', 'status', '', steps) == 'Succeeded' && !(sprig.dig('tryApply', 'outputs', 'parameters', 'currentConfigChecksum', '', steps) == inputs.parameters.configChecksum)}}",
               "arguments": {
                 "parameters": [
                   {
@@ -792,7 +792,7 @@
           [
             {
               "template": "markpendingifchanged",
-              "when": "{{=steps.tryApply.status == 'Succeeded'}}",
+              "when": "{{=sprig.dig('tryApply', 'status', '', steps) == 'Succeeded' && !(sprig.dig('tryApply', 'outputs', 'parameters', 'currentConfigChecksum', '', steps) == inputs.parameters.configChecksum)}}",
               "arguments": {
                 "parameters": [
                   {
@@ -1002,7 +1002,7 @@
           [
             {
               "template": "markpendingifchanged",
-              "when": "{{=steps.tryApply.status == 'Succeeded'}}",
+              "when": "{{=sprig.dig('tryApply', 'status', '', steps) == 'Succeeded' && !(sprig.dig('tryApply', 'outputs', 'parameters', 'currentConfigChecksum', '', steps) == inputs.parameters.configChecksum)}}",
               "arguments": {
                 "parameters": [
                   {
@@ -1184,7 +1184,7 @@
           [
             {
               "template": "markpendingifchanged",
-              "when": "{{=steps.tryApply.status == 'Succeeded'}}",
+              "when": "{{=sprig.dig('tryApply', 'status', '', steps) == 'Succeeded' && !(sprig.dig('tryApply', 'outputs', 'parameters', 'currentConfigChecksum', '', steps) == inputs.parameters.configChecksum)}}",
               "arguments": {
                 "parameters": [
                   {
@@ -1359,7 +1359,7 @@
           [
             {
               "template": "markpendingifchanged",
-              "when": "{{=steps.tryApply.status == 'Succeeded'}}",
+              "when": "{{=sprig.dig('tryApply', 'status', '', steps) == 'Succeeded' && !(sprig.dig('tryApply', 'outputs', 'parameters', 'currentConfigChecksum', '', steps) == inputs.parameters.configChecksum)}}",
               "arguments": {
                 "parameters": [
                   {
@@ -1590,7 +1590,7 @@
           [
             {
               "template": "markpendingifchanged",
-              "when": "{{=steps.tryApply.status == 'Succeeded'}}",
+              "when": "{{=sprig.dig('tryApply', 'status', '', steps) == 'Succeeded' && !(sprig.dig('tryApply', 'outputs', 'parameters', 'currentConfigChecksum', '', steps) == inputs.parameters.configChecksum)}}",
               "arguments": {
                 "parameters": [
                   {

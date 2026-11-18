@@ -32,6 +32,7 @@ import static org.hamcrest.CoreMatchers.nullValue;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.empty;
+import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.sameInstance;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -346,6 +347,58 @@ public class S3RepoTest {
 
         // Only files under that prefix returned, others excluded
         assertEquals(List.of("file1.txt", "file2.txt"), files);
+    }
+
+    @Test
+    void checkAccess_WhenObjectCanBeRead_ReturnsValid() {
+        ListObjectsV2Response response = ListObjectsV2Response.builder()
+            .contents(S3Object.builder().key("directory/index-2").build())
+            .build();
+        when(mockS3Client.listObjectsV2(any(ListObjectsV2Request.class)))
+            .thenReturn(CompletableFuture.completedFuture(response));
+
+        var result = testRepo.checkAccess();
+
+        assertThat(result.status(), equalTo(RepositoryAccessCheckResult.Status.VALID));
+        assertThat(result.isSuccessful(), is(true));
+        assertThat(result.stages(), hasSize(2));
+        assertThat(result.stages().get(1).status(),
+            equalTo(RepositoryAccessCheckResult.StageStatus.PASSED));
+        var request = ArgumentCaptor.forClass(GetObjectRequest.class);
+        verify(mockS3Client).getObject(request.capture(), any(AsyncResponseTransformer.class));
+        assertThat(request.getValue().key(), equalTo("directory/index-2"));
+        assertThat(request.getValue().range(), equalTo("bytes=0-0"));
+    }
+
+    @Test
+    void checkAccess_WhenPrefixIsEmpty_ReturnsPartiallyVerified() {
+        when(mockS3Client.listObjectsV2(any(ListObjectsV2Request.class)))
+            .thenReturn(CompletableFuture.completedFuture(ListObjectsV2Response.builder().build()));
+
+        var result = testRepo.checkAccess();
+
+        assertThat(result.status(), equalTo(RepositoryAccessCheckResult.Status.PARTIALLY_VERIFIED));
+        assertThat(result.isSuccessful(), is(true));
+        assertThat(result.stages().get(1).status(),
+            equalTo(RepositoryAccessCheckResult.StageStatus.PARTIALLY_VERIFIED));
+        verify(mockS3Client, never()).getObject(any(GetObjectRequest.class), any(AsyncResponseTransformer.class));
+    }
+
+    @Test
+    void checkAccess_WhenPrefixCannotBeListed_ReturnsFailed() {
+        var failed = new CompletableFuture<ListObjectsV2Response>();
+        failed.completeExceptionally(S3Exception.builder().message("access denied").build());
+        when(mockS3Client.listObjectsV2(any(ListObjectsV2Request.class))).thenReturn(failed);
+
+        var result = testRepo.checkAccess();
+
+        assertThat(result.status(), equalTo(RepositoryAccessCheckResult.Status.FAILED));
+        assertThat(result.isSuccessful(), is(false));
+        assertThat(result.stages().get(0).status(),
+            equalTo(RepositoryAccessCheckResult.StageStatus.FAILED));
+        assertThat(result.stages().get(0).message(), containsString("access denied"));
+        assertThat(result.stages().get(1).status(),
+            equalTo(RepositoryAccessCheckResult.StageStatus.SKIPPED));
     }
 
     @Test

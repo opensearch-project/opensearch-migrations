@@ -1,7 +1,5 @@
 import { describe, it, expect } from '@jest/globals';
 import { MigrationConfigTransformer } from "../src";
-import { OVERALL_MIGRATION_CONFIG } from "@opensearch-migrations/schemas";
-import { z } from "zod";
 
 /**
  * Azure Blob Storage routing tests: under the unified provider-agnostic REPO_CONFIG schema,
@@ -18,9 +16,9 @@ import { z } from "zod";
 describe('Azure repo routing', () => {
     const transformer = new MigrationConfigTransformer();
 
-    const baseAzureConfig: z.input<typeof OVERALL_MIGRATION_CONFIG> = {
+    const baseAzureConfig = {
         sourceClusters: {
-            azure_source: {
+            "azure-source": {
                 endpoint: "https://azure-source.example.com",
                 allowInsecure: true,
                 version: "ES 7.10.2",
@@ -49,7 +47,7 @@ describe('Azure repo routing', () => {
         },
         snapshotMigrationConfigs: [
             {
-                fromSource: "azure_source",
+                fromSource: "azure-source",
                 toTarget: "target",
                 perSnapshotConfig: {
                     snap1: [{
@@ -65,7 +63,7 @@ describe('Azure repo routing', () => {
         expect(result.snapshots).toBeDefined();
         expect(result.snapshots!.length).toBe(1);
         const ss = result.snapshots![0];
-        expect(ss.sourceConfig.label).toBe("azure_source");
+        expect(ss.sourceConfig.label).toBe("azure-source");
         expect(ss.createSnapshotConfig).toHaveLength(1);
         expect(ss.createSnapshotConfig[0].label).toBe("snap1");
         expect(ss.createSnapshotConfig[0].repo.repoPathUri).toBe("azure://mystorageacct/snapshots");
@@ -77,7 +75,7 @@ describe('Azure repo routing', () => {
         expect(result.snapshotMigrations).toBeDefined();
         expect(result.snapshotMigrations!.length).toBe(1);
         const m = result.snapshotMigrations![0];
-        expect(m.sourceLabel).toBe("azure_source");
+        expect(m.sourceLabel).toBe("azure-source");
         expect(m.label).toBe("snap1");
         expect(m.snapshotConfigChecksum).toBeTruthy();
         expect(m.snapshotConfigChecksum)
@@ -85,9 +83,9 @@ describe('Azure repo routing', () => {
     });
 
     it('mixes S3 and Azure repos in the same output arrays', async () => {
-        const mixed: z.input<typeof OVERALL_MIGRATION_CONFIG> = {
+        const mixed = {
             sourceClusters: {
-                s3_source: {
+                "s3-source": {
                     endpoint: "https://s3-source.example.com",
                     allowInsecure: true,
                     version: "ES 7.10.2",
@@ -101,12 +99,12 @@ describe('Azure repo routing', () => {
                         }
                     }
                 },
-                azure_source: baseAzureConfig.sourceClusters.azure_source,
+                "azure-source": baseAzureConfig.sourceClusters["azure-source"],
             },
             targetClusters: baseAzureConfig.targetClusters,
             snapshotMigrationConfigs: [
                 {
-                    fromSource: "s3_source",
+                    fromSource: "s3-source",
                     toTarget: "target",
                     perSnapshotConfig: {
                         s3snap: [{ metadataMigrationConfig: { skipEvaluateApproval: true, skipMigrateApproval: true } }]
@@ -120,7 +118,7 @@ describe('Azure repo routing', () => {
         expect(result.snapshots?.length).toBe(2);
         expect(result.snapshotMigrations?.length).toBe(2);
         const sourceLabels = result.snapshots!.map(s => s.sourceConfig.label).sort();
-        expect(sourceLabels).toEqual(["azure_source", "s3_source"]);
+        expect(sourceLabels).toEqual(["azure-source", "s3-source"]);
         const repoUris = result.snapshots!
             .flatMap(s => s.createSnapshotConfig.map(c => c.repo.repoPathUri))
             .sort();

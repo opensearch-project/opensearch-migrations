@@ -27,16 +27,19 @@ targetClusters:
 # Capture and replay only. The *WithBackfill.yaml sibling adds snapshot, metadata and backfill.
 snapshotMigrationConfigs: []
 
-kafkaClusterConfiguration:
-  default:
-    autoCreate:
-      topicSpecOverrides:
-        # Must be at least the proxy podReplicas + 1 (one slot for the rolling-update surge pod).
-        partitions: 4
-
 traffic:
+  kafkaClusters:
+    default:
+      autoCreate: {}
+      topics:
+        capture-proxy:
+          specOverrides:
+            # Must be at least the proxy podReplicas + 1 (one slot for the rolling-update surge pod).
+            partitions: 4
   proxies:
     capture-proxy:
+      kafka: default
+      kafkaTopic: capture-proxy
       source: source
       proxyConfig:
         listenPort: 9201

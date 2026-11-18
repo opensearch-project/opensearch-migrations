@@ -31,13 +31,17 @@
     {
       "fromSource": "source",
       "toTarget": "target",
-      "perSnapshotConfig": {
-        "snap1": [
-          {
-            "documentBackfillConfig": { "failedDocumentStream": { "type": "disabled" } }
-          }
-        ]
-      }
+      "fromSnapshot": "snap1",
+      "slices": [
+        {
+          "documentBackfillConfig": {
+            "failedDocumentStream": {
+              "type": "disabled"
+            }
+          },
+          "label": "slice-0"
+        }
+      ]
     }
   ]
 }

@@ -655,7 +655,7 @@ Workflow translation:
 
 - For `trustedClientCaFile`, mount `prod-client-root-cas` into the proxy pod and add `sslTrustCertFile: /file-sources/configmap-prod-client-root-cas/client-ca.pem` to the proxy config.
 - For `trustedClientCaPem`, pass the PEM through `sslTrustCertPem` and the dedicated `CAPTURE_PROXY_SSL_TRUST_CERT_PEM` env var.
-- Add `requireClientAuth: true` unless `clientAuth.required` is explicitly false.
+- Add `requireClientAuth: true` whenever `clientAuth` is configured.
 - Reject configs that specify both `trustedClientCaFile` and `trustedClientCaPem`.
 - Reject `clientAuth` when `tls.mode` is `plaintext`.
 

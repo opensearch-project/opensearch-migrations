@@ -40,7 +40,9 @@ describe("collection-routed targets", () => {
 
     function configWithRegexRoute(sourceIndex: string, collection: string) {
         const config = loadFixture("valid", "collection-routed-target-regex-only.json");
-        config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0].regexCollectionRouting = [{sourceIndex, collection}];
+        config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0].regexCollectionRouting = [
+            {sourceIndex, collection},
+        ];
         return config;
     }
 

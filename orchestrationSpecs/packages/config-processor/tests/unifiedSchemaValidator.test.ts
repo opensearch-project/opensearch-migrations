@@ -11,25 +11,25 @@ describe("unifiedSchemaValidator", () => {
                 version: "ES 7.10",
                 authConfig: {
                     basic: {
-                        secretName: "source1-creds"
-                    }
+                        secretName: "source1-creds",
+                    },
                 },
                 snapshotInfo: {
                     repos: {
                         default: { awsRegion: "us-east-2",
                             endpoint: "http://localhost:4566",
-                            repoPathUri: "s3://test-bucket" }
+                            repoPathUri: "s3://test-bucket", },
                     },
                     snapshots: {
                         snap1: {
                             config: {
-                                createSnapshotConfig: {}
+                                createSnapshotConfig: {},
                             },
-                            repoName: "default"
-                        }
-                    }
-                }
-            }
+                            repoName: "default",
+                        },
+                    },
+                },
+            },
         },
         targetClusters: {
             target1: {
@@ -37,94 +37,95 @@ describe("unifiedSchemaValidator", () => {
                 allowInsecure: true,
                 authConfig: {
                     basic: {
-                        secretName: "target1-creds"
-                    }
-                }
-            }
+                        secretName: "target1-creds",
+                    },
+                },
+            },
         },
         snapshotMigrationConfigs: [
             {
                 fromSource: "source1",
                 toTarget: "target1",
-                perSnapshotConfig: {
-                    snap1: [
-                        {
-                            label: "migration-0",
-                            metadataMigrationConfig: {}
-                        }
-                    ]
-                }
-            }
+                fromSnapshot: "snap1",
+                slices: {
+                    "slice-0": {
+                        metadataMigrationConfig: {},
+                    },
+                },
+                },
         ],
         traffic: {
+            kafkaClusters: {
+                default: {
+                    autoCreate: {},
+                },
+            },
             proxies: {
                 proxy1: {
                     source: "source1",
                     proxyConfig: {
-                        listenPort: 9201
-                    }
-                }
+                        listenPort: 9201,
+                    },
+                },
             },
             replayers: {
                 replay1: {
                     fromCapturedTraffic: "proxy1",
-                    toTarget: "target1"
-                }
-            }
+                    toTarget: "target1",
+                },
+            },
         },
-        kafkaClusterConfiguration: {
-            default: {
-                autoCreate: {}
-            }
-        }
     };
 
     it("suppresses union noise when a more specific Kafka broker config error exists", () => {
         const configWithBogusKafkaKey = {
             ...baseUnifiedValidationInput,
-            kafkaClusterConfiguration: {
-                default: {
-                    autoCreate: {
-                        clusterSpecOverrides: {
-                            kafka: {
-                                config: {
-                                    "auto.create.topics.enable": false,
-                                    "bogus.inner.key": true,
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            traffic: {
+                ...baseUnifiedValidationInput.traffic,
+                kafkaClusters: {
+                    default: {
+                        autoCreate: {
+                            clusterSpecOverrides: {
+                                kafka: {
+                                    config: {
+                                        "auto.create.topics.enable": false,
+                                        "bogus.inner.key": true,
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
         };
 
         expect(() => validateInputAgainstUnifiedSchema(configWithBogusKafkaKey))
-            .toThrow(/Kafka broker config 'bogus\.inner\.key' is not part of the pinned Kafka 4\.2\.0 broker config catalog/);
+            .toThrow(/Kafka broker config 'bogus\.inner\.key' is not part of the pinned Kafka 4\.2\.0 broker config catalog/,);
 
         expect(() => validateInputAgainstUnifiedSchema(configWithBogusKafkaKey))
-            .not.toThrow(/must have required property 'existing'|must match a schema in anyOf/);
+            .not.toThrow(/must have required property 'existing'|must match a schema in anyOf/,);
     });
 
     it("collapses a bare kafka cluster union failure into one clearer message", () => {
         const fakeAjvErrors: ErrorObject[] = [
             {
                 keyword: "required",
-                instancePath: "/kafkaClusterConfiguration/default",
-                schemaPath: "#/properties/kafkaClusterConfiguration/additionalProperties/anyOf/0/required",
+                instancePath: "/traffic/kafkaClusters/default",
+                schemaPath: "#/properties/traffic/properties/kafkaClusters/additionalProperties/anyOf/0/required",
                 params: {missingProperty: "autoCreate"},
                 message: "must have required property 'autoCreate'",
             } as ErrorObject,
             {
                 keyword: "required",
-                instancePath: "/kafkaClusterConfiguration/default",
-                schemaPath: "#/properties/kafkaClusterConfiguration/additionalProperties/anyOf/1/required",
+                instancePath: "/traffic/kafkaClusters/default",
+                schemaPath: "#/properties/traffic/properties/kafkaClusters/additionalProperties/anyOf/1/required",
                 params: {missingProperty: "existing"},
                 message: "must have required property 'existing'",
             } as ErrorObject,
             {
                 keyword: "anyOf",
-                instancePath: "/kafkaClusterConfiguration/default",
-                schemaPath: "#/properties/kafkaClusterConfiguration/additionalProperties/anyOf",
+                instancePath: "/traffic/kafkaClusters/default",
+                schemaPath: "#/properties/traffic/properties/kafkaClusters/additionalProperties/anyOf",
                 params: {},
                 message: "must match a schema in anyOf",
             } as ErrorObject,
@@ -132,11 +133,11 @@ describe("unifiedSchemaValidator", () => {
 
         const formatted = formatInputValidationError(
             new InputValidationError(buildValidationElements(fakeAjvErrors)),
-            {singleLine: true}
+            {singleLine: true,}
         );
 
         expect(formatted).toMatch(/Kafka cluster configuration must define exactly one of 'existing' or 'autoCreate'/);
-        expect(formatted).not.toMatch(/must have required property 'existing'|must have required property 'autoCreate'|must match a schema in anyOf/);
+        expect(formatted).not.toMatch(/must have required property 'existing'|must have required property 'autoCreate'|must match a schema in anyOf/,);
     });
 
     it("does not collapse unrelated ambiguous union failures outside kafka cluster config", () => {
@@ -166,12 +167,12 @@ describe("unifiedSchemaValidator", () => {
 
         const formatted = formatInputValidationError(
             new InputValidationError(buildValidationElements(fakeAjvErrors)),
-            {singleLine: true}
+            {singleLine: true,}
         );
 
         expect(formatted).toMatch(/must have required property 'xOnly'/);
         expect(formatted).toMatch(/must have required property 'yOnly'/);
         expect(formatted).toMatch(/must match a schema in anyOf/);
-        expect(formatted).not.toMatch(/Kafka cluster configuration must define exactly one of 'existing' or 'autoCreate'/);
+        expect(formatted).not.toMatch(/Kafka cluster configuration must define exactly one of 'existing' or 'autoCreate'/,);
     });
 });

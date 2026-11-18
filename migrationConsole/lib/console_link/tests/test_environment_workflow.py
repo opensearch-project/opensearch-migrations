@@ -118,12 +118,12 @@ def test_get_kafka_from_workflow_config_autocreate_default_cluster(mock_creds, m
     # transform-time policy resolves it to scram-sha-512 (single "tls"
     # listener on 9093). The console must read it the same way.
     config = {
-        "kafkaClusterConfiguration": {
-            "default": {
-                "autoCreate": {}
-            }
-        },
         "traffic": {
+            "kafkaClusters": {
+                "default": {
+                    "autoCreate": {}
+                }
+            },
             "proxies": {
                 "capture-proxy": {
                     "source": "source"
@@ -141,16 +141,16 @@ def test_get_kafka_from_workflow_config_autocreate_default_cluster(mock_creds, m
 
 def test_get_kafka_from_workflow_config_existing_cluster_uses_reference():
     config = {
-        "kafkaClusterConfiguration": {
-            "myKafka": {
-                "existing": {
-                    "enableMSKAuth": True,
-                    "kafkaConnection": "broker.a:9092,broker.b:9092",
-                    "kafkaTopic": ""
-                }
-            }
-        },
         "traffic": {
+            "kafkaClusters": {
+                "myKafka": {
+                    "existing": {
+                        "enableMSKAuth": True,
+                        "kafkaConnection": "broker.a:9092,broker.b:9092",
+                        "kafkaTopic": ""
+                    }
+                }
+            },
             "proxies": {
                 "capture-proxy": {
                     "source": "source",
@@ -170,16 +170,16 @@ def test_get_kafka_from_workflow_config_existing_cluster_uses_reference():
 @patch.object(Environment, '_resolve_strimzi_scram_credentials', return_value=("test-password", "/tmp/fake-ca.crt"))
 def test_get_kafka_from_workflow_config_autocreate_scram(mock_creds, mock_bootstrap):
     config = {
-        "kafkaClusterConfiguration": {
-            "default": {
-                "autoCreate": {
-                    "auth": {
-                        "type": "scram-sha-512"
+        "traffic": {
+            "kafkaClusters": {
+                "default": {
+                    "autoCreate": {
+                        "auth": {
+                            "type": "scram-sha-512"
+                        }
                     }
                 }
-            }
-        },
-        "traffic": {
+            },
             "proxies": {
                 "capture-proxy": {
                     "source": "source"
@@ -203,14 +203,14 @@ def test_get_kafka_from_workflow_config_autocreate_explicit_none_auth(mock_boots
     # Explicit auth.type: "none" still selects the plain listener on 9092,
     # matching the workflow transformer when the user opts out of SCRAM.
     config = {
-        "kafkaClusterConfiguration": {
-            "default": {
-                "autoCreate": {
-                    "auth": {"type": "none"}
-                }
-            }
-        },
         "traffic": {
+            "kafkaClusters": {
+                "default": {
+                    "autoCreate": {
+                        "auth": {"type": "none"}
+                    }
+                }
+            },
             "proxies": {
                 "capture-proxy": {"source": "source"}
             }

@@ -30,6 +30,8 @@ module.exports = {
     ],
 
     moduleNameMapper: {
+        "@opensearch-migrations/config-edit-core": "<rootDir>/../config-edit-core/src",
+        "@opensearch-migrations/schemas/browser": "<rootDir>/../schemas/src/browser.ts",
         "@opensearch-migrations/schemas": "<rootDir>/../schemas/src"
     },
     setupFiles: [

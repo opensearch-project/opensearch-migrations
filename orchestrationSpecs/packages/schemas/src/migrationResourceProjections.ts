@@ -12,6 +12,7 @@ import {
 } from "./userSchemas";
 import {
     ARGO_METADATA_OPTIONS,
+    ARGO_PROXY_OPTIONS,
     ARGO_REPLAYER_OPTIONS,
     ARGO_RFS_OPTIONS,
 } from "./argoSchemas";
@@ -39,6 +40,7 @@ interface SchemaProjection {
     schema: z.ZodObject<any>;
     policySchemas?: readonly z.ZodObject<any>[];
     prefix?: string;
+    omitFields?: readonly string[];
 }
 
 interface InternalProjectedField {
@@ -49,9 +51,7 @@ interface InternalProjectedField {
     invariant?: FieldInvariant;
 }
 
-// Export enablement is normalized to endpoint presence before Argo/resource projection.
-const USER_PROXY_RESOURCE_OPTIONS = z.object(USER_PROXY_OPTIONS.shape)
-    .omit(OTEL_EXPORT_CONTROL_FIELD_MASK);
+// Export enablement is normalized to endpoint presence before resource projection.
 const USER_CREATE_SNAPSHOT_RESOURCE_OPTIONS = z.object(USER_CREATE_SNAPSHOT_OPTIONS.shape)
     .omit(OTEL_EXPORT_CONTROL_FIELD_MASK);
 
@@ -75,8 +75,9 @@ export const RESOURCE_PROJECTIONS: readonly ResourceProjection[] = [
 const SCHEMA_PROJECTIONS: readonly SchemaProjection[] = [
     {
         resourceKind: "CaptureProxy",
-        sourceSchema: "USER_PROXY_OPTIONS",
-        schema: USER_PROXY_RESOURCE_OPTIONS,
+        sourceSchema: "ARGO_PROXY_OPTIONS",
+        schema: ARGO_PROXY_OPTIONS,
+        policySchemas: [USER_PROXY_OPTIONS],
     },
     {
         resourceKind: "TrafficReplay",
@@ -95,6 +96,7 @@ const SCHEMA_PROJECTIONS: readonly SchemaProjection[] = [
         schema: ARGO_METADATA_OPTIONS,
         policySchemas: [USER_METADATA_OPTIONS],
         prefix: "metadataMigration",
+        omitFields: ["skipEvaluateApproval", "skipMigrateApproval"],
     },
     {
         resourceKind: "SnapshotMigration",
@@ -102,6 +104,7 @@ const SCHEMA_PROJECTIONS: readonly SchemaProjection[] = [
         schema: ARGO_RFS_OPTIONS,
         policySchemas: [USER_RFS_WORKFLOW_OPTIONS, USER_RFS_PROCESS_OPTIONS],
         prefix: "documentBackfill",
+        omitFields: ["skipApproval"],
     },
 ] as const;
 
@@ -136,8 +139,8 @@ const INTERNAL_PROJECTED_FIELDS: readonly InternalProjectedField[] = [
     {resourceKind: "CapturedTraffic", specPath: ["kafkaCaSecretName"], schema: z.string(), changeRestriction: "impossible"},
     {resourceKind: "CapturedTraffic", specPath: ["kafkaUserName"], schema: z.string(), changeRestriction: "impossible"},
     {resourceKind: "CapturedTraffic", specPath: ["topicName"], schema: z.string(), changeRestriction: "impossible"},
-    {resourceKind: "CapturedTraffic", specPath: ["partitions"], schema: z.number().min(1), changeRestriction: "gated", invariant: "nonDecreasing"},
-    {resourceKind: "CapturedTraffic", specPath: ["replicas"], schema: z.number().min(1), changeRestriction: "gated"},
+    {resourceKind: "CapturedTraffic", specPath: ["partitions"], schema: z.number().int().min(1), changeRestriction: "gated", invariant: "nonDecreasing"},
+    {resourceKind: "CapturedTraffic", specPath: ["replicas"], schema: z.number().int().min(1), changeRestriction: "gated"},
     {resourceKind: "CapturedTraffic", specPath: ["topicConfig"], schema: GENERIC_JSON_OBJECT, changeRestriction: "gated"},
     {resourceKind: "CapturedTraffic", specPath: ["sourceLabel"], schema: z.string(), changeRestriction: "impossible"},
     {resourceKind: "CapturedTraffic", specPath: ["sourceKind"], schema: z.enum(["proxy", "s3"]), changeRestriction: "impossible"},
@@ -246,19 +249,21 @@ function projectedFieldMeta(projection: SchemaProjection, fieldName: string, fie
 
 export function collectProjectedFields(): ProjectedField[] {
     const schemaFields = SCHEMA_PROJECTIONS.flatMap(projection =>
-        Object.entries(projection.schema.shape).map(([fieldName, fieldSchema]) => {
-            const meta = projectedFieldMeta(projection, fieldName, fieldSchema as z.ZodTypeAny);
-            return {
-                resourceKind: projection.resourceKind,
-                specPath: [prefixedFieldName(projection.prefix, fieldName)],
-                schema: fieldSchema as z.ZodTypeAny,
-                sourceSchema: projection.sourceSchema,
-                sourcePath: [fieldName],
-                changeRestriction: meta?.changeRestriction ?? "safe",
-                checksumFor: meta?.checksumFor,
-                ...(meta?.gatedOnIncreaseOnly ? {gatedOnIncreaseOnly: true} : {}),
-            } satisfies ProjectedField;
-        })
+        Object.entries(projection.schema.shape)
+            .filter(([fieldName]) => !(projection.omitFields ?? []).includes(fieldName))
+            .map(([fieldName, fieldSchema]) => {
+                const meta = projectedFieldMeta(projection, fieldName, fieldSchema as z.ZodTypeAny);
+                return {
+                    resourceKind: projection.resourceKind,
+                    specPath: [prefixedFieldName(projection.prefix, fieldName)],
+                    schema: fieldSchema as z.ZodTypeAny,
+                    sourceSchema: projection.sourceSchema,
+                    sourcePath: [fieldName],
+                    changeRestriction: meta?.changeRestriction ?? "safe",
+                    checksumFor: meta?.checksumFor,
+                    ...(meta?.gatedOnIncreaseOnly ? {gatedOnIncreaseOnly: true} : {}),
+                } satisfies ProjectedField;
+            })
     );
 
     const internalFields = INTERNAL_PROJECTED_FIELDS.map(field => ({

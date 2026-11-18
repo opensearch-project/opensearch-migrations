@@ -13,8 +13,9 @@ KIND_CONFIG_FILE="${KIND_CONFIG_FILE:-${MIGRATIONS_REPO_ROOT_DIR}/deployment/k8s
 # They outlive the cluster; kindCleanup.sh --delete-logs removes them.
 KIND_LOGS_DIR="${KIND_LOGS_DIR:-${HOME}/.opensearch-migrations/kind/${KIND_CLUSTER_NAME}/logs}"
 set_docker_hosted_defaults
-# In-cluster pulls use the docker-network DNS name; the host's `docker buildx`
-# push goes to the bind-mounted localhost port. Same registry, two URLs.
+# In-cluster pulls use the configured registry name, which containerd maps to
+# the host gateway. Host-side `docker buildx` uses the bind-mounted localhost
+# port. Both routes reach the same registry.
 LOCAL_REGISTRY="${LOCAL_REGISTRY:-${EXTERNAL_REGISTRY_NAME}:${EXTERNAL_REGISTRY_PORT}}"
 BUILD_REGISTRY_ENDPOINT="${BUILD_REGISTRY_ENDPOINT:-localhost:${EXTERNAL_REGISTRY_PORT}}"
 export KUBE_CONTEXT="${KUBE_CONTEXT:-${KIND_CONTEXT}}"

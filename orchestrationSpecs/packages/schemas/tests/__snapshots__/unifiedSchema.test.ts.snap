@@ -35,19 +35,31 @@ exports[`unified schema builder merges Strimzi definitions from a static OpenAPI
           ]
         }
       ],
-      "description": "Workflow-owned Kafka client auth for auto-created Strimzi clusters. If omitted, transform-time resolution currently defaults workflow-managed Kafka to \`scram-sha-512\` as the secure-by-default policy. This default is intentionally resolved outside the deep-merged Strimzi object defaults so auth policy can change without being hidden inside the structural Kafka/NodePool/Topic default merge."
+      "description": "Workflow-owned Kafka client auth for auto-created Strimzi clusters. If omitted, transform-time resolution defaults workflow-managed Kafka to \`scram-sha-512\` over its TLS listener as the secure-by-default policy. This default is intentionally resolved outside the deep-merged Strimzi object defaults so auth policy can change without being hidden inside the structural Kafka/NodePool/Topic default merge.",
+      "x-effective-default": {
+        "label": "scram-sha-512",
+        "value": {
+          "type": "scram-sha-512"
+        },
+        "description": "Omitting this field uses workflow-managed Kafka SCRAM-SHA-512 authentication over TLS."
+      },
+      "x-expert": true
     },
     "clusterSpecOverrides": {
       "$ref": "#/$defs/StrimziKafkaSpec",
-      "description": "Strimzi Kafka.spec overrides merged into the workflow-managed Kafka resource."
+      "description": "Strimzi Kafka.spec overrides merged into the workflow-managed Kafka resource.",
+      "x-expert": true
     },
     "nodePoolSpecOverrides": {
       "$ref": "#/$defs/StrimziKafkaNodePoolSpec",
-      "description": "Strimzi KafkaNodePool.spec overrides merged into the workflow-managed node pool resource."
-    },
-    "topicSpecOverrides": {
+      "description": "Kafka broker count, storage, resources, and advanced Strimzi KafkaNodePool.spec overrides merged into the workflow-managed node pool resource.",
+      "x-essential": true
+    }
+  },
+  "topic": {
+    "specOverrides": {
       "$ref": "#/$defs/StrimziKafkaTopicSpec",
-      "description": "Strimzi KafkaTopic.spec overrides merged into workflow-created Kafka topics."
+      "description": "Kafka topic settings merged into the generated Strimzi KafkaTopic.spec. Partition and replica counts are common settings; additional Strimzi fields are available in expert mode."
     }
   },
   "defs": {
@@ -55,10 +67,176 @@ exports[`unified schema builder merges Strimzi definitions from a static OpenAPI
       "$ref": "#/$defs/io.strimzi.api.kafka.model.KafkaSpec"
     },
     "StrimziKafkaNodePoolSpec": {
-      "$ref": "#/$defs/io.strimzi.api.kafka.model.nodepool.KafkaNodePoolSpec"
+      "type": "object",
+      "properties": {
+        "replicas": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 3,
+          "description": "Number of Kafka broker/controller pods. Size this explicitly for the required throughput and availability.",
+          "x-essential": true,
+          "x-effective-default": {
+            "label": "3 brokers",
+            "value": 3,
+            "description": "Workflow-managed Kafka uses three dual-role broker/controller pods unless overridden."
+          }
+        },
+        "roles": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "broker",
+              "controller"
+            ]
+          },
+          "x-expert": true
+        },
+        "storage": {
+          "$ref": "#/$defs/io.strimzi.api.kafka.model.storage.Storage",
+          "default": {
+            "type": "persistent-claim",
+            "size": "2Gi",
+            "deleteClaim": true
+          },
+          "description": "Persistent storage allocated to each Kafka node. The 2Gi workflow default is intended for smoke tests; size production storage for ingestion rate and retention duration.",
+          "x-essential": true,
+          "x-effective-default": {
+            "label": "2Gi persistent volume per broker",
+            "value": {
+              "type": "persistent-claim",
+              "size": "2Gi",
+              "deleteClaim": true
+            },
+            "description": "Workflow-managed Kafka uses a 2Gi persistent volume per broker unless overridden."
+          }
+        },
+        "resources": {
+          "type": "object",
+          "properties": {
+            "claims": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "x-expert": true
+            },
+            "limits": {
+              "type": "object",
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "string"
+                  }
+                ]
+              },
+              "description": "Maximum CPU and memory available to each Kafka broker/controller pod.",
+              "x-essential": true
+            },
+            "requests": {
+              "type": "object",
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "string"
+                  }
+                ]
+              },
+              "description": "CPU and memory reserved for each Kafka broker/controller pod.",
+              "x-essential": true
+            }
+          },
+          "additionalProperties": false,
+          "description": "CPU and memory requests and limits for each Kafka broker/controller pod.",
+          "x-essential": true
+        },
+        "template": {
+          "type": "object",
+          "properties": {
+            "pod": {
+              "type": "object",
+              "properties": {
+                "affinity": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "additionalProperties": true
+            }
+          },
+          "additionalProperties": true,
+          "x-expert": true
+        }
+      },
+      "additionalProperties": false
     },
     "StrimziKafkaTopicSpec": {
-      "$ref": "#/$defs/io.strimzi.api.kafka.model.topic.KafkaTopicSpec"
+      "type": "object",
+      "properties": {
+        "partitions": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 2,
+          "description": "Number of partitions for the topic. This can be increased after deployment but cannot be decreased.",
+          "x-effective-default": {
+            "label": "2",
+            "value": 2,
+            "description": "New topics use two partitions unless this value is overridden."
+          },
+          "x-essential": true
+        },
+        "replicas": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 3,
+          "description": "Replication factor for the topic. Changes to a deployed topic require approval.",
+          "x-effective-default": {
+            "label": "3",
+            "value": 3,
+            "description": "New topics use three replicas unless this value is overridden."
+          },
+          "x-essential": true
+        },
+        "config": {
+          "type": "object",
+          "properties": {
+            "cleanup.policy": {
+              "type": "string",
+              "enum": [
+                "delete",
+                "compact"
+              ],
+              "x-expert": true
+            },
+            "retention.ms": {
+              "type": "integer",
+              "default": 604800000,
+              "description": "How long Kafka retains topic records, in milliseconds. The seven-day workflow default must cover the expected capture-to-replay interval; increasing it also increases required broker storage.",
+              "x-essential": true,
+              "x-effective-default": {
+                "label": "7 days",
+                "value": 604800000,
+                "description": "Topics retain records for seven days unless overridden."
+              }
+            },
+            "segment.bytes": {
+              "type": "integer",
+              "x-expert": true
+            }
+          },
+          "additionalProperties": false,
+          "description": "Kafka topic retention and advanced topic configuration.",
+          "x-essential": true
+        }
+      },
+      "additionalProperties": false
     },
     "GenericKafkaListener": {
       "type": "object",

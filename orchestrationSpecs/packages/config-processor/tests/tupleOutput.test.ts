@@ -10,8 +10,19 @@ function configWithTupleOutput(tupleOutput?: unknown) {
         },
         snapshotMigrationConfigs: [],
         traffic: {
+            kafkaClusters: {
+                default: {
+                    autoCreate: {},
+                    topics: {capture: {}},
+                },
+            },
             proxies: {
-                capture: {source: "source", proxyConfig: {listenPort: 9201}},
+                capture: {
+                    source: "source",
+                    kafka: "default",
+                    kafkaTopic: "capture",
+                    proxyConfig: {listenPort: 9201},
+                },
             },
             replayers: {
                 replay: {

@@ -5,6 +5,7 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
+    "./browser": "./src/browser.ts",
     "./buildUnifiedSchema": "./src/buildUnifiedSchema.ts",
     "./makeSample": "./src/makeSample.ts",
     "./showUserSchema": "./src/showUserSchema.ts",

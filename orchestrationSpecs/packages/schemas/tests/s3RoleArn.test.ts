@@ -3,7 +3,11 @@ import {REPO_CONFIG} from "../src/userSchemas";
 const PARTITIONS = ["aws", "aws-cn", "aws-us-gov", "aws-iso", "aws-iso-b", "aws-iso-e", "aws-iso-f", "aws-eusc"];
 
 function parsesRoleArn(s3RoleArn: string) {
-    return REPO_CONFIG.safeParse({repoPathUri: "s3://example-bucket/path", s3RoleArn}).success;
+    return REPO_CONFIG.safeParse({
+        repoPathUri: "s3://example-bucket/path",
+        awsRegion: "us-east-1",
+        s3RoleArn,
+    }).success;
 }
 
 describe("s3RoleArn validation", () => {

@@ -12,9 +12,18 @@
   },
   "snapshotMigrationConfigs": [],
   "traffic": {
+    "kafkaClusters": {
+      "default": {
+        "autoCreate": {},
+        "topics": {
+          "proxy": {}
+        }
+      }
+    },
     "proxies": {
       "proxy": {
         "source": "source",
+        "kafka": "default",
         "proxyConfig": {
           "listenPort": 9200,
           "tls": {
@@ -27,7 +36,8 @@
               }
             }
           }
-        }
+        },
+        "kafkaTopic": "proxy"
       }
     },
     "replayers": {
@@ -39,7 +49,7 @@
             {
               "entryPoint": {
                 "javascriptFile": {
-                  "image": "example.com/transforms@sha256:abc123",
+                  "image": "example.com/transforms@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                   "path": "request.js"
                 }
               },

@@ -49,20 +49,30 @@ public class MetadataMigration {
         var metadataArgs = EnvVarParameterPuller.injectFromEnv(new MetadataArgs(), ENV_PREFIX);
         var migrateArgs  = EnvVarParameterPuller.injectFromEnv(new MigrateArgs(),  ENV_PREFIX);
         var evaluateArgs = EnvVarParameterPuller.injectFromEnv(new EvaluateArgs(), ENV_PREFIX);
+        var repositoryCheckArgs = EnvVarParameterPuller.injectFromEnv(new RepositoryCheckArgs(), ENV_PREFIX);
         var argsParser = JsonCommandLineParser.newBuilder()
             .addObject(metadataArgs)
             .addCommand(migrateArgs)
             .addCommand(evaluateArgs)
+            .addCommand(repositoryCheckArgs)
             .build();
         argsParser.parse(args);
 
-        if (migrateArgs.outputFormat == OutputFormat.JSON || evaluateArgs.outputFormat == OutputFormat.JSON) {
+        if (
+            migrateArgs.outputFormat == OutputFormat.JSON
+            || evaluateArgs.outputFormat == OutputFormat.JSON
+            || repositoryCheckArgs.outputFormat == OutputFormat.JSON
+        ) {
             outputFormat.set(OutputFormat.JSON);
         } else {
             outputFormat.set(OutputFormat.HUMAN_READABLE);
         }
-        outputFile.set(selectedCommandArgs(argsParser.getJCommander(), migrateArgs, evaluateArgs)
-            .map(commandArgs -> commandArgs.outputFile)
+        outputFile.set(selectedOutputFile(
+                argsParser.getJCommander(),
+                migrateArgs,
+                evaluateArgs,
+                repositoryCheckArgs
+            )
             .filter(path -> !path.isBlank())
             .map(Path::of)
             .orElse(null));
@@ -73,18 +83,26 @@ public class MetadataMigration {
             return;
         }
 
-        if (migrateArgs.help || evaluateArgs.help) {
+        if (migrateArgs.help || evaluateArgs.help || repositoryCheckArgs.help) {
             printCommandUsage(argsParser.getJCommander());
             return;
         }
 
-        var result = runCommand(argsParser.getJCommander(), metadataArgs, migrateArgs, evaluateArgs);
+        var result = runCommand(
+            argsParser.getJCommander(),
+            metadataArgs,
+            migrateArgs,
+            evaluateArgs,
+            repositoryCheckArgs
+        );
 
         // Output format determines which version is printed to the user
         writeOutput(result.asCliOutput());
         writeOutput(result.asJsonOutput());
         reportLogPath();
-        reportTransformationPath();
+        if (MetadataCommands.fromString(argsParser.getParsedCommand()) != MetadataCommands.CHECK_REPOSITORY) {
+            reportTransformationPath();
+        }
 
         if (result.getExitCode() == MigratorEvaluatorBase.SNAPSHOT_READ_FAILED_EXIT_CODE) {
             // Surface the snapshot read failure on stderr so it stays visible in the workflow log /
@@ -96,7 +114,13 @@ public class MetadataMigration {
         exitWithCode(result.getExitCode());
     }
 
-    private Result runCommand(JCommander jCommander, MetadataArgs metadataArgs, MigrateArgs migrateArgs, EvaluateArgs evaluateArgs) {
+    private Result runCommand(
+        JCommander jCommander,
+        MetadataArgs metadataArgs,
+        MigrateArgs migrateArgs,
+        EvaluateArgs evaluateArgs,
+        RepositoryCheckArgs repositoryCheckArgs
+    ) {
         var context = new RootMetadataMigrationContext(
             RootOtelContext.initializeOpenTelemetryWithCollectorsOrAsNoop(
                 new OtelCollectorEndpoints(
@@ -130,17 +154,25 @@ public class MetadataMigration {
 
                 writeOutput("Starting Metadata Evaluation");
                 return evaluate(evaluateArgs).execute(context);
+            case CHECK_REPOSITORY:
+                writeOutput("Starting Repository Access Check");
+                return checkRepository(repositoryCheckArgs).execute();
         }
     }
 
-    private Optional<MigrateOrEvaluateArgs> selectedCommandArgs(
+    private Optional<String> selectedOutputFile(
         JCommander jCommander,
         MigrateArgs migrateArgs,
-        EvaluateArgs evaluateArgs
+        EvaluateArgs evaluateArgs,
+        RepositoryCheckArgs repositoryCheckArgs
     ) {
         var command = Optional.ofNullable(jCommander.getParsedCommand())
             .map(MetadataCommands::fromString);
-        return command.map(c -> c == MetadataCommands.EVALUATE ? evaluateArgs : migrateArgs);
+        return command.map(c -> switch (c) {
+            case EVALUATE -> evaluateArgs.outputFile;
+            case MIGRATE -> migrateArgs.outputFile;
+            case CHECK_REPOSITORY -> repositoryCheckArgs.outputFile;
+        });
     }
 
     protected void exitWithCode(int code) {
@@ -157,6 +189,10 @@ public class MetadataMigration {
 
     public Migrate migrate(MigrateOrEvaluateArgs arguments) {
         return new Migrate(arguments);
+    }
+
+    public RepositoryCheck checkRepository(RepositoryCheckArgs arguments) {
+        return new RepositoryCheck(arguments);
     }
 
     protected void writeOutput(String humanReadableOutput) {

@@ -380,10 +380,10 @@ def cluster_group(ctx):
         raise click.UsageError("Neither source nor target cluster is defined.")
 
 
-def _cluster_label(name: str, cluster) -> str:
+def _cluster_label(name: str, cluster, detect_collection_type: bool = True) -> str:
     """Return a display label, e.g. 'TARGET CLUSTER (Amazon OpenSearch Serverless, Collection type: VECTOR)'."""
     if cluster and cluster.is_serverless:
-        collection_type = cluster.detect_serverless_collection_type()
+        collection_type = cluster.detect_serverless_collection_type() if detect_collection_type else None
         if collection_type:
             return f"{name} ({cluster.display_name}, Collection type: {collection_type})"
         return f"{name} ({cluster.display_name})"
@@ -442,15 +442,23 @@ def connection_check_cmd(ctx, cluster, source_selector, target_selector, proxy_s
     if cluster:
         selected_cluster = resolve_named_cluster(ctx, cluster, source_selector, target_selector, proxy_selector)
         result = clusters_.connection_check(selected_cluster)
-        click.echo(result.connection_message)
+        click.echo(json.dumps(result.to_dict()) if ctx.json else result.connection_message)
         return
     required_roles = (ResourceRole.SOURCE, ResourceRole.TARGET)
     source_cluster = resolve_cluster_resource(ctx, ResourceRole.SOURCE, source_selector, hint_roles=required_roles)
     target_cluster = resolve_cluster_resource(ctx, ResourceRole.TARGET, target_selector, hint_roles=required_roles)
-    click.echo(_cluster_label("SOURCE CLUSTER", source_cluster))
-    click.echo(clusters_.connection_check(source_cluster).connection_message)
-    click.echo(_cluster_label("TARGET CLUSTER", target_cluster))
-    click.echo(clusters_.connection_check(target_cluster).connection_message)
+    source_result = clusters_.connection_check(source_cluster)
+    target_result = clusters_.connection_check(target_cluster)
+    if ctx.json:
+        click.echo(json.dumps({
+            "source_cluster": source_result.to_dict(),
+            "target_cluster": target_result.to_dict(),
+        }))
+        return
+    click.echo(_cluster_label("SOURCE CLUSTER", source_cluster, detect_collection_type=False))
+    click.echo(source_result.connection_message)
+    click.echo(_cluster_label("TARGET CLUSTER", target_cluster, detect_collection_type=False))
+    click.echo(target_result.connection_message)
 
 
 @cluster_group.command(name="run-test-benchmarks")
@@ -1286,6 +1294,16 @@ def _resolve_default_consumer_group(env, kafka_selector=None) -> str:
     return DEFAULT_LEGACY_CONSUMER_GROUP
 
 
+def _configured_consumer_group_names(
+    env,
+    kafka_selector=None,
+) -> list[str]:
+    catalog = _resource_catalog(env)
+    if catalog is not None and not hasattr(catalog, "_legacy_env"):
+        return catalog.consumer_group_names(kafka_selector)
+    return list(getattr(env, "kafka_consumer_groups", None) or [])
+
+
 def _topic_hint(topics: Sequence[str]) -> str:
     return f"Specify: TOPIC_NAME <{'|'.join(topics)}>."
 
@@ -1325,21 +1343,46 @@ def _resolve_default_topic_name(env, kafka_selector, kafka_resource) -> str:
 
 @kafka_group.command(name="describe-consumer-group")
 @_kafka_selector_option
+@click.option(
+    "--skip-time-lag",
+    is_flag=True,
+    help="Skip per-partition timestamp probes and return offsets faster.",
+)
 @click.argument('group_name', required=False, default=None,
                 shell_complete=get_kafka_consumer_group_completions)
 @click.pass_obj
-def describe_group_command(ctx, kafka_selector, group_name):
+def describe_group_command(ctx, kafka_selector, skip_time_lag, group_name):
     kafka_resource = resolve_kafka_resource(ctx, kafka_selector)
     if group_name is None:
         group_name = _resolve_default_consumer_group(ctx.env, kafka_selector)
-    result = kafka_.describe_consumer_group(kafka_resource, group_name=group_name)
+    if skip_time_lag:
+        result = kafka_.describe_consumer_group(
+            kafka_resource,
+            group_name=group_name,
+            include_time_lag=False,
+        )
+    else:
+        result = kafka_.describe_consumer_group(
+            kafka_resource,
+            group_name=group_name,
+        )
     click.echo(result.value)
 
 
 @kafka_group.command(name="list-consumer-groups")
 @_kafka_selector_option
+@click.option(
+    "--configured-only",
+    is_flag=True,
+    help="List consumer groups referenced by the migration configuration.",
+)
 @click.pass_obj
-def list_consumer_groups_cmd(ctx, kafka_selector):
+def list_consumer_groups_cmd(ctx, kafka_selector, configured_only):
+    if configured_only:
+        click.echo("\n".join(
+            _configured_consumer_group_names(ctx.env, kafka_selector)
+        ))
+        return
     result = kafka_.list_consumer_groups(resolve_kafka_resource(ctx, kafka_selector))
     click.echo(result.value)
 

@@ -19,8 +19,16 @@ import com.azure.storage.common.StorageSharedKeyCredential;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 
+import static org.opensearch.migrations.bulkload.common.RepositoryAccessCheckResult.failed;
+import static org.opensearch.migrations.bulkload.common.RepositoryAccessCheckResult.failureMessage;
+import static org.opensearch.migrations.bulkload.common.RepositoryAccessCheckResult.partial;
+import static org.opensearch.migrations.bulkload.common.RepositoryAccessCheckResult.passed;
+import static org.opensearch.migrations.bulkload.common.RepositoryAccessCheckResult.skipped;
+
 @Slf4j
 public class AzureRepo implements SourceRepo {
+    private static final String READ_OBJECT_STAGE = "read-object";
+    private static final String READ_OBJECT_LABEL = "Read repository object";
 
     private final Path localDir;
     private final BlobContainerClient containerClient;
@@ -244,6 +252,97 @@ public class AzureRepo implements SourceRepo {
             .log();
 
         return strippedKeys;
+    }
+
+    /**
+     * Checks the same Azure credential and endpoint path used by snapshot readers without requiring
+     * that a snapshot already exists. Object reads are restricted to one byte so this check cannot
+     * accidentally download a large shard file.
+     */
+    public RepositoryAccessCheckResult checkAccess() {
+        var stages = new ArrayList<RepositoryAccessCheckResult.Stage>();
+        String prefix = normalizedRepoPrefix();
+        Iterable<BlobItem> blobs;
+        try {
+            var options = new ListBlobsOptions().setMaxResultsPerPage(25);
+            if (!prefix.isEmpty()) {
+                options.setPrefix(prefix);
+            }
+            blobs = containerClient.listBlobs(options, null);
+            stages.add(passed(
+                "list-prefix",
+                "List repository prefix",
+                "The configured repository prefix is accessible."
+            ));
+        } catch (RuntimeException e) {
+            stages.add(failed("list-prefix", "List repository prefix", failureMessage(e)));
+            stages.add(skipped(
+                READ_OBJECT_STAGE,
+                READ_OBJECT_LABEL,
+                "Object read was not attempted because the repository prefix could not be listed."
+            ));
+            return new RepositoryAccessCheckResult(
+                RepositoryAccessCheckResult.Status.FAILED,
+                "azure",
+                azureRepoUri.uri,
+                "Unable to list the configured Azure repository prefix.",
+                List.copyOf(stages)
+            );
+        }
+
+        BlobItem readableObject = null;
+        for (BlobItem blob : blobs) {
+            if (blob.getName() != null && !blob.getName().isBlank() && !blob.getName().endsWith("/")) {
+                readableObject = blob;
+                break;
+            }
+        }
+        if (readableObject == null) {
+            stages.add(partial(
+                READ_OBJECT_STAGE,
+                READ_OBJECT_LABEL,
+                "No object is currently available under the configured prefix to verify read access."
+            ));
+            return new RepositoryAccessCheckResult(
+                RepositoryAccessCheckResult.Status.PARTIALLY_VERIFIED,
+                "azure",
+                azureRepoUri.uri,
+                "The Azure repository prefix is accessible, but object read access could not yet be verified.",
+                List.copyOf(stages)
+            );
+        }
+
+        try (var stream = containerClient.getBlobClient(readableObject.getName()).openInputStream()) {
+            stream.read();
+            stages.add(passed(
+                READ_OBJECT_STAGE,
+                READ_OBJECT_LABEL,
+                "An object under the configured repository prefix is readable."
+            ));
+            return new RepositoryAccessCheckResult(
+                RepositoryAccessCheckResult.Status.VALID,
+                "azure",
+                azureRepoUri.uri,
+                "The Azure repository prefix can be listed and its objects can be read.",
+                List.copyOf(stages)
+            );
+        } catch (RuntimeException | IOException e) {
+            stages.add(failed(READ_OBJECT_STAGE, READ_OBJECT_LABEL, failureMessage(e)));
+            return new RepositoryAccessCheckResult(
+                RepositoryAccessCheckResult.Status.FAILED,
+                "azure",
+                azureRepoUri.uri,
+                "The Azure repository prefix is accessible, but an object could not be read.",
+                List.copyOf(stages)
+            );
+        }
+    }
+
+    private String normalizedRepoPrefix() {
+        if (azureRepoUri.key.isEmpty()) {
+            return "";
+        }
+        return azureRepoUri.key.endsWith("/") ? azureRepoUri.key : azureRepoUri.key + "/";
     }
 
     public static class CannotFindSnapshotRepoRoot extends RfsException implements SnapshotReadFailure {

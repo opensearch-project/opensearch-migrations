@@ -34,7 +34,7 @@ parse_lag() {
       printf "event=kafka_consumer_group_lag group=%s partition_count=%d total_lag=%d max_partition_lag=%d\n",
         group, partitions, total, maximum
     }
-  ' 
+  '
 }
 
 filter_replayer_events() {

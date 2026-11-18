@@ -23,7 +23,7 @@ async function readStdin(): Promise<string> {
     });
 }
 
-async function readFileOrStdin(yamlPathOrStdin: string): Promise<string> {
+export async function readYamlText(yamlPathOrStdin: string): Promise<string> {
     if (yamlPathOrStdin === '-') {
         return readStdin()
             .catch((e) => {throw new Error("stdin could not be read:", {cause: e});});
@@ -34,7 +34,7 @@ async function readFileOrStdin(yamlPathOrStdin: string): Promise<string> {
 }
 
 export async function parseYaml(yamlPathOrStdin: string) {
-    const yamlContents = await readFileOrStdin(yamlPathOrStdin);
+    const yamlContents = await readYamlText(yamlPathOrStdin);
     return parse(yamlContents);
 }
 

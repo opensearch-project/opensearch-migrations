@@ -4,6 +4,7 @@
     { "path": "./packages/argo-types" },
     { "path": "./packages/strimzi-types" },
     { "path": "./packages/schemas" },
+    { "path": "./packages/config-edit-core" },
     { "path": "./packages/argo-workflow-builders" },
     { "path": "./packages/migration-workflow-templates" },
     { "path": "./packages/config-processor" }

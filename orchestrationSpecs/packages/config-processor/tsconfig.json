@@ -9,8 +9,14 @@
     "module": "Preserve",
     "customConditions": ["development"],
     "paths": {
+      "@opensearch-migrations/config-edit-core": [
+        "../config-edit-core/src/index.ts"
+      ],
       "@opensearch-migrations/schemas": [
         "../schemas/src/index.ts"
+      ],
+      "@opensearch-migrations/schemas/browser": [
+        "../schemas/src/browser.ts"
       ]
     },
     "disableSourceOfProjectReferenceRedirect": false,
@@ -19,6 +25,7 @@
   "include": ["./src/**/*"],
   "exclude": ["node_modules", "dist", "./test", "tests", "**/*.test.ts", "**/__tests__/**"],
   "references": [
+    { "path": "../config-edit-core/tsconfig.json" },
     { "path": "../schemas/tsconfig.json" }
   ]
 }

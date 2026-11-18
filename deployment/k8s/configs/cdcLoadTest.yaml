@@ -40,17 +40,21 @@ targetClusters:
         secretName: target-creds
     # auth-end
 
-# An auto-created Strimzi cluster. Swap in an `existing:` block to point at a Kafka you already run.
-kafkaClusterConfiguration:
-  default:
-    autoCreate:
-      topicSpecOverrides:
-        # Two active capture proxies plus the workflow's one-pod rolling-surge slot.
-        partitions: 3
-
 traffic:
+  # An auto-created Strimzi cluster. Swap in an `existing:` block to point at Kafka you already run.
+  kafkaClusters:
+    default:
+      autoCreate: {}
+      topics:
+        capture-proxy:
+          specOverrides:
+            # Two active capture proxies plus the workflow's one-pod rolling-surge slot.
+            partitions: 3
+
   proxies:
     capture-proxy:
+      kafka: default
+      kafkaTopic: capture-proxy
       source: source1
       proxyConfig:
         listenPort: 9201

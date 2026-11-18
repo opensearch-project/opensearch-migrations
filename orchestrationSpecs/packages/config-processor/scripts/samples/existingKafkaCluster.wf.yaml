@@ -1,13 +1,3 @@
-kafkaClusterConfiguration:
-  my-kafka:
-    existing:
-      enableMSKAuth: true
-      kafkaConnection: broker.a:9092,broker.b:9092
-      kafkaTopic: ""
-      auth:
-        type: scram-sha-512
-        secretName: existing-kafka-user-secret
-        caSecretName: existing-kafka-cluster-ca
 sourceClusters:
   source:
     endpoint: https://elasticsearch-master-headless:9200
@@ -37,10 +27,22 @@ targetClusters:
 snapshotMigrationConfigs:
   - fromSource: source
     toTarget: target
-    perSnapshotConfig:
-      snap1:
-        - metadataMigrationConfig: {}
+    fromSnapshot: snap1
+    slice: default
+    metadataMigrationConfig: {}
 traffic:
+  kafkaClusters:
+    my-kafka:
+      existing:
+        enableMSKAuth: true
+        kafkaConnection: broker.a:9092,broker.b:9092
+        auth:
+          type: scram-sha-512
+          secretName: existing-kafka-user-secret
+          caSecretName: existing-kafka-cluster-ca
+          kafkaUserName: existing-kafka-user
+      topics:
+        capture-traffic: {}
   proxies:
     proxy1:
       kafka: my-kafka

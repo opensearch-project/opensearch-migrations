@@ -11,6 +11,8 @@ from typing import Dict, Any, Optional, Tuple, TypedDict, List
 import requests
 from kubernetes import client
 
+from ..timeouts import ARGO_REQUEST_TIMEOUT
+
 
 logger = logging.getLogger(__name__)
 
@@ -144,7 +146,8 @@ class WorkflowService:
                 url,
                 json=request_body,
                 headers=headers,
-                verify=not insecure
+                verify=not insecure,
+                timeout=ARGO_REQUEST_TIMEOUT,
             )
 
             response.raise_for_status()
@@ -230,7 +233,7 @@ class WorkflowService:
             logger.info(f"Listing workflows in namespace {namespace} (exclude_completed={exclude_completed})")
             logger.debug(f"List request URL: {url}")
 
-            response = requests.get(url, headers=headers, verify=not insecure)
+            response = requests.get(url, headers=headers, verify=not insecure, timeout=ARGO_REQUEST_TIMEOUT)
 
             if response.status_code == 200:
                 result = response.json()
@@ -301,7 +304,7 @@ class WorkflowService:
             logger.info(f"Getting status for workflow {workflow_name}")
             logger.debug(f"Request URL: {url}")
 
-            response = requests.get(url, headers=headers, verify=not insecure)
+            response = requests.get(url, headers=headers, verify=not insecure, timeout=ARGO_REQUEST_TIMEOUT)
 
             if response.status_code != 200:
                 error_msg = self._format_error_message("get workflow status", response)
@@ -632,7 +635,7 @@ class WorkflowService:
         headers = self._prepare_headers(token)
         url = f"{argo_server}/api/v1/workflows/{namespace}/{workflow_name}/artifacts/{node_id}/{artifact_name}"
         try:
-            resp = requests.get(url, headers=headers, verify=not insecure)
+            resp = requests.get(url, headers=headers, verify=not insecure, timeout=ARGO_REQUEST_TIMEOUT)
             return resp.text if resp.status_code == 200 else None
         except requests.exceptions.RequestException as e:
             logger.error(f"Failed to fetch artifact {artifact_name}: {e}")

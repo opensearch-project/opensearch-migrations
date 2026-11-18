@@ -1,11 +1,12 @@
 import os
 import requests.exceptions
 import subprocess
-from typing import Optional
+from typing import Any, Optional
 
 from console_link.models.cluster import Cluster, HttpMethod
 from console_link.models.snapshot import Snapshot
 from dataclasses import dataclass
+from enum import Enum
 import logging
 
 logger = logging.getLogger(__name__)
@@ -16,11 +17,48 @@ def _is_solr(cluster: Cluster) -> bool:
     return isinstance(cluster.version, str) and cluster.version.upper().startswith("SOLR")
 
 
-@dataclass
+class ConnectionCheckStatus(str, Enum):
+    VALID = "valid"
+    PARTIALLY_VERIFIED = "partially_verified"
+    FAILED = "failed"
+
+
+class ConnectionCheckStageStatus(str, Enum):
+    PASSED = "passed"
+    PARTIALLY_VERIFIED = "partially_verified"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+
+
+@dataclass(frozen=True)
+class ConnectionCheckStage:
+    name: str
+    status: ConnectionCheckStageStatus
+    message: str
+    code: Optional[str] = None
+    http_status: Optional[int] = None
+
+    def to_dict(self) -> dict[str, Any]:
+        result: dict[str, Any] = {
+            "name": self.name,
+            "status": self.status.value,
+            "message": self.message,
+        }
+        if self.code is not None:
+            result["code"] = self.code
+        if self.http_status is not None:
+            result["http_status"] = self.http_status
+        return result
+
+
+@dataclass(frozen=True)
 class ConnectionResult:
     connection_message: str
     connection_established: bool
     cluster_version: Optional[str] = None
+    status: ConnectionCheckStatus = ConnectionCheckStatus.FAILED
+    stages: tuple[ConnectionCheckStage, ...] = ()
+    diagnostic_log: Optional[str] = None
 
     def __repr__(self):
         parts = [f"connection_message='{self.connection_message}'",
@@ -28,6 +66,69 @@ class ConnectionResult:
         if self.cluster_version is not None:
             parts.append(f"cluster_version='{self.cluster_version}'")
         return f"ConnectionResult({', '.join(parts)})"
+
+    @classmethod
+    def success(
+        cls,
+        *,
+        cluster_version: Optional[str] = None,
+        message: str = "Successfully connected!",
+        stage_message: str = "Connected and authenticated.",
+        http_status: Optional[int] = None,
+    ) -> "ConnectionResult":
+        return cls(
+            connection_message=message,
+            connection_established=True,
+            cluster_version=cluster_version,
+            status=ConnectionCheckStatus.VALID,
+            stages=(
+                ConnectionCheckStage(
+                    name="cluster-api",
+                    status=ConnectionCheckStageStatus.PASSED,
+                    message=stage_message,
+                    http_status=http_status,
+                ),
+            ),
+        )
+
+    @classmethod
+    def failure(
+        cls,
+        *,
+        message: str,
+        code: str,
+        stage_message: Optional[str] = None,
+        http_status: Optional[int] = None,
+        diagnostic_log: Optional[str] = None,
+    ) -> "ConnectionResult":
+        return cls(
+            connection_message=message,
+            connection_established=False,
+            status=ConnectionCheckStatus.FAILED,
+            stages=(
+                ConnectionCheckStage(
+                    name="cluster-api",
+                    status=ConnectionCheckStageStatus.FAILED,
+                    message=stage_message or message,
+                    code=code,
+                    http_status=http_status,
+                ),
+            ),
+            diagnostic_log=diagnostic_log,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        result: dict[str, Any] = {
+            "status": self.status.value,
+            "connection_established": self.connection_established,
+            "connection_message": self.connection_message,
+        }
+        if self.cluster_version is not None:
+            result["cluster_version"] = self.cluster_version
+        result["stages"] = [stage.to_dict() for stage in self.stages]
+        if self.diagnostic_log is not None:
+            result["diagnostic_log"] = self.diagnostic_log
+        return result
 
 
 @dataclass
@@ -121,66 +222,136 @@ def _solr_collection_doc_count(cluster: Cluster, collection: str) -> int:
         return 0
 
 
-def _solr_connection_check(cluster: Cluster, r, caught_exception) -> ConnectionResult:
-    if caught_exception is None and r is not None:
-        response_json = r.json()
+def _response_failure(response) -> ConnectionResult:
+    status_code = response.status_code
+    diagnostic_log = _response_diagnostic_log(response)
+    if status_code == 401:
+        return ConnectionResult.failure(
+            message="Unable to connect to cluster: authentication failed with HTTP 401.",
+            stage_message="The cluster rejected the configured authentication.",
+            code="authentication-failed",
+            http_status=status_code,
+            diagnostic_log=diagnostic_log,
+        )
+    if status_code == 403:
+        return ConnectionResult.failure(
+            message="Unable to connect to cluster: authorization failed with HTTP 403.",
+            stage_message="The authenticated principal is not authorized to read cluster information.",
+            code="authorization-failed",
+            http_status=status_code,
+            diagnostic_log=diagnostic_log,
+        )
+    return ConnectionResult.failure(
+        message=f"Unable to connect to cluster: the cluster API returned HTTP {status_code}.",
+        stage_message=f"The cluster API returned HTTP {status_code}.",
+        code="unexpected-http-status",
+        http_status=status_code,
+        diagnostic_log=diagnostic_log,
+    )
+
+
+def _response_diagnostic_log(response) -> str:
+    status = f"HTTP {response.status_code}"
+    reason = str(getattr(response, "reason", "") or "").strip()
+    if reason:
+        status += f" {reason}"
+    lines = [status]
+    for header in ("audit-id", "x-amz-request-id", "x-amzn-requestid"):
+        value = response.headers.get(header)
+        if value:
+            lines.append(f"{header}: {value}")
+    body = str(getattr(response, "text", "") or "").strip()
+    if body:
+        lines.extend(["", body[:8192]])
+    return "\n".join(lines)
+
+
+def _exception_failure(error: Exception) -> ConnectionResult:
+    if isinstance(error, requests.exceptions.SSLError):
+        code = "tls-failed"
+    elif isinstance(error, requests.exceptions.Timeout):
+        code = "timeout"
+    elif isinstance(error, requests.exceptions.ConnectionError):
+        code = "connection-failed"
+    else:
+        code = "unexpected-error"
+    return ConnectionResult.failure(
+        message=f"Unable to connect to cluster with error: {error}",
+        stage_message=str(error),
+        code=code,
+        diagnostic_log=f"{type(error).__name__}: {error}",
+    )
+
+
+def _solr_connection_check(response) -> ConnectionResult:
+    if response.status_code != 200:
+        return _response_failure(response)
+    try:
+        response_json = response.json()
         version = response_json.get("lucene", {}).get("solr-spec-version", "unknown")
-        return ConnectionResult(connection_message="Successfully connected!",
-                                connection_established=True,
-                                cluster_version=version)
-    return ConnectionResult(connection_message=f"Unable to connect to cluster with error: {caught_exception}",
-                            connection_established=False)
+    except Exception as error:
+        return ConnectionResult.failure(
+            message=f"Unable to read the Solr cluster response: {error}",
+            stage_message=str(error),
+            code="invalid-response",
+            http_status=response.status_code,
+        )
+    return ConnectionResult.success(
+        cluster_version=version,
+        http_status=response.status_code,
+    )
 
 
 def _serverless_connection_check(cluster: Cluster) -> ConnectionResult:
-    """Check connectivity to an AOSS serverless collection and detect its type."""
-    collection_type = cluster.detect_serverless_collection_type(skip_root_probe=True)
+    """Verify AOSS access with a read-only API request."""
     try:
-        cluster.call_api("/_cat/indices", timeout=3)
-    except Exception as e:
-        logger.debug(f"Unable to access AOSS cluster: {cluster} with exception: {e}")
-        return ConnectionResult(connection_message=f"Unable to connect to cluster with error: {e}",
-                                connection_established=False)
-    msg = "Successfully connected to serverless collection!"
-    if collection_type == "UNKNOWN":
-        probe_err = getattr(cluster, '_collection_type_probe_error', None) or "unknown error"
-        msg += (f"\n⚠ Warning: Could not detect collection type. "
-                f"The type detection probe failed ({probe_err}). "
-                f"Ensure the migration IAM role has index creation permissions in the AOSS data access policy.")
-    return ConnectionResult(connection_message=msg, connection_established=True)
+        response = cluster.call_api("/_cat/indices", timeout=3, raise_error=False)
+    except Exception as error:
+        logger.debug("Unable to access AOSS cluster", exc_info=True)
+        return _exception_failure(error)
+    if response.status_code != 200:
+        return _response_failure(response)
+    return ConnectionResult.success(
+        message="Successfully connected to serverless collection!",
+        http_status=response.status_code,
+    )
 
 
 def connection_check(cluster: Cluster) -> ConnectionResult:
-    # Probe GET / — mirrors Java getClusterVersion logic.
-    # For non-serverless: returns the response directly (avoids a second GET /).
-    # For serverless (404): detect collection type via KNN probe.
-    caught_exception = None
-    r = None
     try:
         if _is_solr(cluster):
-            r = cluster.call_api(f"{cluster.solr_context_path}/admin/info/system", timeout=3)
+            response = cluster.call_api(
+                f"{cluster.solr_context_path}/admin/info/system",
+                timeout=3,
+                raise_error=False,
+            )
         else:
-            r = cluster.call_api("/", raise_error=False, timeout=5)
-    except Exception as e:
-        caught_exception = e
+            response = cluster.call_api("/", raise_error=False, timeout=5)
+    except Exception as error:
+        return _exception_failure(error)
 
     if _is_solr(cluster):
-        return _solr_connection_check(cluster, r, caught_exception)
+        return _solr_connection_check(response)
 
-    if caught_exception is None and r is not None and r.status_code == 404:
+    if response.status_code == 404 and cluster.is_serverless:
         return _serverless_connection_check(cluster)
 
-    # Non-serverless — use the response from the probe directly
-    if caught_exception is None and r is not None and r.status_code == 200:
-        try:
-            response_json = r.json()
-            return ConnectionResult(connection_message="Successfully connected!",
-                                    connection_established=True,
-                                    cluster_version=response_json['version']['number'])
-        except Exception as e:
-            caught_exception = e
-    return ConnectionResult(connection_message=f"Unable to connect to cluster with error: {caught_exception or r}",
-                            connection_established=False)
+    if response.status_code != 200:
+        return _response_failure(response)
+    try:
+        response_json = response.json()
+        version = response_json["version"]["number"]
+    except Exception as error:
+        return ConnectionResult.failure(
+            message=f"Unable to read the cluster version response: {error}",
+            stage_message=str(error),
+            code="invalid-response",
+            http_status=response.status_code,
+        )
+    return ConnectionResult.success(
+        cluster_version=version,
+        http_status=response.status_code,
+    )
 
 
 def run_test_benchmarks(cluster: Cluster):

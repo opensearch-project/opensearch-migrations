@@ -41,7 +41,7 @@ OpenSearch Migration Assistant is a comprehensive set of tools designed to facil
   - **Downgrade Support**: Downgrade to an earlier version if needed (e.g., from Elasticsearch 7.17 to 7.10.2).
   - **Existing Data Migration with [Reindex-from-Snapshot](RFS/docs/DESIGN.md)**: Migrate indices and documents using snapshots, updating your data to the latest Lucene version quickly without impacting the target cluster.
   - **Live Traffic Capture with [Capture-and-Replay](docs/TrafficCaptureAndReplayDesign.md)**: Capture live traffic from the source cluster and replay it on the target cluster for validation. This ensures the target cluster can handle real-world traffic patterns before fully migrating.
-  
+
 - **Zero-Downtime Migration with [Live Traffic Routing](docs/ClientTrafficSwinging.md)**: Tools to seamlessly switch client traffic between clusters while keeping services fully operational.
 
 - **Migration Rollback**: Keep your source cluster synchronized during the migration, allowing you to monitor the target cluster's performance before fully committing to the switch. You can safely revert if needed.
@@ -92,7 +92,7 @@ Note that testing is done on specific minor versions, but any minor versions wit
 ### Capture and Replay
 A two-hour benchmark (see [details](docs/captureAndReplay/loadTestRun-2026-10-13-160k.md)) recorded a full-rate ingest workload as it was written to an
 Elasticsearch 7.10 source and replayed it live onto an OpenSearch 3.7 target, both Amazon OpenSearch
-Service domains. The load was single-document `_bulk` requests of about 2 KiB, with about a quarter of 
+Service domains. The load was single-document `_bulk` requests of about 2 KiB, with about a quarter of
 them opening a new TLS connection.
 
 | What to expect                              | Result                                                                          |
@@ -137,7 +137,7 @@ Tests were ran with and without the [Type Mapping Sanitization Transformer](./tr
 
 ## Issue Tracking
 
-We encourage users to open bugs and feature requests in this GitHub repository. 
+We encourage users to open bugs and feature requests in this GitHub repository.
 
 **Encountering a compatibility issue or missing feature?**
 

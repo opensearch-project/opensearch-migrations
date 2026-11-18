@@ -24,7 +24,8 @@ targetClusters:
 snapshotMigrationConfigs:
   - fromSource: solr-source
     toTarget: target
-    perSnapshotConfig:
-      customerBackup:
-        - metadataMigrationConfig: {}
-          documentBackfillConfig: { failedDocumentStream: { type: disabled } }
+    fromSnapshot: customerBackup
+    slice: default
+    metadataMigrationConfig: {}
+    documentBackfillConfig:
+      failedDocumentStream: { type: disabled }

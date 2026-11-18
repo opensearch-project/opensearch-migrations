@@ -18,6 +18,7 @@ import com.azure.storage.blob.BlobContainerClient;
 import com.azure.storage.blob.models.BlobItem;
 import com.azure.storage.blob.models.BlobStorageException;
 import com.azure.storage.blob.models.ListBlobsOptions;
+import com.azure.storage.blob.specialized.BlobInputStream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -37,6 +38,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doReturn;
@@ -246,6 +248,76 @@ public class AzureRepoTest {
 
         assertThat(thrown.getCause(), sameInstance(azureFailure));
         assertThat(thrown.getMessage(), containsString("container-name"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void CheckAccess_ListsPrefixAndReadsOneByte() throws Exception {
+        BlobItem blob = new BlobItem().setName("directory/index-0");
+        PagedIterable<BlobItem> page = mock(PagedIterable.class);
+        when(page.iterator()).thenReturn(List.of(blob).iterator());
+        when(mockContainerClient.listBlobs(any(ListBlobsOptions.class), isNull())).thenReturn(page);
+        BlobInputStream stream = mock(BlobInputStream.class);
+        when(mockBlobClient.openInputStream()).thenReturn(stream);
+        when(stream.read()).thenReturn(1);
+
+        var result = testRepo.checkAccess();
+
+        assertEquals(RepositoryAccessCheckResult.Status.VALID, result.status());
+        assertEquals("azure", result.provider());
+        assertEquals(RepositoryAccessCheckResult.StageStatus.PASSED, result.stages().get(0).status());
+        assertEquals(RepositoryAccessCheckResult.StageStatus.PASSED, result.stages().get(1).status());
+        verify(mockContainerClient).getBlobClient("directory/index-0");
+        verify(stream).read();
+        verify(stream).close();
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void CheckAccess_EmptyPrefixIsPartiallyVerified() {
+        PagedIterable<BlobItem> page = mock(PagedIterable.class);
+        when(page.iterator()).thenReturn(List.<BlobItem>of().iterator());
+        when(mockContainerClient.listBlobs(any(ListBlobsOptions.class), isNull())).thenReturn(page);
+
+        var result = testRepo.checkAccess();
+
+        assertEquals(RepositoryAccessCheckResult.Status.PARTIALLY_VERIFIED, result.status());
+        assertEquals(
+            RepositoryAccessCheckResult.StageStatus.PARTIALLY_VERIFIED,
+            result.stages().get(1).status()
+        );
+        verifyNoInteractions(mockBlobClient);
+    }
+
+    @Test
+    void CheckAccess_ListFailureSkipsRead() {
+        RuntimeException failure = new RuntimeException("list denied");
+        when(mockContainerClient.listBlobs(any(ListBlobsOptions.class), isNull())).thenThrow(failure);
+
+        var result = testRepo.checkAccess();
+
+        assertEquals(RepositoryAccessCheckResult.Status.FAILED, result.status());
+        assertEquals(RepositoryAccessCheckResult.StageStatus.FAILED, result.stages().get(0).status());
+        assertEquals(RepositoryAccessCheckResult.StageStatus.SKIPPED, result.stages().get(1).status());
+        assertThat(result.stages().get(0).message(), containsString("list denied"));
+        verifyNoInteractions(mockBlobClient);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void CheckAccess_ReadFailureIsReported() {
+        BlobItem blob = new BlobItem().setName("directory/index-0");
+        PagedIterable<BlobItem> page = mock(PagedIterable.class);
+        when(page.iterator()).thenReturn(List.of(blob).iterator());
+        when(mockContainerClient.listBlobs(any(ListBlobsOptions.class), isNull())).thenReturn(page);
+        when(mockBlobClient.openInputStream()).thenThrow(new RuntimeException("read denied"));
+
+        var result = testRepo.checkAccess();
+
+        assertEquals(RepositoryAccessCheckResult.Status.FAILED, result.status());
+        assertEquals(RepositoryAccessCheckResult.StageStatus.PASSED, result.stages().get(0).status());
+        assertEquals(RepositoryAccessCheckResult.StageStatus.FAILED, result.stages().get(1).status());
+        assertThat(result.stages().get(1).message(), containsString("read denied"));
     }
 
     @ParameterizedTest

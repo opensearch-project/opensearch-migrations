@@ -8,7 +8,10 @@ import { REPO_CONFIG } from "../src";
  * so the boundaries are worth pinning down here rather than through full configs.
  */
 describe("repoPathUri", () => {
-    const accepts = (uri: string) => REPO_CONFIG.safeParse({ repoPathUri: uri }).success;
+    const accepts = (uri: string) => REPO_CONFIG.safeParse({
+        repoPathUri: uri,
+        ...(uri.startsWith("s3://") ? {awsRegion: "us-east-1"} : {}),
+    }).success;
 
     describe("azure://", () => {
         it.each([

@@ -36,9 +36,7 @@ def k8s():
     with patch('console_link.workflow.commands.approve.load_k8s_config'), \
             patch('console_link.workflow.commands.approve._gather_gates', return_value=[_retry_gate()]), \
             patch(MODULE + '.get_workflow', return_value=_workflow()), \
-            patch(MODULE + '.client.CustomObjectsApi', return_value=custom), \
-            patch('console_link.workflow.commands.approve._retry_blockers') as blockers:
-        custom.blockers = blockers
+            patch(MODULE + '.client.CustomObjectsApi', return_value=custom):
         yield custom
 
 
@@ -79,7 +77,6 @@ class TestChangeRestrictionOverride:
         assert status['body']['status']['phase'] == 'Approved'
         assert status['body']['status']['message'].startswith(
             'change-restriction override: documentBackfillDocTransformerConfig at ')
-        k8s.blockers.assert_not_called()
         assert 'OVERRIDING CHANGE RESTRICTIONS' in result.output
 
     def test_named_fields_and_the_resource_wide_key(self, k8s):
@@ -142,8 +139,7 @@ class TestChangeRestrictionOverride:
         k8s.patch_namespaced_custom_object.assert_not_called()
 
     def test_without_the_override_retry_still_requires_a_reset(self, k8s):
-        k8s.blockers.return_value = [(_retry_gate(), ('Reset', 'workflow reset mig'))]
         result = CliRunner().invoke(workflow_cli, ['approve', 'retry', 'snapshotmigration.mig'])
         assert result.exit_code != 0
-        assert 'workflow reset mig' in result.output
+        assert 'workflow reset snapshotmigration.mig --resubmit' in result.output
         k8s.patch_namespaced_custom_object.assert_not_called()
