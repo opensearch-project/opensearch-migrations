@@ -5,6 +5,7 @@ import os
 import time
 import pytest
 import requests_mock
+from kubernetes import config
 from botocore.exceptions import ClientError
 from click.testing import CliRunner
 from types import SimpleNamespace
@@ -25,13 +26,13 @@ from console_link.k8s_resource_catalog import (
     ConsoleResourceEntry,
     ResourceRole,
 )
-from console_link.models.backfill_rfs import ECSRFSBackfill, RfsWorkersInProgress, WorkingIndexDoesntExist
+from console_link.models.backfill_rfs import K8sRFSBackfill, RfsWorkersInProgress, WorkingIndexDoesntExist
 from console_link.models.cluster import Cluster, HttpMethod
 from console_link.models.command_result import CommandResult
-from console_link.models.ecs_service import ECSService
 from console_link.models.kafka import StandardKafka
+from console_link.models.kubectl_runner import KubectlRunner
 from console_link.models.metrics_source import Component
-from console_link.models.replayer_ecs import ECSReplayer
+from console_link.models.replayer_k8s import K8sReplayer
 from console_link.models.snapshot import FileSystemSnapshot
 from console_link.models.utils import DeploymentStatus
 
@@ -97,6 +98,12 @@ def block_k8s_config_store_usage(monkeypatch):
     # it to ignore any `services.yaml`-type config files. This fixture caues the `can_use_k8s_config_store`
     # check to always return False.
     monkeypatch.setattr(cli_module, "can_use_k8s_config_store", lambda: False)
+
+
+@pytest.fixture(autouse=True)
+def mock_kube_config(monkeypatch):
+    monkeypatch.setattr(config, "load_incluster_config", lambda: None)
+    monkeypatch.setattr(config, "load_kube_config", lambda: None)
 
 
 @pytest.fixture(autouse=True)
@@ -959,8 +966,8 @@ def test_cli_backfill_when_not_defined(runner, source_cluster_only_yaml_path):
 
 
 def test_cli_backfill_start(runner, mocker):
-    mock = mocker.patch.object(ECSRFSBackfill, 'start', autospec=True)
-    result = runner.invoke(cli, ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
+    mock = mocker.patch.object(K8sRFSBackfill, 'start', autospec=True)
+    result = runner.invoke(cli, ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_k8s_rfs.yaml"),
                                  'backfill', 'start'],
                            catch_exceptions=True)
     mock.assert_called_once()
@@ -968,8 +975,8 @@ def test_cli_backfill_start(runner, mocker):
 
 
 def test_cli_backfill_pause(runner, mocker):
-    mock = mocker.patch.object(ECSRFSBackfill, 'pause', autospec=True)
-    result = runner.invoke(cli, ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
+    mock = mocker.patch.object(K8sRFSBackfill, 'pause', autospec=True)
+    result = runner.invoke(cli, ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_k8s_rfs.yaml"),
                                  'backfill', 'pause'],
                            catch_exceptions=True)
     mock.assert_called_once()
@@ -977,16 +984,16 @@ def test_cli_backfill_pause(runner, mocker):
 
 
 def test_cli_backfill_stop(runner, mocker):
-    mock_stop = mocker.patch.object(ECSRFSBackfill, 'stop', autospec=True)
+    mock_stop = mocker.patch.object(K8sRFSBackfill, 'stop', autospec=True)
 
     archive_result_seq = [
         CommandResult(success=False, value=RfsWorkersInProgress()),
         CommandResult(success=True, value="/path/to/archive.json")
     ]
-    mock_archive = mocker.patch.object(ECSRFSBackfill, 'archive', autospec=True, side_effect=archive_result_seq)
+    mock_archive = mocker.patch.object(K8sRFSBackfill, 'archive', autospec=True, side_effect=archive_result_seq)
     mocker.patch.object(time, 'sleep', autospec=True)  # make a no-op
 
-    result = runner.invoke(cli, ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
+    result = runner.invoke(cli, ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_k8s_rfs.yaml"),
                                  'backfill', 'stop'],
                            catch_exceptions=False)
     mock_stop.assert_called_once()
@@ -995,13 +1002,13 @@ def test_cli_backfill_stop(runner, mocker):
 
 
 def test_cli_backfill_stop_no_index(runner, mocker):
-    mock_stop = mocker.patch.object(ECSRFSBackfill, 'stop', autospec=True)
+    mock_stop = mocker.patch.object(K8sRFSBackfill, 'stop', autospec=True)
 
     archive_result = CommandResult(success=False, value=WorkingIndexDoesntExist("index"))
-    mock_archive = mocker.patch.object(ECSRFSBackfill, 'archive', autospec=True, return_value=archive_result)
+    mock_archive = mocker.patch.object(K8sRFSBackfill, 'archive', autospec=True, return_value=archive_result)
     mocker.patch.object(time, 'sleep', autospec=True)  # make a no-op
 
-    result = runner.invoke(cli, ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
+    result = runner.invoke(cli, ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_k8s_rfs.yaml"),
                                  'backfill', 'stop'],
                            catch_exceptions=False)
     mock_stop.assert_called_once()
@@ -1010,8 +1017,8 @@ def test_cli_backfill_stop_no_index(runner, mocker):
 
 
 def test_cli_backfill_scale(runner, mocker):
-    mock = mocker.patch.object(ECSRFSBackfill, 'scale', autospec=True)
-    result = runner.invoke(cli, ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
+    mock = mocker.patch.object(K8sRFSBackfill, 'scale', autospec=True)
+    result = runner.invoke(cli, ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_k8s_rfs.yaml"),
                                  'backfill', 'scale', '3'],
                            catch_exceptions=True)
     mock.assert_called_once()
@@ -1019,8 +1026,8 @@ def test_cli_backfill_scale(runner, mocker):
 
 
 def test_cli_backfill_scale_with_no_units_fails(runner, mocker):
-    mock = mocker.patch.object(ECSRFSBackfill, 'scale', autospec=True)
-    result = runner.invoke(cli, ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
+    mock = mocker.patch.object(K8sRFSBackfill, 'scale', autospec=True)
+    result = runner.invoke(cli, ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_k8s_rfs.yaml"),
                                  'backfill', 'scale'],
                            catch_exceptions=True)
     mock.assert_not_called()
@@ -1034,16 +1041,17 @@ def test_get_backfill_status_no_deep_check(runner, mocker):
         running=3,
         pending=1
     )
-    mock = mocker.patch.object(ECSService, 'get_instance_statuses', autspec=True, return_value=mocked_running_status)
+    mock = mocker.patch.object(KubectlRunner, 'retrieve_deployment_status',
+                               autospec=True, return_value=mocked_running_status)
 
-    result = runner.invoke(cli, ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
+    result = runner.invoke(cli, ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_k8s_rfs.yaml"),
                                  'backfill', 'status'],
                            catch_exceptions=True)
     print(result)
     print(result.output)
     assert result.exit_code == 0
     assert "RUNNING" in result.output
-    assert str(mocked_running_status) in result.output
+    assert "Pods - Running: 3, Pending: 1, Desired: 1" in result.output
 
     mock.assert_called_once()
 
@@ -1055,20 +1063,20 @@ def test_get_backfill_status_with_deep_check(runner, mocker):
         pending=1
     )
     mocked_detailed_status = "Remaining shards: 43"
-    mock_ecs_service_call = mocker.patch.object(ECSService, 'get_instance_statuses', autospec=True,
+    mock_k8s_service_call = mocker.patch.object(KubectlRunner, 'retrieve_deployment_status', autospec=True,
                                                 return_value=mocked_running_status)
     mock_detailed_status_call = mocker.patch('console_link.models.backfill_rfs.get_detailed_status', autospec=True,
                                              return_value=mocked_detailed_status)
 
-    result = runner.invoke(cli, ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
+    result = runner.invoke(cli, ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_k8s_rfs.yaml"),
                                  'backfill', 'status', '--deep-check'],
                            catch_exceptions=True)
     assert result.exit_code == 0
     assert "RUNNING" in result.output
-    assert str(mocked_running_status) in result.output
+    assert "Pods - Running: 3, Pending: 1, Desired: 1" in result.output
     assert mocked_detailed_status in result.output
 
-    mock_ecs_service_call.assert_called_once()
+    mock_k8s_service_call.assert_called_once()
     mock_detailed_status_call.assert_called_once()
 
 
@@ -1085,7 +1093,7 @@ def test_get_backfill_status_with_deep_check_as_json(runner, mocker):
         "shard_waiting": 0,
     }
     mock_build_status = mocker.patch.object(
-        ECSRFSBackfill,
+        K8sRFSBackfill,
         'build_backfill_status',
         autospec=True,
         return_value=cli_module.BackfillOverallStatus(**mocked_status)
@@ -1094,7 +1102,7 @@ def test_get_backfill_status_with_deep_check_as_json(runner, mocker):
 
     result = runner.invoke(
         cli,
-        ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
+        ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_k8s_rfs.yaml"),
          '--json', 'backfill', 'status', '--deep-check'],
         catch_exceptions=True
     )
@@ -1121,7 +1129,7 @@ def test_replay_describe(runner, mocker):
 
 
 def test_replay_start(runner, mocker):
-    mock = mocker.patch.object(ECSReplayer, 'start', autospec=True)
+    mock = mocker.patch.object(K8sReplayer, 'start', autospec=True)
     result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'replay', 'start'],
                            catch_exceptions=True)
     mock.assert_called_once()
@@ -1129,7 +1137,7 @@ def test_replay_start(runner, mocker):
 
 
 def test_replay_stop(runner, mocker):
-    mock = mocker.patch.object(ECSReplayer, 'stop', autospec=True)
+    mock = mocker.patch.object(K8sReplayer, 'stop', autospec=True)
     result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'replay', 'stop'],
                            catch_exceptions=True)
     mock.assert_called_once()
@@ -1137,7 +1145,7 @@ def test_replay_stop(runner, mocker):
 
 
 def test_replay_scale(runner, mocker):
-    mock = mocker.patch.object(ECSReplayer, 'scale', autospec=True)
+    mock = mocker.patch.object(K8sReplayer, 'scale', autospec=True)
     result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'replay', 'scale', '5'],
                            catch_exceptions=True)
     mock.assert_called_once()
@@ -1145,7 +1153,7 @@ def test_replay_scale(runner, mocker):
 
 
 def test_replay_scale_with_no_units_fails(runner, mocker):
-    mock = mocker.patch.object(ECSReplayer, 'scale', autospec=True)
+    mock = mocker.patch.object(K8sReplayer, 'scale', autospec=True)
     result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'replay', 'scale'],
                            catch_exceptions=True)
     mock.assert_not_called()
@@ -1153,7 +1161,7 @@ def test_replay_scale_with_no_units_fails(runner, mocker):
 
 
 def test_replay_status(runner, mocker):
-    mock = mocker.patch.object(ECSReplayer, 'get_status', autospec=True)
+    mock = mocker.patch.object(K8sReplayer, 'get_status', autospec=True)
     result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'replay', 'status'],
                            catch_exceptions=True)
     mock.assert_called_once()
@@ -2068,15 +2076,15 @@ def test_failed_document_stream_list_when_not_configured(runner, mocker):
 # ----- backfill status: failed document stream summary append --------------------------------
 
 def test_backfill_status_appends_failed_document_stream_summary_when_configured(runner, mocker):
-    # Stub the underlying ECS lookup so we hit SUCCESS in status_backfill_cmd,
+    # Stub the underlying Kubernetes lookup so we hit SUCCESS in status_backfill_cmd,
     # then verify the failed document stream tail is appended.
-    mocker.patch.object(ECSService, 'get_instance_statuses', autospec=True,
+    mocker.patch.object(KubectlRunner, 'retrieve_deployment_status', autospec=True,
                         return_value=DeploymentStatus(desired=1, running=1, pending=0))
     mocker.patch.object(cli_module.failed_document_stream_, "load_config",
                         return_value=_fake_failed_document_stream_cfg())
     mocker.patch.object(cli_module.failed_document_stream_, "has_records", return_value=True)
 
-    result = runner.invoke(cli, ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
+    result = runner.invoke(cli, ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_k8s_rfs.yaml"),
                                  'backfill', 'status'],
                            catch_exceptions=False)
     assert result.exit_code == 0
@@ -2086,27 +2094,27 @@ def test_backfill_status_appends_failed_document_stream_summary_when_configured(
 
 def test_backfill_status_surfaces_unreadable_failed_document_stream(runner, mocker):
     # A configured stream we cannot read must fail, not report a clean status.
-    mocker.patch.object(ECSService, 'get_instance_statuses', autospec=True,
+    mocker.patch.object(KubectlRunner, 'retrieve_deployment_status', autospec=True,
                         return_value=DeploymentStatus(desired=1, running=1, pending=0))
     mocker.patch.object(cli_module.failed_document_stream_, "load_config",
                         return_value=_fake_failed_document_stream_cfg())
     err = ClientError({"Error": {"Code": "AccessDenied", "Message": "x"}}, "ListObjects")
     mocker.patch.object(cli_module.failed_document_stream_, "has_records", side_effect=err)
 
-    result = runner.invoke(cli, ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
+    result = runner.invoke(cli, ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_k8s_rfs.yaml"),
                                  'backfill', 'status'])
     assert result.exit_code != 0
     assert isinstance(result.exception, ClientError)
 
 
 def test_backfill_status_no_failed_document_stream_section_when_not_configured(runner, mocker):
-    mocker.patch.object(ECSService, 'get_instance_statuses', autospec=True,
+    mocker.patch.object(KubectlRunner, 'retrieve_deployment_status', autospec=True,
                         return_value=DeploymentStatus(desired=1, running=1, pending=0))
     from console_link.middleware.failed_document_stream import FailedDocumentStreamNotConfigured
     mocker.patch.object(cli_module.failed_document_stream_, "load_config",
                         side_effect=FailedDocumentStreamNotConfigured("nothing"))
 
-    result = runner.invoke(cli, ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
+    result = runner.invoke(cli, ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_k8s_rfs.yaml"),
                                  'backfill', 'status'],
                            catch_exceptions=False)
     assert result.exit_code == 0
@@ -2131,7 +2139,7 @@ def _completed_status_payload():
 
 def test_backfill_status_json_deep_check_threads_presence_and_includes_keys(runner, mocker):
     # Presence threaded into build_backfill_status and surfaced as keys.
-    mock_build = mocker.patch.object(ECSRFSBackfill, 'build_backfill_status', autospec=True,
+    mock_build = mocker.patch.object(K8sRFSBackfill, 'build_backfill_status', autospec=True,
                                      return_value=cli_module.BackfillOverallStatus(**_completed_status_payload()))
     mocker.patch.object(cli_module.failed_document_stream_, "load_config",
                         return_value=_fake_failed_document_stream_cfg())
@@ -2139,7 +2147,7 @@ def test_backfill_status_json_deep_check_threads_presence_and_includes_keys(runn
 
     result = runner.invoke(
         cli,
-        ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
+        ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_k8s_rfs.yaml"),
          '--json', 'backfill', 'status', '--deep-check'],
         catch_exceptions=False,
     )
@@ -2151,7 +2159,7 @@ def test_backfill_status_json_deep_check_threads_presence_and_includes_keys(runn
 
 
 def test_backfill_status_json_deep_check_threads_no_failures(runner, mocker):
-    mock_build = mocker.patch.object(ECSRFSBackfill, 'build_backfill_status', autospec=True,
+    mock_build = mocker.patch.object(K8sRFSBackfill, 'build_backfill_status', autospec=True,
                                      return_value=cli_module.BackfillOverallStatus(**_completed_status_payload()))
     mocker.patch.object(cli_module.failed_document_stream_, "load_config",
                         return_value=_fake_failed_document_stream_cfg())
@@ -2159,7 +2167,7 @@ def test_backfill_status_json_deep_check_threads_no_failures(runner, mocker):
 
     result = runner.invoke(
         cli,
-        ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
+        ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_k8s_rfs.yaml"),
          '--json', 'backfill', 'status', '--deep-check'],
         catch_exceptions=False,
     )
@@ -2171,7 +2179,7 @@ def test_backfill_status_json_deep_check_threads_no_failures(runner, mocker):
 
 def test_backfill_status_json_deep_check_surfaces_unreadable_stream(runner, mocker):
     # A configured stream we cannot read must fail rather than emit a clean payload.
-    mocker.patch.object(ECSRFSBackfill, 'build_backfill_status', autospec=True,
+    mocker.patch.object(K8sRFSBackfill, 'build_backfill_status', autospec=True,
                         return_value=cli_module.BackfillOverallStatus(**_completed_status_payload()))
     mocker.patch.object(cli_module.failed_document_stream_, "load_config",
                         return_value=_fake_failed_document_stream_cfg())
@@ -2180,7 +2188,7 @@ def test_backfill_status_json_deep_check_surfaces_unreadable_stream(runner, mock
 
     result = runner.invoke(
         cli,
-        ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
+        ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_k8s_rfs.yaml"),
          '--json', 'backfill', 'status', '--deep-check'],
     )
     assert result.exit_code != 0
@@ -2192,14 +2200,14 @@ def test_backfill_status_json_deep_check_omits_failed_document_stream_keys_when_
     mocked_status = cli_module.BackfillOverallStatus(
         status=cli_module.StepStateWithPause.PENDING, percentage_completed=0.0,
     )
-    mocker.patch.object(ECSRFSBackfill, 'build_backfill_status', autospec=True,
+    mocker.patch.object(K8sRFSBackfill, 'build_backfill_status', autospec=True,
                         return_value=mocked_status)
     mocker.patch.object(cli_module.failed_document_stream_, "load_config",
                         side_effect=FailedDocumentStreamNotConfigured("missing"))
 
     result = runner.invoke(
         cli,
-        ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
+        ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_k8s_rfs.yaml"),
          '--json', 'backfill', 'status', '--deep-check'],
         catch_exceptions=False,
     )
@@ -2214,7 +2222,7 @@ def test_backfill_status_json_deep_check_falls_back_to_pending(runner, mocker):
     # should emit a PENDING fallback payload (still augmented with failed document stream keys
     # when configured).
     from console_link.cli import DeepStatusNotYetAvailable
-    mocker.patch.object(ECSRFSBackfill, 'build_backfill_status', autospec=True,
+    mocker.patch.object(K8sRFSBackfill, 'build_backfill_status', autospec=True,
                         side_effect=DeepStatusNotYetAvailable("not yet"))
     mocker.patch.object(cli_module.failed_document_stream_, "load_config",
                         return_value=_fake_failed_document_stream_cfg())
@@ -2222,7 +2230,7 @@ def test_backfill_status_json_deep_check_falls_back_to_pending(runner, mocker):
 
     result = runner.invoke(
         cli,
-        ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
+        ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_k8s_rfs.yaml"),
          '--json', 'backfill', 'status', '--deep-check'],
         catch_exceptions=False,
     )
@@ -2236,7 +2244,7 @@ def test_backfill_status_json_deep_check_falls_back_to_pending(runner, mocker):
 # ----- backfill reset ------------------------------------------------------
 
 def test_backfill_reset_default_preserves_failed_document_stream(runner, mocker):
-    mocker.patch.object(ECSRFSBackfill, 'archive', autospec=True,
+    mocker.patch.object(K8sRFSBackfill, 'archive', autospec=True,
                         return_value=CommandResult(success=True, value="/path/to/archive.json"))
     # Without --include-failed-document-stream, the failed_document_stream middleware should never be loaded.
     load_cfg_mock = mocker.patch.object(cli_module.failed_document_stream_, "load_config")
@@ -2244,7 +2252,7 @@ def test_backfill_reset_default_preserves_failed_document_stream(runner, mocker)
 
     result = runner.invoke(
         cli,
-        ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
+        ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_k8s_rfs.yaml"),
          'backfill', 'reset'],
         catch_exceptions=False,
     )
@@ -2256,7 +2264,7 @@ def test_backfill_reset_default_preserves_failed_document_stream(runner, mocker)
 
 
 def test_backfill_reset_with_include_failed_document_stream_deletes_session(runner, mocker):
-    mocker.patch.object(ECSRFSBackfill, 'archive', autospec=True,
+    mocker.patch.object(K8sRFSBackfill, 'archive', autospec=True,
                         return_value=CommandResult(success=True, value="/path/to/archive.json"))
     mocker.patch.object(cli_module.failed_document_stream_, "load_config",
                         return_value=_fake_failed_document_stream_cfg())
@@ -2264,7 +2272,7 @@ def test_backfill_reset_with_include_failed_document_stream_deletes_session(runn
 
     result = runner.invoke(
         cli,
-        ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
+        ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_k8s_rfs.yaml"),
          'backfill', 'reset', '--include-failed-document-stream', '--yes'],
         catch_exceptions=False,
     )
@@ -2274,7 +2282,7 @@ def test_backfill_reset_with_include_failed_document_stream_deletes_session(runn
 
 
 def test_backfill_reset_include_failed_document_stream_prompts_without_yes(runner, mocker):
-    mocker.patch.object(ECSRFSBackfill, 'archive', autospec=True,
+    mocker.patch.object(K8sRFSBackfill, 'archive', autospec=True,
                         return_value=CommandResult(success=True, value="/path/to/archive.json"))
     mocker.patch.object(cli_module.failed_document_stream_, "load_config",
                         return_value=_fake_failed_document_stream_cfg())
@@ -2283,7 +2291,7 @@ def test_backfill_reset_include_failed_document_stream_prompts_without_yes(runne
     # Send 'n' to abort the click.confirm prompt — verifies the abort path.
     result = runner.invoke(
         cli,
-        ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
+        ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_k8s_rfs.yaml"),
          'backfill', 'reset', '--include-failed-document-stream'],
         input="n\n",
         catch_exceptions=False,
@@ -2295,7 +2303,7 @@ def test_backfill_reset_include_failed_document_stream_prompts_without_yes(runne
 
 def test_backfill_reset_include_failed_document_stream_when_failed_document_stream_not_configured(runner, mocker):
     from console_link.middleware.failed_document_stream import FailedDocumentStreamNotConfigured
-    mocker.patch.object(ECSRFSBackfill, 'archive', autospec=True,
+    mocker.patch.object(K8sRFSBackfill, 'archive', autospec=True,
                         return_value=CommandResult(success=True, value="/path/to/archive.json"))
     mocker.patch.object(cli_module.failed_document_stream_, "load_config",
                         side_effect=FailedDocumentStreamNotConfigured("nothing here"))
@@ -2303,7 +2311,7 @@ def test_backfill_reset_include_failed_document_stream_when_failed_document_stre
 
     result = runner.invoke(
         cli,
-        ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
+        ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_k8s_rfs.yaml"),
          'backfill', 'reset', '--include-failed-document-stream', '--yes'],
         catch_exceptions=False,
     )
@@ -2315,13 +2323,13 @@ def test_backfill_reset_include_failed_document_stream_when_failed_document_stre
 
 def test_backfill_reset_when_index_doesnt_exist(runner, mocker):
     # WorkingIndexDoesntExist short-circuits the archive flow.
-    mocker.patch.object(ECSRFSBackfill, 'archive', autospec=True,
+    mocker.patch.object(K8sRFSBackfill, 'archive', autospec=True,
                         return_value=CommandResult(success=False,
                                                    value=WorkingIndexDoesntExist("idx")))
 
     result = runner.invoke(
         cli,
-        ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
+        ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_k8s_rfs.yaml"),
          'backfill', 'reset'],
         catch_exceptions=False,
     )
@@ -2336,13 +2344,13 @@ def test_backfill_reset_waits_for_workers_in_progress(runner, mocker):
         CommandResult(success=False, value=RfsWorkersInProgress()),
         CommandResult(success=True, value="/path/to/archive.json"),
     ]
-    archive_mock = mocker.patch.object(ECSRFSBackfill, 'archive', autospec=True,
+    archive_mock = mocker.patch.object(K8sRFSBackfill, 'archive', autospec=True,
                                        side_effect=archive_sequence)
     mocker.patch.object(time, 'sleep', autospec=True)  # don't actually wait 5s
 
     result = runner.invoke(
         cli,
-        ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
+        ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_k8s_rfs.yaml"),
          'backfill', 'reset'],
         catch_exceptions=False,
     )
@@ -2352,12 +2360,12 @@ def test_backfill_reset_waits_for_workers_in_progress(runner, mocker):
 
 
 def test_backfill_reset_archive_failure_raises(runner, mocker):
-    mocker.patch.object(ECSRFSBackfill, 'archive', autospec=True,
+    mocker.patch.object(K8sRFSBackfill, 'archive', autospec=True,
                         return_value=CommandResult(success=False, value="archive blew up"))
 
     result = runner.invoke(
         cli,
-        ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
+        ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_k8s_rfs.yaml"),
          'backfill', 'reset'],
         catch_exceptions=False,
     )

@@ -7,14 +7,14 @@ USER_AGENT_EXTRA = "test-user-agent-v1.0"
 
 
 def test_create_boto3_client_no_user_agent():
-    client = create_boto3_client(aws_service_name="ecs")
+    client = create_boto3_client(aws_service_name="s3")
     user_agent_for_client = client.meta.config.user_agent
     assert "Boto3" in user_agent_for_client
 
 
 def test_create_boto3_client_with_user_agent():
     client_options = ClientOptions(config={"user_agent_extra": USER_AGENT_EXTRA})
-    client = create_boto3_client(aws_service_name="ecs", client_options=client_options)
+    client = create_boto3_client(aws_service_name="s3", client_options=client_options)
     user_agent_for_client = client.meta.config.user_agent
     assert "Boto3" in user_agent_for_client
     assert USER_AGENT_EXTRA in user_agent_for_client

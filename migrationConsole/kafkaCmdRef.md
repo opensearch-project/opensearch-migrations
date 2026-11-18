@@ -115,11 +115,13 @@ same way as live-captured traffic.
 
 The topic must already exist (the import does not create it).
 
-Using the `kafkaImport.sh` helper (recommended — handles MSK/EKS auth detection):
+Using the `kafkaImport.sh` helper:
 ```shell
 /root/kafka-tools/kafkaImport.sh \
     --topic "$TOPIC" \
-    --s3-uri "s3://your-bucket/kafka_export_from_migration_console_<ts>.proto.gz"
+    --s3-uri "s3://your-bucket/kafka_export_from_migration_console_<ts>.proto.gz" \
+    --auth-type msk-iam \
+    --kafka-property-file /root/kafka-tools/aws/msk-iam-auth.properties
 ```
 
 Or the underlying recipe directly:

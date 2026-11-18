@@ -174,8 +174,8 @@ argo workflows via the migration console. Argo workflows manages deploying the r
 migration. Helm manages bootstrapping the Argo Workflows environment into the K8s cluster and configuring the other
 resources that are used by those workflows (configmaps, RBAC policies, and the migration console).
 
-Helm installations are unaware of the source and target environments (unlike previous IAC in the MA ECS solution). All
-of those are workflow configurations that are used dynamically every time that a workflow is executed. Configuration
+Helm installations are unaware of the source and target environments. Those are workflow configurations
+that are used dynamically every time that a workflow is executed. Configuration
 options for Helm include features like metrics & log management, test/diagnostic features (localstack, jaeger, etc.),
 and low-level configurations for Argo Workflows and other critical resources.
 
