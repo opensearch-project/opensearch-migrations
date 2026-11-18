@@ -228,7 +228,7 @@ case "${MANAGE_WEB_ACTION}" in
       --namespace "${MANAGE_WEB_NAMESPACE}" \
       --workflow-name "${MANAGE_WEB_WORKFLOW}" \
       --argo-server "${MANAGE_WEB_ARGO_SERVER}" \
-      --web-host 0.0.0.0 \
+      --web-host 127.0.0.1 \
       --web-port "${MANAGE_WEB_PORT}" \
       >"${LOG_FILE}" 2>&1 </dev/null &
     echo "$!" >"${PID_FILE}"

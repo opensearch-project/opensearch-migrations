@@ -6,6 +6,7 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 SCRIPT="${REPO_ROOT}/deployment/k8s/workflowWeb.sh"
 WORK_DIR="$(mktemp -d)"
 CALLS="${WORK_DIR}/kubectl.calls"
+EXEC_STDIN="${WORK_DIR}/kubectl-exec.stdin"
 PORT_FORWARD_COUNT="${WORK_DIR}/port-forward.count"
 start_pid=""
 
@@ -24,7 +25,7 @@ set -euo pipefail
 printf '%q ' "$@" >>"${FAKE_KUBECTL_CALLS}"
 printf '\n' >>"${FAKE_KUBECTL_CALLS}"
 if [[ " $* " == *" exec "* ]]; then
-  cat >/dev/null
+  cat >>"${FAKE_KUBECTL_EXEC_STDIN}"
 fi
 if [[ " $* " == *" port-forward "* ]]; then
   count=0
@@ -44,6 +45,7 @@ FAKE_KUBECTL
 chmod +x "${WORK_DIR}/kubectl"
 
 export FAKE_KUBECTL_CALLS="${CALLS}"
+export FAKE_KUBECTL_EXEC_STDIN="${EXEC_STDIN}"
 export FAKE_PORT_FORWARD_COUNT="${PORT_FORWARD_COUNT}"
 export KUBECTL="${WORK_DIR}/kubectl"
 export KUBE_CONTEXT="ignored-context"
@@ -90,6 +92,12 @@ grep -F -- "MANAGE_WEB_WORKFLOW=migration-workflow" "${CALLS}"
 [[ "$(grep -F -c -- "--context kind-developer-test -n migration-test port-forward statefulset/migration-console-test 8181:8000 --address 127.0.0.1" "${CALLS}")" -eq 2 ]]
 grep -F -- "Port-forward exited with status 23; retrying" "${WORK_DIR}/start.out"
 grep -F -- "Restarting port-forward (attempt 2)" "${WORK_DIR}/start.out"
+# The in-pod server must stay loopback-only; kubectl port-forward is its only ingress.
+grep -F -- "--web-host 127.0.0.1" "${EXEC_STDIN}"
+if grep -F -- "0.0.0.0" "${EXEC_STDIN}"; then
+  echo "The in-pod Web UI server must not bind all interfaces." >&2
+  exit 1
+fi
 
 : >"${CALLS}"
 "${SCRIPT}" status "${COMMON_ARGS[@]}"
