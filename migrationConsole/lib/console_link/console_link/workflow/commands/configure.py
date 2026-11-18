@@ -30,6 +30,8 @@ from .hints import hint_after_configure_edit, hint_configure_fix
 logger = logging.getLogger(__name__)
 
 session_name = 'default'
+HTTP_BASIC_CREDENTIALS = "HTTP Basic credentials"
+AZURE_STORAGE_CREDENTIALS = "Azure storage credentials"
 NO_MANAGED_HTTP_BASIC_CREDENTIALS_MESSAGE = "No managed HTTP Basic credentials found."
 STDIN_SECRET_FORMAT_ERROR = (
     "HTTP Basic credentials from stdin were not well-formed. Expected USERNAME:PASSWORD."
@@ -405,10 +407,10 @@ def _secret_has_managed_labels(secret_store, secret: V1Secret) -> bool:
 def _managed_secret_store(ctx, name):
     secret_store = _credentials_secret_store(ctx)
     if secret_store.secret_exists(name):
-        return secret_store, "HTTP Basic credentials"
+        return secret_store, HTTP_BASIC_CREDENTIALS
     azure_store = _azure_credentials_secret_store(ctx)
     if azure_store.secret_exists(name):
-        return azure_store, "Azure storage credentials"
+        return azure_store, AZURE_STORAGE_CREDENTIALS
     raise click.ClickException(f"No managed credentials found: {name}")
 
 
@@ -482,10 +484,10 @@ def create_secret(ctx, show_missing, stdin, silent, azure, account_key, sas_toke
     if azure_key:
         _ensure_workflow_context(ctx)
         secret_store = get_azure_credentials_secret_store(ctx)
-        kind = "Azure storage credentials"
+        kind = AZURE_STORAGE_CREDENTIALS
     else:
         secret_store = _credentials_secret_store(ctx)
-        kind = "HTTP Basic credentials"
+        kind = HTTP_BASIC_CREDENTIALS
     existing = _read_raw_secret(secret_store, name)
     if existing is not None:
         if _secret_has_managed_labels(secret_store, existing):
@@ -527,7 +529,7 @@ def update_secret(ctx, list_names, stdin, silent, name):
         ctx.exit(1)
 
     secret_store, kind = _managed_secret_store(ctx, name)
-    if kind == "Azure storage credentials":
+    if kind == AZURE_STORAGE_CREDENTIALS:
         credentials = _get_azure_credentials(_azure_secret_key(secret_store, name), stdin, silent)
     else:
         credentials = _get_basic_auth_credentials(stdin, silent)
