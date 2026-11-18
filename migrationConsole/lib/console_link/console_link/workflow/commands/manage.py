@@ -204,7 +204,8 @@ def _serve_native_manage_app(
               help='Run the native workflow manage web application and API.')
 @click.option('--web-host', default=MANAGE_SERVE_DEFAULT_HOST, show_default=True,
               envvar='WORKFLOW_MANAGE_WEB_HOST',
-              help='Host/interface for the native web application to bind.')
+              help='Host/interface for the native web application to bind. Requests are accepted '
+                   'only when addressed to localhost; reach it through kubectl port-forward or an SSH tunnel.')
 @click.option('--web-port', default=MANAGE_SERVE_DEFAULT_PORT, show_default=True,
               type=click.IntRange(1, 65535), envvar='WORKFLOW_MANAGE_WEB_PORT',
               help='Port for the native web application to bind.')

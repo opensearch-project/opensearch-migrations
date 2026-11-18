@@ -2,7 +2,7 @@ import asyncio
 import json
 import threading
 from datetime import datetime, timezone
-from fastapi.testclient import TestClient
+from fastapi.testclient import TestClient as _FastApiTestClient
 import httpx
 import pytest
 
@@ -83,6 +83,12 @@ from console_link.workflow.web.app import (
 from console_link.workflow.web.openapi import main as generate_openapi
 
 
+def TestClient(app, **kwargs):
+    """Address requests the way a port-forwarded browser does."""
+    kwargs.setdefault("base_url", "http://127.0.0.1:8000")
+    return _FastApiTestClient(app, **kwargs)
+
+
 def _static_bundle(tmp_path):
     static_dir = tmp_path / "static"
     assets_dir = static_dir / "assets"
@@ -119,7 +125,8 @@ def test_health_endpoint_is_same_origin_and_does_not_enable_cors(tmp_path):
     app = create_app(static_dir=_static_bundle(tmp_path))
 
     with TestClient(app) as client:
-        response = client.get(
+        response = client.get("/api/v1/system/health")
+        cross_site = client.get(
             "/api/v1/system/health",
             headers={"Origin": "https://untrusted.example"},
         )
@@ -129,7 +136,8 @@ def test_health_endpoint_is_same_origin_and_does_not_enable_cors(tmp_path):
         "status": "ok",
         "apiVersion": "v1",
     }
-    assert "access-control-allow-origin" not in response.headers
+    assert cross_site.status_code == 403
+    assert "access-control-allow-origin" not in cross_site.headers
 
 
 def test_static_assets_and_spa_routes_are_served_from_the_same_app(tmp_path):
@@ -1770,6 +1778,84 @@ async def test_blocking_action_services_do_not_stall_the_event_loop(
     assert health.status_code == 200
     assert action_finished_first is False
     assert response.status_code < 300, response.text
+
+
+@pytest.mark.parametrize(
+    "host",
+    ["127.0.0.1:8000", "localhost:8001", "LOCALHOST", "[::1]:8000"],
+)
+def test_loopback_hosts_reach_the_api_and_frontend(tmp_path, host):
+    app = create_app(static_dir=_static_bundle(tmp_path))
+
+    with TestClient(app) as client:
+        health = client.get("/api/v1/system/health", headers={"Host": host})
+        page = client.get("/", headers={"Host": host})
+        same_origin = client.get(
+            "/api/v1/system/health",
+            headers={"Host": host, "Origin": "http://localhost:5173"},
+        )
+
+    assert health.status_code == 200
+    assert page.status_code == 200
+    assert same_origin.status_code == 200
+
+
+@pytest.mark.parametrize(
+    "host",
+    [
+        "attacker.example:8000",
+        "127.0.0.1.attacker.example",
+        "10.244.0.29:8000",
+        "",
+    ],
+)
+def test_rebound_or_non_loopback_hosts_are_rejected_before_routing(
+    tmp_path,
+    host,
+):
+    submissions = _Submissions(_Documents())
+    app = create_app(
+        static_dir=_static_bundle(tmp_path),
+        config_documents=submissions,
+        operations=_Operations(),
+    )
+
+    with TestClient(app) as client:
+        page = client.get("/", headers={"Host": host})
+        submit = client.post(
+            "/api/v1/config/submit",
+            headers={"Host": host},
+            json={"expectedPersistedRevision": "11"},
+        )
+
+    assert page.status_code == 403
+    assert page.json()["detail"]["code"] == "untrusted_host"
+    assert submit.status_code == 403
+    assert submissions.prepared == []
+
+
+@pytest.mark.parametrize(
+    "origin",
+    ["https://attacker.example", "null", "http://10.0.0.5:8000"],
+)
+def test_cross_site_origins_cannot_trigger_actions(tmp_path, origin):
+    submissions = _Submissions(_Documents())
+    app = create_app(
+        static_dir=_static_bundle(tmp_path),
+        config_documents=submissions,
+        operations=_Operations(),
+    )
+
+    with TestClient(app) as client:
+        submit = client.post(
+            "/api/v1/config/submit",
+            headers={"Origin": origin},
+            json={"expectedPersistedRevision": "11"},
+        )
+
+    assert submit.status_code == 403
+    assert submit.json()["detail"]["code"] == "untrusted_origin"
+    assert submissions.prepared == []
 
 
 def test_dependency_timeouts_return_gateway_timeout_details(tmp_path):

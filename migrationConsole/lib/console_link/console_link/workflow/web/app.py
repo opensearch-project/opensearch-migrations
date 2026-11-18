@@ -7,7 +7,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Annotated, Any, AsyncIterator, Dict, Optional
+from typing import Annotated, Any, AsyncIterator, Dict, Optional, Tuple
 
 from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import (
@@ -92,6 +92,7 @@ from .contracts import (
     StartLogStreamRequestV1,
     StartConnectivityChecksRequestV1,
 )
+from .host_guard import LOOPBACK_HOSTS, LoopbackHostMiddleware
 
 
 DEFAULT_STATIC_DIR = Path(__file__).with_name("static")
@@ -105,6 +106,7 @@ class WebAppSettings:
     workflow_name: str = DEFAULT_WORKFLOW_NAME
     external_logs_url: Optional[str] = None
     config_schema_path: Optional[Path] = None
+    allowed_hosts: Tuple[str, ...] = LOOPBACK_HOSTS
 
 
 @dataclass(frozen=True)
@@ -183,6 +185,10 @@ def create_app(
         docs_url="/api/docs",
         openapi_url="/api/openapi.json",
         lifespan=lifespan,
+    )
+    app.add_middleware(
+        LoopbackHostMiddleware,
+        allowed_hosts=resolved_settings.allowed_hosts,
     )
     for timeout_type in TIMEOUT_EXCEPTION_TYPES:
         app.add_exception_handler(timeout_type, _timeout_response)
