@@ -6,6 +6,6 @@ target_cluster:
     password: "myStrongPassword123!"
 backfill:
   reindex_from_snapshot:
-    ecs:
-      cluster_name: "migration-cluster"
-      service_name: "rfs-service"
+    k8s:
+      namespace: "ma"
+      deployment_name: "ma-reindex-from-snapshot"

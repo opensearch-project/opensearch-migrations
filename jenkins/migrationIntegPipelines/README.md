@@ -93,7 +93,6 @@ functionName(jobName: jobNameOverride ?: null)
 | eksCreateVPCSolutionsCFNTestCover.groovy | eksSolutionsCFNTest | JOB_NAME_OVERRIDE |
 | eksImportVPCSolutionsCFNTestCover.groovy | eksSolutionsCFNTest | JOB_NAME_OVERRIDE |
 | eksIntegTestCover.groovy | eksIntegPipeline | JOB_NAME_OVERRIDE |
-| fullES68SourceE2ETestCover.groovy | fullES68SourceE2ETest | JOB_NAME_OVERRIDE |
 | k8sLocalElasticsearch1xTestCover.groovy | k8sLocalElasticsearch1xTest | JOB_NAME_OVERRIDE |
 | k8sLocalElasticsearch2xTestCover.groovy | k8sLocalElasticsearch2xTest | JOB_NAME_OVERRIDE |
 | k8sLocalElasticsearch5xTestCover.groovy | k8sLocalElasticsearch5xTest | JOB_NAME_OVERRIDE |
@@ -105,8 +104,6 @@ functionName(jobName: jobNameOverride ?: null)
 | k8sLocalSolr8xTestCover.groovy | k8sLocalSolr8xTest | JOB_NAME_OVERRIDE |
 | k8sLocalSolrOtherTestCover.groovy | k8sLocalSolrOtherTest | JOB_NAME_OVERRIDE |
 | k8sMatrixTestCover.groovy | k8sMatrixTest | JOB_NAME_OVERRIDE |
-| rfsDefaultE2ETestCover.groovy | rfsDefaultE2ETest | JOB_NAME_OVERRIDE |
-| solutionsCFNTestCover.groovy | solutionsCFNTest | JOB_NAME_OVERRIDE |
 
 The time-series and vector AOSS cover files are retained as manual compatibility entry points. Their periodic schedules are disabled; the search cover file runs the combined three-collection suite.
 
@@ -116,7 +113,6 @@ The `.github/workflows/jenkins_tests.yml` workflow handles both PR and post-merg
 
 Jobs triggered:
 
-- `full-es68source-e2e-test` (PR and main)
 - `k8s-local-elasticsearch1x-test` through `k8s-local-elasticsearch8x-test` (PR and main)
 - `k8s-local-opensearch1x-test` (PR and main)
 - `k8s-local-solr8x-test` (PR and main)

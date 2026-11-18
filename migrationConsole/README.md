@@ -15,7 +15,7 @@ There are many different parameters that can be provided to configure the export
 
 Export all current Kafka records as well as records that get added during the 2-minute limit (if possible) and store the gzip export in S3
 ```shell
-./kafkaExport.sh --timeout-seconds 120 --enable-s3 -- --from-beginning
+./kafkaExport.sh --timeout-seconds 120 --enable-s3 --s3-bucket-name my-bucket -- --from-beginning
 ```
 
 Export all current Kafka records as well as records that get added during the 5-minute limit (if possible) and store the gzip export in the `/shared-logs-output` EFS mounted directory

@@ -2251,8 +2251,8 @@ if [[ "$build" == "true" && -z "$ma_images_source" ]]; then
     | docker login --username AWS --password-stdin "$ecr_domain" \
     || { echo "ECR login failed"; exit 1; }
 
-  # Test-only images (the SearchGuard Elasticsearch used by the Docker Compose and ECS solutions)
-  # are never needed on EKS: the testClusters source there uses the public elasticsearch-oss image.
+  # Test-only images used by Docker Compose are never needed on EKS: the testClusters
+  # source there uses the public elasticsearch-oss image.
   skip_test_arg="-PskipTestImages=true"
 
   "$base_dir/gradlew" -p "$base_dir" ${BUILD_TARGETS} -PregistryEndpoint="$MIGRATIONS_ECR_REGISTRY" -Pbuilder="$BUILDER_NAME" -PimageVersion="$IMAGE_TAG" $skip_test_arg -x test \

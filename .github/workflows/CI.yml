@@ -287,7 +287,6 @@ jobs:
       fail-fast: false
       matrix:
         npm-project:
-          - ./deployment/cdk/opensearch-service-migration
           - ./deployment/migration-assistant-solution
           - ./TrafficCapture/SolrTransformations/transforms
           - ./schema-viewer

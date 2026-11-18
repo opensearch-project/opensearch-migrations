@@ -1,1 +1,1 @@
-export * from './lib/solutions-stack'
+export * from './lib/solutions-stack-eks'

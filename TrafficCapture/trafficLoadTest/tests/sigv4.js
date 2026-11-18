@@ -29,7 +29,7 @@ function sign(overrides = {}, credentials = {}) {
   });
 }
 
-export default function () {
+export function setup() {
   const empty = sign();
   assertEqual(empty.host, 'foo.us-bar-1.amazonaws.com', 'source host');
   assertEqual(empty['x-amz-date'], '20000101T000000Z', 'signing date');
@@ -89,3 +89,5 @@ export default function () {
     'normalized path signature',
   );
 }
+
+export default function () {}
