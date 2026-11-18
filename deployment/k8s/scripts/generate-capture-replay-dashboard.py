@@ -173,7 +173,7 @@ def catchup_eta(w):
     s = w.e(f"{lag} / 1000", "lag s", visible=False)
     red = w.e(f"-1 * RATE({s})", "lag reduction s/s", visible=False)
     return s, (f"IF({s} <= CATCHUP_FLOOR_SECONDS, 0, IF({red} > 0.01, "
-               f"(({s} - CATCHUP_FLOOR_SECONDS) / 3600) / {red}, 0/0))")
+               f"(({s} - CATCHUP_FLOOR_SECONDS) / 3600) / {red}))")
 
 
 def kpis():

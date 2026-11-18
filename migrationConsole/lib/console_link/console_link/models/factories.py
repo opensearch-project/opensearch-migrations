@@ -6,10 +6,9 @@ from console_link.models.replayer_docker import DockerReplayer
 from console_link.models.replayer_k8s import K8sReplayer
 from console_link.models.metrics_source import CloudwatchMetricsSource, PrometheusMetricsSource
 from console_link.models.backfill_base import Backfill
-from console_link.models.backfill_rfs import DockerRFSBackfill, ECSRFSBackfill, K8sRFSBackfill
+from console_link.models.backfill_rfs import DockerRFSBackfill, K8sRFSBackfill
 from console_link.models.cluster import Cluster
 from console_link.models.kafka import MSK, StandardKafka, ScramKafka
-from console_link.models.replayer_ecs import ECSReplayer
 from console_link.models.snapshot import AzureSnapshot, FileSystemSnapshot, GcsSnapshot, S3Snapshot
 import logging
 
@@ -59,8 +58,6 @@ def get_snapshot(config: Dict, source_cluster: Optional[Cluster]):
 
 
 def get_replayer(config: Dict, client_options: Optional[ClientOptions] = None):
-    if 'ecs' in config:
-        return ECSReplayer(config=config, client_options=client_options)
     if 'docker' in config:
         return DockerReplayer(config)
     if 'k8s' in config:
@@ -88,11 +85,6 @@ def get_backfill(config: Dict, target_cluster: Cluster,
             logger.debug("Creating Docker RFS backfill instance")
             return DockerRFSBackfill(config=config,
                                      target_cluster=target_cluster)
-        elif 'ecs' in config[BackfillType.reindex_from_snapshot.name]:
-            logger.debug("Creating ECS RFS backfill instance")
-            return ECSRFSBackfill(config=config,
-                                  target_cluster=target_cluster,
-                                  client_options=client_options)
         elif 'k8s' in config[BackfillType.reindex_from_snapshot.name]:
             logger.debug("Creating K8s RFS backfill instance with config=" + str(config))
             return K8sRFSBackfill(config=config,

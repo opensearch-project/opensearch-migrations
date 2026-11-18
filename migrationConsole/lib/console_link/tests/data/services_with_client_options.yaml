@@ -16,9 +16,9 @@ metrics_source:
     endpoint: "http://prometheus:9090"
 backfill:
   reindex_from_snapshot:
-    ecs:
-      cluster_name: "migration-cluster"
-      service_name: "rfs-service"
+    k8s:
+      namespace: "ma"
+      deployment_name: "ma-reindex-from-snapshot"
 snapshot:
   snapshot_name: "test_snapshot"
   fs:
@@ -35,9 +35,9 @@ metadata_migration:
   otel_metrics_endpoint: "http://otel-collector:4317"
   cluster_awareness_attributes: 0
 replay:
-  ecs:
-    cluster_name: "my-cluster"
-    service_name: "my-service"
+  k8s:
+    namespace: "ma"
+    deployment_name: "ma-replayer"
   scale: 2
 kafka:
   broker_endpoints: "kafka1:9092,kafka2:9092,kafka3:9092"

@@ -67,7 +67,6 @@ digests already match, skips Helm chart versions already present in ECR, and
 avoids recreating existing repositories. When the script creates or updates the
 CloudFormation stack, mirroring starts as soon as its ECR repository exists and
 continues while EKS is provisioning and the cluster is configured.
-
 The repository wait is limited to 15 minutes by default so credentials,
 permissions, and failed stack operations do not leave the installer polling
 forever. Set `MIRROR_ECR_WAIT_TIMEOUT` to a positive number of seconds to
@@ -169,6 +168,15 @@ helm uninstall ma -n ma
 Use the same `--stage` and `--region` values as the existing deployment so the
 script resolves the correct CloudFormation exports. `--build` and `--version`
 are mutually exclusive.
+
+The redeployment command also preserves the cluster's current EKS Auto Mode
+`NodeClass`; it does not require `--stack-name` or repeating the original
+`--tags`. The persistent bootstrap `NodePool` is used when present, otherwise
+the script requires one unambiguous in-cluster `NodeClass` reference. A custom
+class's tags are reused for Helm-created EBS and load-balancer resources. The
+script stops before building or installing if the selection is ambiguous,
+missing, or not Ready. An explicit `aws.nodeClassName` in `--helm-values`
+continues to take precedence.
 
 ## Configuring workload NodePools
 
@@ -302,10 +310,17 @@ run is skipped with `--use-general-node-pool`, which does not create the pool.
   `StorageClass`, and adds load-balancer tag annotations to Services and
   Ingresses.
 
-This requires the cluster IAM role to permit user-defined tags on Auto Mode
-resources. The solution CloudFormation template declares that policy, and
-`aws-bootstrap.sh --tags` also ensures it for older, adopted, and hand-built
-clusters. The caller needs `iam:PutRolePolicy` on the cluster role.
+On a later `--skip-cfn-deploy` run, the script reads the retained custom
+`NodeClass` and its tags back from the cluster. You do not need to repeat
+`--tags`, and the BuildKit and Migration Assistant `NodePool`s are reconciled
+to the same class.
+
+This requires the cluster IAM role to permit user-defined tags on Auto
+Mode resources. The solution CloudFormation template declares that
+policy, and `aws-bootstrap.sh --tags` also ensures the same named inline
+policy so older, adopted, and hand-built clusters need no manual IAM
+changes. The caller needs `iam:PutRolePolicy` on the cluster role;
+without it, adding a tag turns every `RunInstances` into `AccessDenied`.
 
 Two caveats: `--tags` is incompatible with `--use-general-node-pool`, and
 StorageClass parameters are immutable, so changing the tag set on an existing

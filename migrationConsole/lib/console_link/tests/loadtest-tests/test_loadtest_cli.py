@@ -1173,7 +1173,7 @@ class TestRenderedChartMatchesTheValues:
         return copy
 
     @staticmethod
-    def _rendered(
+    def _render_documents(
         template_file="templates/k6-workflowtemplates.yaml",
         extra_helm_args=(),
     ):
@@ -1190,8 +1190,20 @@ class TestRenderedChartMatchesTheValues:
                 capture_output=True, text=True)
         if out.returncode != 0:
             pytest.fail(f"helm template failed:\n{out.stderr}")
-        return {d["metadata"]["name"]: d
-                for d in yaml.safe_load_all(out.stdout) if d and d.get("kind") == "WorkflowTemplate"}
+        return [document for document in yaml.safe_load_all(out.stdout) if document]
+
+    @staticmethod
+    def _rendered(
+        template_file="templates/k6-workflowtemplates.yaml",
+        extra_helm_args=(),
+    ):
+        return {
+            document["metadata"]["name"]: document
+            for document in TestRenderedChartMatchesTheValues._render_documents(
+                template_file, extra_helm_args
+            )
+            if document.get("kind") == "WorkflowTemplate"
+        }
 
     @staticmethod
     def _runner_env(template, defaults):
@@ -1227,6 +1239,58 @@ class TestRenderedChartMatchesTheValues:
             assert test_run["runner"]["nodeSelector"] == {
                 "migrations.opensearch.org/workload-pool": "k6-work-pool"
             }, name
+
+    def test_pod_identity_auth_configures_load_runners_but_not_archive_initializers(self):
+        pod_identity_args = (
+            "--set", "podIdentityAuth.enabled=true",
+            "--set-string", "podIdentityAuth.region=us-east-2",
+            "--set-string", "podIdentityAuth.signingEndpoint=https://source.example.com",
+        )
+        templates = self._rendered(extra_helm_args=pod_identity_args)
+        for name, template in sorted(templates.items()):
+            defaults = {
+                parameter["name"]: parameter.get("value", "")
+                for parameter in template["spec"]["arguments"]["parameters"]
+            }
+            manifest = template["spec"]["templates"][0]["resource"]["manifest"]
+            substituted = re.sub(
+                r"\{\{workflow\.parameters\.([A-Za-z0-9_-]+)\}\}",
+                lambda match: defaults[match.group(1)],
+                manifest,
+            ).replace("{{workflow.name}}", "a-run")
+            test_run = yaml.safe_load(substituted)["spec"]
+
+            initializer = test_run["initializer"]
+            assert "serviceAccountName" not in initializer, name
+            assert "volumes" not in initializer, name
+            assert "volumeMounts" not in initializer, name
+            runner = test_run["runner"]
+            assert runner["serviceAccountName"] == "argo-workflow-executor", name
+            assert runner["volumes"][0]["configMap"]["name"] == "k6-pod-identity-wrapper", name
+            assert runner["volumeMounts"][0]["mountPath"] == "/opt/k6-pod-identity/bin", name
+            env = {item["name"]: item["value"] for item in runner["env"]}
+            assert env["K6_AUTH_MODE"] == "sigv4", name
+            assert env["AWS_REGION"] == "us-east-2", name
+            assert env["SIGV4_SERVICE"] == "es", name
+            assert env["SIGV4_SIGNING_ENDPOINT"] == "https://source.example.com", name
+            assert env["PATH"].startswith("/opt/k6-pod-identity/bin:"), name
+
+    def test_pod_identity_wrapper_fetches_temporary_credentials_without_a_secret(self):
+        documents = self._render_documents(
+            "templates/pod-identity-auth.yaml",
+            (
+                "--set", "podIdentityAuth.enabled=true",
+                "--set-string", "podIdentityAuth.region=us-east-2",
+                "--set-string", "podIdentityAuth.signingEndpoint=https://source.example.com",
+            ),
+        )
+        assert len(documents) == 1
+        config_map = documents[0]
+        assert config_map["kind"] == "ConfigMap"
+        script = config_map["data"]["k6"]
+        assert "AWS_CONTAINER_CREDENTIALS_FULL_URI" in script
+        assert "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE" in script
+        assert "exec /usr/bin/k6" in script
 
     def test_chart_defaults_to_repository_patched_operator(self):
         operator = _chart_values()["k6-operator"]["manager"]["image"]
@@ -1303,6 +1367,30 @@ class TestRenderedChartMatchesTheValues:
         assert prepare_env["INDEX_NUMBER_OF_SHARDS"] == (
             "{{workflow.parameters.INDEX_NUMBER_OF_SHARDS}}"
         )
+
+    def test_connection_mode_index_setup_uses_pod_identity_when_enabled(self):
+        suite = self._rendered(
+            "templates/k6-ingest-connection-modes.yaml",
+            (
+                "--set", "podIdentityAuth.enabled=true",
+                "--set-string", "podIdentityAuth.region=us-east-2",
+                "--set-string", "podIdentityAuth.signingEndpoint=https://source.example.com",
+            ),
+        )["k6-ingest-connection-modes"]
+        assert suite["spec"]["serviceAccountName"] == "argo-workflow-executor"
+        prepare_index = next(
+            template for template in suite["spec"]["templates"]
+            if template["name"] == "prepare-index"
+        )
+        assert prepare_index["volumes"][0]["configMap"]["name"] == "k6-pod-identity-wrapper"
+        container = prepare_index["container"]
+        assert container["command"] == ["/opt/k6-pod-identity/bin/k6"]
+        assert container["volumeMounts"][0]["mountPath"] == "/opt/k6-pod-identity/bin"
+        env = {item["name"]: item["value"] for item in container["env"]}
+        assert env["K6_AUTH_MODE"] == "sigv4"
+        assert env["AWS_REGION"] == "us-east-2"
+        assert env["SIGV4_SERVICE"] == "es"
+        assert env["SIGV4_SIGNING_ENDPOINT"] == "https://source.example.com"
 
     def test_the_parameters_and_the_runner_env_are_the_same_set(self):
         for name, template in sorted(self._rendered().items()):

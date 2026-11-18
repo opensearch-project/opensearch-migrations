@@ -96,10 +96,7 @@ jobs:
 
       - name: Build Docker images
         timeout-minutes: 30
-        run: ./deployment/cdk/opensearch-service-migration/buildDockerImages.sh
-        env:
-          # docker-compose.yml doesn't use otel_collector; skipping it avoids an extra public.ecr.aws pull.
-          BUILD_OTEL_COLLECTOR: 'false'
+        run: ./buildImages/buildDockerImages.sh
 
       - name: Docker compose up
         timeout-minutes: 10

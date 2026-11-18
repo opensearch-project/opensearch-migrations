@@ -66,8 +66,7 @@ Failed documents present: yes
 
 The first line reports the worker *deployment* state, so a finished backfill shows `STOPPED` there (no
 workers running) while `Backfill status:` below it reports *shard* progress as `Completed`. The second line
-is deployment-specific: the example is a Kubernetes deployment, whereas on ECS it reads
-`Running=0 Pending=0 Desired=0 Terminating=0`.
+reports the Kubernetes pod counts.
 
 Status reports only *whether* failures exist, not how many: counting reads every record, which is
 unbounded work on a backfill that failed a large number of documents. Use `console failed-document-stream

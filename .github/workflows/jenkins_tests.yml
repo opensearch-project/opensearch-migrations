@@ -27,27 +27,6 @@ jobs:
     if: github.event.action != 'labeled' || startsWith(github.event.label.name, 'run-')
     uses: ./.github/workflows/sanitize-repo-details.yml
 
-  full-es68-e2e-aws-test:
-    if: github.event.action != 'labeled'
-    needs: [get-require-approval, sanitize-input]
-    environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
-    runs-on: ubuntu-22.04
-    concurrency:
-      group: ${{ github.workflow }}-full-es68-e2e-aws-test-${{ github.event.pull_request.number || github.run_id }}
-      cancel-in-progress: ${{ github.event_name != 'push' && github.event.action != 'labeled' }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Jenkins Job Trigger and Monitor
-        uses: ./.github/actions/jenkins-trigger
-        with:
-          jenkins_url: "https://migrations.ci.opensearch.org"
-          job_name: ${{ github.event_name == 'push' && 'main-full-es68source-e2e-test' || 'pr-full-es68source-e2e-test' }}
-          api_token: "${{ secrets.JENKINS_MIGRATIONS_GENERIC_WEBHOOK_TOKEN }}"
-          job_params: "GIT_REPO_URL=${{ needs.sanitize-input.outputs.pr_repo_url }},GIT_BRANCH=${{ needs.sanitize-input.outputs.branch_name }},GIT_COMMIT=${{ needs.sanitize-input.outputs.commit_hash }}"
-          jenkins_user: "${{ secrets.JENKINS_MIGRATIONS_USER }}"
-          jenkins_api_token: "${{ secrets.JENKINS_MIGRATIONS_API_TOKEN }}"
-          job_timeout_minutes: "180"
-
   eks-integ-test:
     if: |
       github.event_name == 'push' ||
@@ -276,7 +255,6 @@ jobs:
 
   all-jenkins-checks-pass:
     needs:
-      - full-es68-e2e-aws-test
       - eks-integ-test
       - eks-aoss-integ-test
       - eks-byos-integ-test

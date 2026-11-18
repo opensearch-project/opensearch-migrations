@@ -1,9 +1,0 @@
-{
-  "vpcEnabled": true,
-  "migrationAssistanceEnabled": true,
-  "migrationConsoleServiceEnabled": true,
-  "trafficReplayerServiceEnabled": false,
-  "otelMetricsCollectorEnabled": true,
-  "otelTraceCollectorEnabled": false,
-  "reindexFromSnapshotWorkerSize": "default"
-}

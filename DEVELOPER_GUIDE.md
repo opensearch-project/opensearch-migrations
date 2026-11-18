@@ -48,7 +48,7 @@ to learn more about how to use the migration console and its workflow commands.
 - `dev-tools`: Development utilities and API request templates.
 - `docs`: Project documentation and architecture diagrams.
 - `libraries`: Shared libraries used across the project.
-- [`test`](test/README.md): End-to-end testing scripts and configurations.
+- `test`: End-to-end testing scripts and configurations.
 - `transformation`: Data transformation utilities for migration processes.
 - [`dashboardsSanitizer`](dashboardsSanitizer/README.md): CLI tool for sanitizing dashboard configurations.
 - `testHelperFixtures`: Test utilities including HTTP client for testing.
@@ -59,7 +59,7 @@ The migration console CLI provides users with a centralized interface to execute
 - Controlling traffic replay
 - Monitoring migration progress through metrics
 - Handling snapshots and metadata
-- Integrating with various deployment environments (Docker locally, AWS ECS, EKS, K8s)
+- Integrating with Docker and Kubernetes deployment environments
 
 Users can interact with the migration process through the CLI, which orchestrates the different components of the migration toolkit to perform a seamless migration between Elasticsearch and OpenSearch clusters.
 

@@ -14,7 +14,6 @@ updates:
   - package-ecosystem: "npm"
     directories:
       - "/deployment/migration-assistant-solution"
-      - "/deployment/cdk/opensearch-service-migration"
       - "/orchestrationSpecs"
       - "/transformation/standardJavascriptTransforms"
       - "/TrafficCapture/SolrTransformations/transforms"

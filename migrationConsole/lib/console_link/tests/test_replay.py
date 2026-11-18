@@ -1,21 +1,15 @@
 import json
 from kubernetes import config
-import pathlib
 
 import pytest
 import yaml
 
 import console_link.middleware.replay as replay_
-from console_link.models.ecs_service import ECSService
 from console_link.models.factories import UnsupportedReplayerError, get_replayer
 from console_link.models.kubectl_runner import KubectlRunner
 from console_link.models.replayer_base import Replayer
-from console_link.models.replayer_ecs import ECSReplayer
 from console_link.models.replayer_k8s import K8sReplayer
 from console_link.models.replayer_docker import DockerReplayer
-
-TEST_DATA_DIRECTORY = pathlib.Path(__file__).parent / "data"
-AWS_REGION = "us-east-1"
 
 
 @pytest.fixture(autouse=True)
@@ -34,19 +28,6 @@ def docker_replayer():
 
 
 @pytest.fixture
-def ecs_replayer(monkeypatch):
-    monkeypatch.setattr("console_link.models.ecs_service.create_boto3_client", lambda *a, **kw: None)
-    config = {
-        "ecs": {
-            "cluster_name": "migration-aws-integ-ecs-cluster",
-            "service_name": "migration-aws-integ-traffic-replayer-default"
-        },
-        "scale": 3
-    }
-    return get_replayer(config)
-
-
-@pytest.fixture
 def k8s_replayer():
     config = {
         "k8s": {
@@ -56,14 +37,6 @@ def k8s_replayer():
         "scale": 3
     }
     return get_replayer(config)
-
-
-def _mock_ecs_set_desired_count(mocker):
-    return mocker.patch.object(ECSService, 'set_desired_count', autospec=True)
-
-
-def _mock_ecs_validate_desired_count(mock, replayer, expected_count):
-    mock.assert_called_once_with(replayer.ecs_client, expected_count)
 
 
 def _mock_k8s_set_desired_count(mocker):
@@ -79,11 +52,6 @@ def test_get_replayer_valid_docker(docker_replayer):
     assert isinstance(docker_replayer, Replayer)
 
 
-def test_get_replayer_valid_ecs(ecs_replayer):
-    assert isinstance(ecs_replayer, ECSReplayer)
-    assert isinstance(ecs_replayer, Replayer)
-
-
 def test_get_replayer_valid_k8s(k8s_replayer):
     assert isinstance(k8s_replayer, K8sReplayer)
     assert isinstance(k8s_replayer, Replayer)
@@ -91,9 +59,9 @@ def test_get_replayer_valid_k8s(k8s_replayer):
 
 def test_cant_instantiate_with_multiple_types():
     config = {
-        "ecs": {
-            "cluster_name": "migration-aws-integ-ecs-cluster",
-            "service_name": "migration-aws-integ-traffic-replayer-default"
+        "k8s": {
+            "namespace": "ma",
+            "deployment_name": "ma-replayer"
         },
         "docker": {
         },
@@ -119,7 +87,6 @@ def test_nonexistent_replayer_type():
 @pytest.mark.parametrize(
     "replayer_fixture, mock_desired_count, validate_desired_count",
     [
-        ('ecs_replayer', _mock_ecs_set_desired_count, _mock_ecs_validate_desired_count),
         ('k8s_replayer', _mock_k8s_set_desired_count, _mock_k8s_validate_desired_count),
     ]
 )
@@ -137,7 +104,6 @@ def test_replayer_start_sets_desired_count(request,
 @pytest.mark.parametrize(
     "replayer_fixture, mock_desired_count, validate_desired_count",
     [
-        ('ecs_replayer', _mock_ecs_set_desired_count, _mock_ecs_validate_desired_count),
         ('k8s_replayer', _mock_k8s_set_desired_count, _mock_k8s_validate_desired_count),
     ]
 )
@@ -155,7 +121,6 @@ def test_replayer_stop_sets_desired_count(request,
 @pytest.mark.parametrize(
     "replayer_fixture, mock_desired_count, validate_desired_count",
     [
-        ('ecs_replayer', _mock_ecs_set_desired_count, _mock_ecs_validate_desired_count),
         ('k8s_replayer', _mock_k8s_set_desired_count, _mock_k8s_validate_desired_count),
     ]
 )
@@ -170,7 +135,7 @@ def test_replayer_scale_sets_desired_count(request,
     validate_desired_count(mock, replayer, 5)
 
 
-@pytest.mark.parametrize("replayer_fixture", ['ecs_replayer', 'k8s_replayer'])
+@pytest.mark.parametrize("replayer_fixture", ['docker_replayer', 'k8s_replayer'])
 def test_replayer_describe_no_json(request, replayer_fixture):
     replayer = request.getfixturevalue(replayer_fixture)
     success, output = replay_.describe(replayer, as_json=False)
@@ -178,7 +143,7 @@ def test_replayer_describe_no_json(request, replayer_fixture):
     assert output == yaml.safe_dump(replayer.config)
 
 
-@pytest.mark.parametrize("replayer_fixture", ['ecs_replayer', 'k8s_replayer'])
+@pytest.mark.parametrize("replayer_fixture", ['docker_replayer', 'k8s_replayer'])
 def test_replayer_describe_as_json(request, replayer_fixture):
     replayer = request.getfixturevalue(replayer_fixture)
     success, output = replay_.describe(replayer, as_json=True)

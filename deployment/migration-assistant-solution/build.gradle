@@ -1,4 +1,5 @@
 import com.github.gradle.node.npm.task.NpmTask
+import com.github.gradle.node.NodeExtension
 import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 import org.gradle.api.tasks.*
@@ -12,6 +13,8 @@ node {
     version = '22.14.0'
     download = true
 }
+
+def nodeExtension = extensions.getByType(NodeExtension)
 
 tasks.register('installDependencies', NpmTask) {
     description = 'Install npm dependencies including dev dependencies'
@@ -30,6 +33,10 @@ abstract class CdkSynthTask extends DefaultTask {
     @InputDirectory
     @PathSensitive(PathSensitivity.RELATIVE)
     abstract DirectoryProperty getNodeModulesDir()
+
+    @InputFile
+    @PathSensitive(PathSensitivity.NONE)
+    abstract RegularFileProperty getNodeExecutable()
 
     private FileTree sourceFiles
     @InputFiles
@@ -51,10 +58,12 @@ abstract class CdkSynthTask extends DefaultTask {
         cdkOut.mkdirs()
 
         def cdkExecutable = getNodeModulesDir().file('aws-cdk/bin/cdk').get().getAsFile()
+        def nodeBinDir = nodeExecutable.get().asFile.parentFile
 
         execOperations.exec {
-            commandLine = ['node', cdkExecutable, 'synth', '*']
+            commandLine = [nodeExecutable.get().asFile, cdkExecutable, 'synth', '*']
             environment 'CDK_OUT', cdkOut.getAbsolutePath()
+            environment 'PATH', "${nodeBinDir.absolutePath}${File.pathSeparator}${System.getenv('PATH') ?: ''}"
         }.assertNormalExitValue()
     }
 }
@@ -63,9 +72,11 @@ tasks.register('cdkSynth', CdkSynthTask) {
     description = 'Synthesize CDK stacks'
     group = 'cdk'
     dependsOn 'installDependencies'
+    dependsOn 'nodeSetup'
 
     cdkOutDir.set(layout.projectDirectory.dir('cdk.out'))
     nodeModulesDir.set(layout.projectDirectory.dir('node_modules'))
+    nodeExecutable.set(nodeExtension.resolvedNodeDir.file('bin/node'))
 
     def cdkAppDir = layout.projectDirectory.dir('deployment/migration-assistant-solution')
     def libDir = layout.projectDirectory.dir('lib')

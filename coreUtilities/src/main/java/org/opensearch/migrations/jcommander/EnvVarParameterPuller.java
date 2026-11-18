@@ -164,8 +164,8 @@ public class EnvVarParameterPuller {
         String envCase = matcher.replaceAll("_$1").toUpperCase();
         return Stream.concat( // return these w/ the highest precedence first.  We start with the most specific
             Stream.of(prefix + envCase + suffix),
-            // return alternates without the prefix/suffix for credentials because we have ECS related
-            // tasks setting environment variables without prefixes.
+            // Return credential alternates without the prefix/suffix for compatibility with
+            // environments that set the standard variables directly.
             (!prefix.isEmpty() || !suffix.isEmpty()) &&
                 (ArgNameConstants.POSSIBLE_CREDENTIALS_ARG_FLAG_NAMES.matcher(argName).matches()
                     || ArgNameConstants.AZURE_STORAGE_CREDENTIAL_ARGS.contains(argName)) ?
