@@ -7,6 +7,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from console_link.workflow.tree_utils import get_step_status_output, ArtifactRef
 from console_link.workflow.services.workflow_service import WorkflowService
+from console_link.workflow.timeouts import ARGO_REQUEST_TIMEOUT
 
 
 class TestArtifactRef:
@@ -141,7 +142,8 @@ class TestWorkflowServiceGetArtifactContent:
         mock_get.assert_called_once_with(
             "https://argo:2746/api/v1/workflows/ma/my-wf/artifacts/node-abc/statusOutput",
             headers={"Content-Type": "application/json"},
-            verify=True
+            verify=True,
+            timeout=ARGO_REQUEST_TIMEOUT,
         )
 
     @patch('console_link.workflow.services.workflow_service.requests.get')

@@ -10,8 +10,14 @@ from pathlib import Path
 from typing import Annotated, Any, AsyncIterator, Dict, Optional
 
 from fastapi import FastAPI, Header, HTTPException, Query, Request
-from fastapi.responses import FileResponse, Response, StreamingResponse
+from fastapi.responses import (
+    FileResponse,
+    JSONResponse,
+    Response,
+    StreamingResponse,
+)
 from fastapi.staticfiles import StaticFiles
+import urllib3
 
 from ..application.observations import ObservationCoordinator, ObservationEvent
 from ..application.config_documents import ConfigurationDocumentConflict
@@ -40,6 +46,7 @@ from ..application.resets import (
 )
 from ..application.runtime_status import RuntimeStatusUnavailable
 from ..commands.autocomplete_workflows import DEFAULT_WORKFLOW_NAME
+from ..timeouts import TIMEOUT_EXCEPTION_TYPES, is_timeout
 from .contracts import (
     AdmissionPreflightV1,
     ApproveRequestV1,
@@ -106,6 +113,28 @@ class WebRuntimeServices:
     cluster_curl: Optional[Any] = None
 
 
+def _timeout_response(_request: Request, error: Exception) -> JSONResponse:
+    logger.warning("Request dependency timed out: %s", error)
+    return JSONResponse(
+        status_code=504,
+        content={
+            "detail": {
+                "code": "dependency_timeout",
+                "message": str(error) or type(error).__name__,
+            },
+        },
+    )
+
+
+def _retries_exhausted_response(
+    request: Request,
+    error: Exception,
+) -> JSONResponse:
+    if is_timeout(error):
+        return _timeout_response(request, error)
+    raise error
+
+
 def create_app(
     static_dir: Optional[Path] = None,
     coordinator: Optional[ObservationCoordinator] = None,
@@ -154,6 +183,12 @@ def create_app(
         docs_url="/api/docs",
         openapi_url="/api/openapi.json",
         lifespan=lifespan,
+    )
+    for timeout_type in TIMEOUT_EXCEPTION_TYPES:
+        app.add_exception_handler(timeout_type, _timeout_response)
+    app.add_exception_handler(
+        urllib3.exceptions.MaxRetryError,
+        _retries_exhausted_response,
     )
 
     @app.get(

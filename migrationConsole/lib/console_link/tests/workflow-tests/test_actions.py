@@ -1,4 +1,5 @@
 import pytest
+import requests
 
 from console_link.workflow.application.actions import (
     ApprovalGateInventory,
@@ -550,4 +551,56 @@ def test_reset_plan_is_stale_when_a_reviewed_target_was_removed():
     present = False
 
     with pytest.raises(ResetPlanStale, match="no longer available"):
+        service.validate(plan.token)
+
+
+def test_approval_review_reports_gate_timeouts_instead_of_missing_gates():
+    def timed_out(_name):
+        raise requests.exceptions.ReadTimeout("Read timed out.")
+
+    service = ApprovalService(
+        namespace="ma",
+        workflow_name="migration",
+        workflow_loader=_approval_workflow,
+        gate_loader=timed_out,
+    )
+
+    with pytest.raises(requests.exceptions.ReadTimeout):
+        service.review("approval:approval-node")
+
+
+def test_reset_validation_reports_timeouts_instead_of_stale_plans():
+    targets = [("snapshotmigrations", "migration-0", "Ready", [])]
+    responses = iter([
+        {"uid": "migration-uid", "resourceVersion": "10"},
+    ])
+
+    def load_version(_plural, _name):
+        try:
+            return next(responses)
+        except StopIteration:
+            raise requests.exceptions.ReadTimeout("Read timed out.") from None
+
+    service = ResetService(
+        namespace="ma",
+        target_resolver=lambda *_args, **_kwargs: targets,
+        exact_resolver=lambda *_args, **_kwargs: targets,
+        plan_builder=lambda resolved, _namespace, messages, _delete: {
+            "targets": [{
+                "plural": plural,
+                "type": plural,
+                "name": name,
+                "path": f"{plural}.{name}",
+                "phase": phase,
+                "dependsOn": dependencies,
+            } for plural, name, phase, dependencies in resolved],
+            "messages": messages,
+            "warnings": [],
+        },
+        version_loader=load_version,
+        deleter=lambda *_args: True,
+    )
+    plan = service.plan("reset:snapshotmigrations:migration-0")
+
+    with pytest.raises(requests.exceptions.ReadTimeout):
         service.validate(plan.token)

@@ -17,6 +17,7 @@ from kubernetes import client
 from kubernetes.client.rest import ApiException
 
 from ..commands.crd_utils import CRD_GROUP, CRD_VERSION
+from ..timeouts import STREAMING_REQUEST_TIMEOUT
 
 
 MIGRATION_RESOURCE_UID_LABEL = (
@@ -359,6 +360,7 @@ class KubernetesLogSource:
                 tail_lines=0,
                 follow=True,
                 _preload_content=False,
+                _request_timeout=STREAMING_REQUEST_TIMEOUT,
             )
             register_response(response)
             for line in _response_lines(response):

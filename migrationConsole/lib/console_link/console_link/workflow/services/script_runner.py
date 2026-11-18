@@ -5,13 +5,22 @@ import logging
 import os
 import re
 import shutil
+import signal
 import subprocess
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional, Dict, Any, Mapping
+from typing import Optional, Dict, Any, Mapping, Sequence
+
+from ..timeouts import (
+    CONFIG_PROCESSOR_TIMEOUT_SECONDS,
+    NODE_VERSION_TIMEOUT_SECONDS,
+    WORKFLOW_SUBMISSION_TIMEOUT_SECONDS,
+    CommandTimeout,
+)
 
 logger = logging.getLogger(__name__)
+PROCESS_GROUP_TERMINATE_GRACE_SECONDS = 2
 SAMPLE_CONFIG_PATH_ENV = "MIGRATION_SAMPLE_CONFIG_PATH"
 MINIMUM_NODEJS_VERSION = (22, 14, 0)
 
@@ -25,6 +34,60 @@ def _format_subprocess_failure(label: str, error: subprocess.CalledProcessError)
     if stdout:
         details.append(f"stdout: {stdout}")
     return "\n".join(details)
+
+
+def _run_process(
+    command: Sequence[str],
+    *,
+    timeout_seconds: float,
+    label: str,
+    input: Optional[str] = None,
+    check: bool = False,
+    cwd: Optional[str] = None,
+    env: Optional[Mapping[str, str]] = None,
+) -> subprocess.CompletedProcess:
+    """Run a command like subprocess.run, stopping its whole process group on timeout.
+
+    Submission scripts start node and kubectl children. subprocess.run only kills the
+    direct child on timeout, which would leave those descendants running.
+    """
+    process = subprocess.Popen(
+        list(command),
+        stdin=subprocess.PIPE if input is not None else None,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        cwd=cwd,
+        env=env,
+        start_new_session=True,
+    )
+    try:
+        stdout, stderr = process.communicate(input=input, timeout=timeout_seconds)
+    except subprocess.TimeoutExpired:
+        _stop_process_group(process)
+        raise CommandTimeout(f"{label} timed out after {timeout_seconds:g} seconds") from None
+    except BaseException:
+        _stop_process_group(process)
+        raise
+    if check and process.returncode != 0:
+        raise subprocess.CalledProcessError(process.returncode, process.args, stdout, stderr)
+    return subprocess.CompletedProcess(process.args, process.returncode, stdout, stderr)
+
+
+def _stop_process_group(process: subprocess.Popen) -> None:
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+        process.wait(timeout=PROCESS_GROUP_TERMINATE_GRACE_SECONDS)
+    except (ProcessLookupError, subprocess.TimeoutExpired):
+        pass
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    process.wait()
+    for stream in (process.stdin, process.stdout, process.stderr):
+        if stream is not None:
+            stream.close()
 
 
 @dataclass
@@ -61,6 +124,8 @@ class ScriptRunner:
         self,
         script_dir: Optional[Path] = None,
         env: Optional[Mapping[str, str]] = None,
+        config_processor_timeout_seconds: float = CONFIG_PROCESSOR_TIMEOUT_SECONDS,
+        submission_timeout_seconds: float = WORKFLOW_SUBMISSION_TIMEOUT_SECONDS,
     ):
         """
         Initialize with script directory path.
@@ -70,6 +135,8 @@ class ScriptRunner:
                        Raises ValueError if neither is provided or if the directory doesn't exist.
         """
         self.env = dict(env) if env is not None else None
+        self.config_processor_timeout_seconds = config_processor_timeout_seconds
+        self.submission_timeout_seconds = submission_timeout_seconds
 
         if script_dir is None:
             config_processor_dir = os.environ.get('CONFIG_PROCESSOR_DIR')
@@ -104,12 +171,12 @@ class ScriptRunner:
         if location in self._validated_nodejs:
             return location
         try:
-            result = subprocess.run(
+            result = _run_process(
                 [location, "--version"],
-                capture_output=True,
+                timeout_seconds=NODE_VERSION_TIMEOUT_SECONDS,
+                label="Node.js version check",
                 check=True,
                 env=self.env,
-                text=True,
             )
         except (OSError, subprocess.CalledProcessError) as error:
             raise RuntimeError(
@@ -141,7 +208,8 @@ class ScriptRunner:
             program_name: str,
             input_data: Optional[str] = None,
             *args: str,
-            direct_output: bool = False
+            direct_output: bool = False,
+            label: Optional[str] = None,
     ) -> str:
         """
         Run a program with standard interface.
@@ -169,16 +237,15 @@ class ScriptRunner:
             logger.debug(f"Input data length: {len(input_data)} bytes")
 
         try:
-            run_options = {
-                "input": input_data,
-                "capture_output": True,
-                "text": True,
-                "check": True,
-                "cwd": str(self.script_dir),
-            }
-            if self.env is not None:
-                run_options["env"] = self.env
-            result = subprocess.run(cmd, **run_options)
+            result = _run_process(
+                cmd,
+                timeout_seconds=self.config_processor_timeout_seconds,
+                label=label or Path(str(program_name)).name,
+                input=input_data,
+                check=True,
+                cwd=str(self.script_dir),
+                env=self.env,
+            )
 
             logger.debug("Script completed successfully")
             return result.stdout.strip()
@@ -234,7 +301,14 @@ class ScriptRunner:
         """
         nodejs_location = self.require_supported_nodejs(nodejs_location)
         script_entrypoint = os.path.join(self.config_processor_dir, "index.js")
-        return self.run(nodejs_location, input_data, script_entrypoint, processor_name, *args)
+        return self.run(
+            nodejs_location,
+            input_data,
+            script_entrypoint,
+            processor_name,
+            *args,
+            label=f"Config processor command '{processor_name}'",
+        )
 
     def _get_blank_starter_config(self) -> str:
         """Get a minimal blank starter configuration template.
@@ -318,17 +392,9 @@ class ScriptRunner:
             if not script_path.exists():
                 raise FileNotFoundError(f"Script not found: {script_path}")
 
-            run_options = {
-                "capture_output": True,
-                "text": True,
-                "check": True,
-                "cwd": str(self.script_dir),
-            }
-            if self.env is not None:
-                run_options["env"] = self.env
-            result = subprocess.run(
+            result = _run_process(
                 [str(script_path), temp_file_path] + submit_args,
-                **run_options,
+                **self._submission_run_options(check=True, label="Workflow submit script"),
             )
             return self._submission_result(result)
         except subprocess.CalledProcessError as e:
@@ -368,13 +434,16 @@ class ScriptRunner:
             ):
                 submit_args.append("--quiet")
             submit_args.extend(["--prepare-only", str(bundle_dir)])
-            result = subprocess.run(
+            result = _run_process(
                 [
                     str(self._submission_script()),
                     str(config_path),
                     *submit_args,
                 ],
-                **self._submission_run_options(check=False),
+                **self._submission_run_options(
+                    check=False,
+                    label="Workflow submission preparation",
+                ),
             )
             report_path = bundle_dir / "submissionPreflight.json"
             report = (
@@ -434,13 +503,16 @@ class ScriptRunner:
         if prepared.quiet:
             submit_args.append("--quiet")
         try:
-            result = subprocess.run(
+            result = _run_process(
                 [
                     str(self._submission_script()),
                     str(prepared.config_path),
                     *submit_args,
                 ],
-                **self._submission_run_options(check=True),
+                **self._submission_run_options(
+                    check=True,
+                    label="Workflow submit script",
+                ),
             )
             return self._submission_result(result)
         except subprocess.CalledProcessError as error:
@@ -460,16 +532,14 @@ class ScriptRunner:
             raise FileNotFoundError(f"Script not found: {script_path}")
         return script_path
 
-    def _submission_run_options(self, *, check: bool) -> Dict[str, Any]:
-        options: Dict[str, Any] = {
-            "capture_output": True,
-            "text": True,
+    def _submission_run_options(self, *, check: bool, label: str) -> Dict[str, Any]:
+        return {
+            "timeout_seconds": self.submission_timeout_seconds,
+            "label": label,
             "check": check,
             "cwd": str(self.script_dir),
+            "env": self.env,
         }
-        if self.env is not None:
-            options["env"] = self.env
-        return options
 
     def _submission_result(
         self,

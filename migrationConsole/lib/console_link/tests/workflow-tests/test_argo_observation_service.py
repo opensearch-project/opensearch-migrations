@@ -88,3 +88,52 @@ def test_slim_workflow_http_error_preserves_response_status():
     assert raised.value.response is response
     assert raised.value.response.status_code == 404
     response.close.assert_called_once()
+
+
+def test_slim_workflow_bounds_the_streaming_argo_request():
+    from console_link.workflow.timeouts import ARGO_REQUEST_TIMEOUT
+
+    requests_made = []
+    response = Mock(
+        status_code=200,
+        raw=io.BytesIO(json.dumps({"status": {"nodes": {}}}).encode()),
+    )
+    service = Mock()
+    service.get_workflow_status.return_value = {"success": True, "workflow": {}}
+
+    load_slim_workflow(
+        service,
+        "migration-workflow",
+        "ma",
+        argo_url="https://argo",
+        token=None,
+        insecure=True,
+        request_get=lambda *_args, **kwargs: requests_made.append(kwargs) or response,
+    )
+
+    assert requests_made[0]["timeout"] == ARGO_REQUEST_TIMEOUT
+    assert requests_made[0]["stream"] is True
+
+
+def test_workflow_service_bounds_argo_status_requests(monkeypatch):
+    from console_link.workflow.services import workflow_service
+    from console_link.workflow.timeouts import ARGO_REQUEST_TIMEOUT
+
+    requests_made = []
+
+    def timed_out(*_args, **kwargs):
+        requests_made.append(kwargs)
+        raise requests.exceptions.ReadTimeout("Read timed out.")
+
+    monkeypatch.setattr(workflow_service.requests, "get", timed_out)
+
+    result = workflow_service.WorkflowService().get_workflow_status(
+        "migration-workflow",
+        "ma",
+        "https://argo",
+        None,
+        True,
+    )
+
+    assert requests_made[0]["timeout"] == ARGO_REQUEST_TIMEOUT
+    assert result["success"] is False

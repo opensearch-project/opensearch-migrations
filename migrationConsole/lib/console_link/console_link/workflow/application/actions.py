@@ -15,6 +15,7 @@ from ..commands.approve import (
 )
 from ..commands.crd_utils import CRD_GROUP, CRD_VERSION
 from ..resource_tree import RESOURCE_KIND_TO_PLURAL
+from ..timeouts import is_timeout
 from ..tree_utils import (
     extract_denial_reason,
     get_node_input_parameter,
@@ -235,6 +236,8 @@ class ApprovalService:
         except ApprovalUnavailable:
             raise
         except Exception as error:
+            if is_timeout(error):
+                raise
             raise ApprovalUnavailable(
                 f"ApprovalGate {gate_name} is no longer available."
             ) from error

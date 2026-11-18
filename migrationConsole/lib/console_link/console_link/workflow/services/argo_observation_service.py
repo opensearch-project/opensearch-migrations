@@ -6,6 +6,7 @@ from typing import Any, Callable, Dict, Optional, Tuple
 import ijson
 import requests
 
+from ..timeouts import ARGO_REQUEST_TIMEOUT
 from .workflow_service import logger, WorkflowService
 
 
@@ -39,6 +40,7 @@ def load_slim_workflow(
         headers=headers,
         verify=not insecure,
         stream=True,
+        timeout=ARGO_REQUEST_TIMEOUT,
     )
     if response.status_code != 200:
         response.close()

@@ -9,11 +9,42 @@ import subprocess
 import tempfile
 from typing import Mapping, Optional
 
+import urllib3
 import yaml
 from kubernetes import client, config
 
+from ..timeouts import KUBERNETES_REQUEST_TIMEOUT
+
 
 logger = logging.getLogger(__name__)
+
+
+class BoundedApiClient(client.ApiClient):
+    """Apply a default timeout to every request that does not set one.
+
+    The generated client passes ``timeout=None`` to urllib3 when a caller omits
+    ``_request_timeout``, which disables any pool-level default. Calls that need
+    a different bound, such as followed log streams, still pass their own.
+    """
+
+    def __init__(self, *args, default_request_timeout=KUBERNETES_REQUEST_TIMEOUT, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.default_request_timeout = default_request_timeout
+
+    def request(self, *args, _request_timeout=None, **kwargs):
+        if _request_timeout is None:
+            _request_timeout = self.default_request_timeout
+        return super().request(*args, _request_timeout=_request_timeout, **kwargs)
+
+
+def bounded_api_configuration(
+    api_configuration: client.Configuration,
+) -> client.Configuration:
+    """Keep connection retries but stop retrying requests whose reads timed out."""
+    # urllib3 retries an idempotent request three more times after a read
+    # timeout, which would turn one stalled API call into four full waits.
+    api_configuration.retries = urllib3.Retry(total=3, read=0)
+    return api_configuration
 
 
 class PinnedKubernetesRuntime:
@@ -71,10 +102,12 @@ def pin_kubernetes_runtime() -> PinnedKubernetesRuntime:
             raise
         logger.info("Pinned Kubernetes runtime to context %s", context_name)
 
-    api_configuration = client.Configuration.get_default_copy()
+    api_configuration = bounded_api_configuration(
+        client.Configuration.get_default_copy()
+    )
     return PinnedKubernetesRuntime(
         context_name=context_name,
-        api_client=client.ApiClient(api_configuration),
+        api_client=BoundedApiClient(api_configuration),
         kubeconfig_path=kubeconfig_path,
         previous_kubeconfig=previous_kubeconfig,
     )

@@ -1,3 +1,4 @@
+import threading
 from types import SimpleNamespace
 
 import pytest
@@ -353,3 +354,32 @@ def test_log_stream_service_issues_composite_target_from_opaque_targets():
     assert combined.kind == "aggregate"
     assert combined.supports_follow is True
     assert combined.id not in {first.id, second.id}
+
+
+def test_kubernetes_follow_bounds_only_the_connection_attempt():
+    from console_link.workflow.timeouts import STREAMING_REQUEST_TIMEOUT
+
+    custom = _CustomObjects({
+        "metadata": {
+            "uid": "capture-resource-uid",
+            "labels": {"migrations.opensearch.org/capture": "p2"},
+        },
+    })
+    core = _Core([_pod(restart_count=0)])
+    source = KubernetesLogSource(
+        namespace="ma",
+        workflow_name="migration",
+        core_api=core,
+        custom_api=custom,
+    )
+    container = next(
+        selection
+        for selection in source.resolve("logs:captureproxies:p2")
+        if selection.kind == "container" and not selection.previous
+    )
+
+    source.follow(container, lambda _record: None, threading.Event(), lambda _response: None)
+
+    follow_request = core.log_requests[-1]
+    assert follow_request["follow"] is True
+    assert follow_request["_request_timeout"] == STREAMING_REQUEST_TIMEOUT

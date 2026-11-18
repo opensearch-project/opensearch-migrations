@@ -1772,6 +1772,82 @@ async def test_blocking_action_services_do_not_stall_the_event_loop(
     assert response.status_code < 300, response.text
 
 
+def test_dependency_timeouts_return_gateway_timeout_details(tmp_path):
+    from console_link.workflow.timeouts import CommandTimeout
+
+    class _TimedOutSubmissions(_Submissions):
+        def review(self, expected_revision, snapshot=None):
+            raise CommandTimeout(
+                "Config processor command 'editConfig' timed out after 60 seconds"
+            )
+
+    app = create_app(
+        static_dir=_static_bundle(tmp_path),
+        config_documents=_TimedOutSubmissions(_Documents()),
+        approvals=_KubernetesTimeoutApprovals(),
+    )
+
+    with TestClient(app) as client:
+        review = client.post(
+            "/api/v1/config/review",
+            json={"expectedPersistedRevision": "11"},
+        )
+        approval = client.get(
+            "/api/v1/approvals/review",
+            params={"targetId": "approval:node-1"},
+        )
+
+    assert review.status_code == 504
+    assert review.json()["detail"] == {
+        "code": "dependency_timeout",
+        "message": (
+            "Config processor command 'editConfig' timed out after 60 seconds"
+        ),
+    }
+    assert approval.status_code == 504
+    assert approval.json()["detail"]["code"] == "dependency_timeout"
+
+
+def test_exhausted_retries_without_a_timeout_remain_server_errors(tmp_path):
+    import urllib3
+
+    class _RefusedApprovals(_Approvals):
+        def review(self, target_id, snapshot_revision=None):
+            raise urllib3.exceptions.MaxRetryError(
+                None,
+                "/apis",
+                reason=ConnectionRefusedError(),
+            )
+
+    app = create_app(
+        static_dir=_static_bundle(tmp_path),
+        approvals=_RefusedApprovals(),
+    )
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        approval = client.get(
+            "/api/v1/approvals/review",
+            params={"targetId": "approval:node-1"},
+        )
+
+    assert approval.status_code == 500
+
+
+class _KubernetesTimeoutApprovals(_Approvals):
+    def review(self, target_id, snapshot_revision=None):
+        import urllib3
+
+        raise urllib3.exceptions.MaxRetryError(
+            None,
+            "/apis/migrations.opensearch.org/v1alpha1/approvalgates",
+            reason=urllib3.exceptions.ReadTimeoutError(
+                None,
+                "/apis",
+                "Read timed out. (read timeout=30.0)",
+            ),
+        )
+
+
 def test_submit_worker_rejects_a_saved_configuration_changed_after_acceptance(
     tmp_path,
 ):

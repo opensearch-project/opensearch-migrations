@@ -8,13 +8,14 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 from console_link.workflow.services.script_runner import ScriptRunner
+from console_link.workflow.timeouts import NODE_VERSION_TIMEOUT_SECONDS
 from console_link.workflow.models.config import WorkflowConfig
 
 
 class TestScriptRunner:
     """Test script runner service."""
 
-    @patch('console_link.workflow.services.script_runner.subprocess.run')
+    @patch('console_link.workflow.services.script_runner._run_process')
     def test_config_processor_accepts_supported_nodejs(self, mock_run):
         mock_run.return_value = Mock(stdout="v22.14.0\n")
         runner = ScriptRunner(env={
@@ -26,13 +27,13 @@ class TestScriptRunner:
         )
         mock_run.assert_called_once_with(
             ["/gradle/node-v22.14.0/bin/node", "--version"],
-            capture_output=True,
+            timeout_seconds=NODE_VERSION_TIMEOUT_SECONDS,
+            label="Node.js version check",
             check=True,
             env=runner.env,
-            text=True,
         )
 
-    @patch('console_link.workflow.services.script_runner.subprocess.run')
+    @patch('console_link.workflow.services.script_runner._run_process')
     def test_config_processor_rejects_unsupported_nodejs(self, mock_run):
         mock_run.return_value = Mock(stdout="v18.20.2\n")
         runner = ScriptRunner(env={"NODEJS": "/mise/node-18/bin/node"})
@@ -65,7 +66,7 @@ class TestScriptRunner:
         assert "requiresApproval" in sample
         assert "approver" in sample
 
-    @patch('console_link.workflow.services.script_runner.subprocess.run')
+    @patch('console_link.workflow.services.script_runner._run_process')
     def test_submit_workflow(self, mock_run):
         """Test workflow submission."""
         # Mock the subprocess call to avoid actual Kubernetes submission
@@ -90,7 +91,7 @@ class TestScriptRunner:
         assert "workflow_uid" in result
         assert "--quiet" in mock_run.call_args[0][0]
 
-    @patch('console_link.workflow.services.script_runner.subprocess.run')
+    @patch('console_link.workflow.services.script_runner._run_process')
     def test_submit_workflow_custom_namespace(self, mock_run):
         """Test workflow submission with custom namespace."""
         # Mock the subprocess call to avoid actual Kubernetes submission
@@ -114,7 +115,7 @@ class TestScriptRunner:
         assert "workflow_name" in result
         assert "--quiet" in mock_run.call_args[0][0]
 
-    @patch('console_link.workflow.services.script_runner.subprocess.run')
+    @patch('console_link.workflow.services.script_runner._run_process')
     def test_submit_workflow_uses_pinned_environment(self, mock_run):
         mock_run.return_value = Mock(
             returncode=0,
@@ -131,7 +132,7 @@ class TestScriptRunner:
             "KUBECONFIG": "/tmp/pinned-config",
         }
 
-    @patch('console_link.workflow.services.script_runner.subprocess.run')
+    @patch('console_link.workflow.services.script_runner._run_process')
     def test_submit_workflow_can_request_verbose_script_output(self, mock_run):
         """Verbose submit keeps the generated resource handler output visible."""
         mock_run.return_value = Mock(
@@ -145,7 +146,7 @@ class TestScriptRunner:
 
         assert "--quiet" not in mock_run.call_args[0][0]
 
-    @patch('console_link.workflow.services.script_runner.subprocess.run')
+    @patch('console_link.workflow.services.script_runner._run_process')
     def test_submit_workflow_failure_includes_stderr(self, mock_run):
         """Failed submit scripts should surface stderr instead of a bare CalledProcessError."""
         mock_run.side_effect = subprocess.CalledProcessError(
@@ -165,7 +166,7 @@ class TestScriptRunner:
         assert "Error: missing required workflow value" in message
         assert "stdout: Running configuration conversion..." in message
 
-    @patch('console_link.workflow.services.script_runner.subprocess.run')
+    @patch('console_link.workflow.services.script_runner._run_process')
     def test_prepare_and_commit_reuse_the_exact_submission_bundle(self, mock_run):
         def run(command, **_kwargs):
             if "--prepare-only" in command:

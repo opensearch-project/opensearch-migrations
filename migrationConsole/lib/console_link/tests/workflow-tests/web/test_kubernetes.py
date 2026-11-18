@@ -64,3 +64,38 @@ users: []
 
     assert os.environ["KUBECONFIG"] == "/original/config"
     assert not pinned_path.exists()
+
+
+def test_bounded_api_client_defaults_request_timeout_without_overriding_callers(
+    monkeypatch,
+):
+    from console_link.workflow.timeouts import (
+        KUBERNETES_REQUEST_TIMEOUT,
+        STREAMING_REQUEST_TIMEOUT,
+    )
+    from console_link.workflow.web.kubernetes import (
+        BoundedApiClient,
+        bounded_api_configuration,
+    )
+
+    timeouts = []
+    monkeypatch.setattr(
+        client.ApiClient,
+        "request",
+        lambda self, method, url, **kwargs: timeouts.append(
+            kwargs["_request_timeout"]
+        ),
+    )
+    configuration = bounded_api_configuration(client.Configuration())
+    api_client = BoundedApiClient(configuration)
+
+    api_client.request("GET", "https://kubernetes/api")
+    api_client.request(
+        "GET",
+        "https://kubernetes/api",
+        _request_timeout=STREAMING_REQUEST_TIMEOUT,
+    )
+
+    assert timeouts == [KUBERNETES_REQUEST_TIMEOUT, STREAMING_REQUEST_TIMEOUT]
+    assert configuration.retries.read == 0
+    assert configuration.retries.total == 3

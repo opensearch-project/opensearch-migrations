@@ -265,7 +265,7 @@ class TestWorkflowCLICommands:
     @patch('console_link.workflow.commands.submit.stop_workflow')
     @patch('console_link.workflow.commands.submit.workflow_exists')
     @patch('console_link.workflow.commands.submit.load_k8s_config')
-    @patch('console_link.workflow.services.script_runner.subprocess.run')
+    @patch('console_link.workflow.services.script_runner._run_process')
     @patch('console_link.workflow.commands.submit.WorkflowConfigStore')
     def test_submit_command_basic(
         self,
@@ -325,7 +325,7 @@ class TestWorkflowCLICommands:
     )
     @patch("console_link.workflow.commands.submit.workflow_exists")
     @patch("console_link.workflow.commands.submit.load_k8s_config")
-    @patch("console_link.workflow.services.script_runner.subprocess.run")
+    @patch("console_link.workflow.services.script_runner._run_process")
     @patch("console_link.workflow.commands.submit.WorkflowConfigStore")
     def test_submit_command_stops_before_replacing_workflow_when_preflight_blocks(
         self,
@@ -374,7 +374,7 @@ class TestWorkflowCLICommands:
     )
     @patch("console_link.workflow.commands.submit.workflow_exists")
     @patch("console_link.workflow.commands.submit.load_k8s_config")
-    @patch("console_link.workflow.services.script_runner.subprocess.run")
+    @patch("console_link.workflow.services.script_runner._run_process")
     @patch("console_link.workflow.commands.submit.WorkflowConfigStore")
     def test_submit_dry_run_outputs_package_report_without_mutation(
         self,
@@ -416,7 +416,7 @@ class TestWorkflowCLICommands:
     )
     @patch("console_link.workflow.commands.submit.workflow_exists")
     @patch("console_link.workflow.commands.submit.load_k8s_config")
-    @patch("console_link.workflow.services.script_runner.subprocess.run")
+    @patch("console_link.workflow.services.script_runner._run_process")
     @patch("console_link.workflow.commands.submit.WorkflowConfigStore")
     def test_submit_blocked_dry_run_returns_only_the_json_report(
         self,
@@ -464,7 +464,7 @@ class TestWorkflowCLICommands:
     @patch('console_link.workflow.commands.submit.stop_workflow')
     @patch('console_link.workflow.commands.submit.workflow_exists')
     @patch('console_link.workflow.commands.submit.load_k8s_config')
-    @patch('console_link.workflow.services.script_runner.subprocess.run')
+    @patch('console_link.workflow.services.script_runner._run_process')
     @patch('console_link.workflow.commands.submit.WorkflowConfigStore')
     def test_submit_command_can_show_verbose_submit_output(
         self,
@@ -492,7 +492,7 @@ class TestWorkflowCLICommands:
     @patch('console_link.workflow.commands.submit.verify_configured_secrets_exist')
     @patch('console_link.workflow.commands.submit.get_credentials_secret_store_for_namespace')
     @patch('console_link.workflow.commands.submit.load_k8s_config')
-    @patch('console_link.workflow.services.script_runner.subprocess.run')
+    @patch('console_link.workflow.services.script_runner._run_process')
     @patch('console_link.workflow.commands.submit.WorkflowConfigStore')
     def test_submit_command_fails_fast_when_secrets_missing(
         self,
@@ -573,7 +573,7 @@ class TestWorkflowCLICommands:
     @patch('console_link.workflow.commands.submit.stop_workflow')
     @patch('console_link.workflow.commands.submit.workflow_exists')
     @patch('console_link.workflow.commands.submit.load_k8s_config')
-    @patch('console_link.workflow.services.script_runner.subprocess.run')
+    @patch('console_link.workflow.services.script_runner._run_process')
     @patch('console_link.workflow.commands.submit.WorkflowService')
     @patch('console_link.workflow.commands.submit.WorkflowConfigStore')
     def test_submit_command_with_wait(
@@ -640,7 +640,7 @@ class TestWorkflowCLICommands:
     @patch('console_link.workflow.commands.submit.stop_workflow')
     @patch('console_link.workflow.commands.submit.workflow_exists')
     @patch('console_link.workflow.commands.submit.load_k8s_config')
-    @patch('console_link.workflow.services.script_runner.subprocess.run')
+    @patch('console_link.workflow.services.script_runner._run_process')
     @patch('console_link.workflow.commands.submit.WorkflowConfigStore')
     def test_submit_command_replaces_existing_workflow(
         self,
@@ -2099,7 +2099,7 @@ class TestWorkflowCLICommands:
     @patch('console_link.workflow.commands.submit.stop_workflow')
     @patch('console_link.workflow.commands.submit.workflow_exists')
     @patch('console_link.workflow.commands.submit.load_k8s_config')
-    @patch('console_link.workflow.services.script_runner.subprocess.run')
+    @patch('console_link.workflow.services.script_runner._run_process')
     @patch('console_link.workflow.commands.submit.WorkflowConfigStore')
     def test_submit_command_with_config_injection(
         self,

@@ -22,6 +22,7 @@ from ..commands.reset import (
     _resolve_exact_reset_targets,
     _resolve_named_reset_targets,
 )
+from ..timeouts import is_timeout
 
 
 class ResetUnavailable(RuntimeError):
@@ -174,6 +175,8 @@ class ResetService:
             except ResetPlanStale:
                 raise
             except Exception as error:
+                if is_timeout(error):
+                    raise
                 raise ResetPlanStale(
                     f"{target.path} is no longer available; create a new plan."
                 ) from error
