@@ -197,19 +197,67 @@ mirror_bootstrap_artifacts() (
 # checkpoint file.
 wait_for_ecr_repository_uri() {
   local region="$1" repository_name="$2"
-  local interval="${MIRROR_ECR_POLL_INTERVAL:-5}" registry_uri
+  local interval="${MIRROR_ECR_POLL_INTERVAL:-5}"
+  local timeout="${MIRROR_ECR_WAIT_TIMEOUT:-900}"
+  local aws_output last_error="" start_seconds elapsed remaining sleep_seconds
+
+  case "$interval" in
+    ''|0|*[!0-9]*)
+      echo "Invalid MIRROR_ECR_POLL_INTERVAL='$interval'; expected a positive integer." >&2
+      return 1
+      ;;
+  esac
+  case "$timeout" in
+    ''|0|*[!0-9]*)
+      echo "Invalid MIRROR_ECR_WAIT_TIMEOUT='$timeout'; expected a positive integer." >&2
+      return 1
+      ;;
+  esac
+  interval=$((10#$interval))
+  timeout=$((10#$timeout))
+  start_seconds=$SECONDS
 
   echo "Waiting for ECR repository $repository_name before starting mirrors..." >&2
   while true; do
-    registry_uri=$(aws ecr describe-repositories \
-      --region "$region" \
-      --repository-names "$repository_name" \
-      --query 'repositories[0].repositoryUri' \
-      --output text 2>/dev/null || true)
-    if [[ -n "$registry_uri" && "$registry_uri" != "None" ]]; then
-      printf '%s\n' "$registry_uri"
-      return 0
+    if aws_output=$(aws ecr describe-repositories \
+        --region "$region" \
+        --repository-names "$repository_name" \
+        --query 'repositories[0].repositoryUri' \
+        --output text 2>&1); then
+      if [[ -n "$aws_output" && "$aws_output" != "None" ]]; then
+        printf '%s\n' "$aws_output"
+        return 0
+      fi
+      last_error=""
+    else
+      case "$aws_output" in
+        *ExpiredToken*|*RequestExpired*|*InvalidClientTokenId*|*UnrecognizedClientException*|\
+        *"Unable to locate credentials"*|*AccessDenied*|*UnauthorizedOperation*|\
+        *SignatureDoesNotMatch*)
+          echo "Unable to query ECR repository $repository_name:" >&2
+          echo "$aws_output" >&2
+          echo "Refresh or correct the AWS credentials, then rerun the same bootstrap command." >&2
+          return 1
+          ;;
+        *)
+          last_error="$aws_output"
+          ;;
+      esac
     fi
-    sleep "$interval"
+
+    elapsed=$((SECONDS - start_seconds))
+    if (( elapsed >= timeout )); then
+      break
+    fi
+    remaining=$((timeout - elapsed))
+    sleep_seconds="$interval"
+    (( sleep_seconds <= remaining )) || sleep_seconds="$remaining"
+    sleep "$sleep_seconds"
   done
+
+  echo "Timed out after ${timeout} seconds waiting for ECR repository $repository_name." >&2
+  [[ -z "$last_error" ]] || echo "Last AWS error: $last_error" >&2
+  echo "CloudFormation may still be running. Rerun the same bootstrap command;" >&2
+  echo "it will attach to the stack operation, reuse completed work, and retry safely." >&2
+  return 1
 }

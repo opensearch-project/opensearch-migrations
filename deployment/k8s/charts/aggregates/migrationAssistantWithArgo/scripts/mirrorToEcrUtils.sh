@@ -62,8 +62,8 @@ ensure_mirror_ecr_repositories() {
   done
 }
 
-# Return a safe worker count, defaulting to the GitFarm implementation's six
-# workers while allowing operators to tune it for their network or host.
+# Return a safe worker count, defaulting to six workers while allowing
+# operators to tune it for their network or host.
 mirror_copy_concurrency() {
   local total="$1" requested="${MIRROR_CONCURRENCY:-6}"
 

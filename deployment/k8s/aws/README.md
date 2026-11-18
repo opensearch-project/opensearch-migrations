@@ -68,6 +68,11 @@ avoids recreating existing repositories. When the script creates or updates the
 CloudFormation stack, mirroring starts as soon as its ECR repository exists and
 continues while EKS is provisioning and the cluster is configured.
 
+The repository wait is limited to 15 minutes by default so credentials,
+permissions, and failed stack operations do not leave the installer polling
+forever. Set `MIRROR_ECR_WAIT_TIMEOUT` to a positive number of seconds to
+adjust the limit.
+
 Migration Assistant images and third-party images share a work-conserving
 queue; Helm chart mirroring reserves at most one additional slot from the same
 global limit. The default limit is six concurrent transfers. Set

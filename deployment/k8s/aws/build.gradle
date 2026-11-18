@@ -4,35 +4,35 @@ plugins {
 
 def repositoryRoot = rootProject.layout.projectDirectory
 
-tasks.register('testMirrorToEcrUtils', Exec) {
-    description = 'Tests the bounded ECR mirror worker pool and digest fast paths'
-    group = 'verification'
-    workingDir repositoryRoot.asFile
-    commandLine 'bash', repositoryRoot.file('test/mirrorToEcrUtils.sh').asFile
-}
+def bashTests = [
+    testMirrorToEcrUtils           : [
+        'test/mirrorToEcrUtils.sh',
+        'Tests the bounded ECR mirror worker pool and digest fast paths',
+    ],
+    testBootstrapMirror            : [
+        'test/bootstrapMirror.sh',
+        'Tests bootstrap mirror scheduling, concurrency, and ECR polling',
+    ],
+    testBootstrapGrantEksAccessOnly: [
+        'test/awsBootstrapGrantEksAccessOnly.sh',
+        'Tests the source and assembled bootstrap grant-only flow',
+    ],
+    testBootstrapCfnResume         : [
+        'test/awsBootstrapCfnResume.sh',
+        'Tests reconnecting to an in-progress CloudFormation deployment',
+    ],
+]
 
-tasks.register('testBootstrapMirror', Exec) {
-    description = 'Tests bootstrap mirror scheduling, concurrency, and ECR polling'
-    group = 'verification'
-    workingDir repositoryRoot.asFile
-    commandLine 'bash', repositoryRoot.file('test/bootstrapMirror.sh').asFile
-}
-
-tasks.register('testBootstrapGrantEksAccessOnly', Exec) {
-    description = 'Tests the source and assembled bootstrap grant-only flow'
-    group = 'verification'
-    workingDir repositoryRoot.asFile
-    commandLine 'bash', repositoryRoot.file('test/awsBootstrapGrantEksAccessOnly.sh').asFile
-}
-
-tasks.register('testBootstrapCfnResume', Exec) {
-    description = 'Tests reconnecting to an in-progress CloudFormation deployment'
-    group = 'verification'
-    workingDir repositoryRoot.asFile
-    commandLine 'bash', repositoryRoot.file('test/awsBootstrapCfnResume.sh').asFile
+bashTests.each { taskName, spec ->
+    def (script, desc) = spec
+    tasks.register(taskName, Exec) {
+        description = desc
+        group = 'verification'
+        workingDir repositoryRoot.asFile
+        commandLine 'bash', repositoryRoot.file(script).asFile
+    }
 }
 
 tasks.named('check') {
-    dependsOn 'testMirrorToEcrUtils', 'testBootstrapMirror',
-            'testBootstrapGrantEksAccessOnly', 'testBootstrapCfnResume'
+    dependsOn bashTests.keySet()
 }

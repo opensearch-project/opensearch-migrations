@@ -96,12 +96,45 @@ aws() {
   fi
   printf '123456789012.dkr.ecr.us-east-1.amazonaws.com/migration-ecr-dev-us-east-1\n'
 }
+sleep() {
+  :
+}
 
-registry_uri=$(MIRROR_ECR_POLL_INTERVAL=0 \
+registry_uri=$(MIRROR_ECR_POLL_INTERVAL=1 MIRROR_ECR_WAIT_TIMEOUT=10 \
   wait_for_ecr_repository_uri us-east-1 migration-ecr-dev-us-east-1)
 [[ "$registry_uri" == \
     "123456789012.dkr.ecr.us-east-1.amazonaws.com/migration-ecr-dev-us-east-1" ]] \
   || fail "ECR repository polling returned the wrong URI"
 [[ "$(cat "$poll_count")" == "3" ]] || fail "ECR repository polling did not retry"
+
+aws() {
+  echo "RepositoryNotFoundException: repository is not ready" >&2
+  return 1
+}
+sleep() {
+  SECONDS=$((SECONDS + $1))
+}
+if timeout_error=$(MIRROR_ECR_POLL_INTERVAL=5 MIRROR_ECR_WAIT_TIMEOUT=10 \
+    wait_for_ecr_repository_uri us-east-1 migration-ecr-dev-us-east-1 2>&1); then
+  fail "ECR repository polling did not time out"
+fi
+grep -q 'Timed out after 10 seconds' <<< "$timeout_error" \
+  || fail "ECR repository timeout did not report its deadline"
+grep -q 'Rerun the same bootstrap command' <<< "$timeout_error" \
+  || fail "ECR repository timeout did not provide recovery guidance"
+
+aws() {
+  echo "ExpiredTokenException: The security token included in the request is expired" >&2
+  return 1
+}
+sleep() {
+  fail "credential failures should not be retried"
+}
+if credential_error=$(MIRROR_ECR_POLL_INTERVAL=5 MIRROR_ECR_WAIT_TIMEOUT=3600 \
+    wait_for_ecr_repository_uri us-east-1 migration-ecr-dev-us-east-1 2>&1); then
+  fail "expired credentials did not fail ECR repository polling"
+fi
+grep -q 'Refresh or correct the AWS credentials' <<< "$credential_error" \
+  || fail "credential failure did not provide recovery guidance"
 
 echo "bootstrapMirror tests passed"
