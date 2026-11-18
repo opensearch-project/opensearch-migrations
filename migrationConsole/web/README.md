@@ -12,26 +12,29 @@ React bundle. After installing the Migration Assistant chart, start the server i
 pod and run a local port-forward with:
 
 ```sh
-KUBE_CONTEXT=kind-ma ../../deployment/k8s/workflowWeb.sh start
+../../deployment/k8s/workflowWeb.sh start \
+  --kubectl-context kind-ma \
+  --namespace ma
 ```
 
 Open `http://127.0.0.1:8000`. API documentation is available at
 `http://127.0.0.1:8000/api/docs`.
 
-`start` keeps the port-forward in the foreground. Ctrl-C stops the port-forward but
-leaves the in-pod server running. Its lifecycle can be inspected separately:
+`start` keeps the port-forward in the foreground and restarts it when `kubectl`
+exits unexpectedly. Ctrl-C stops the retry loop but leaves the in-pod server
+running. Its lifecycle can be inspected separately:
 
 ```sh
-KUBE_CONTEXT=kind-ma ../../deployment/k8s/workflowWeb.sh status
-KUBE_CONTEXT=kind-ma ../../deployment/k8s/workflowWeb.sh logs
-KUBE_CONTEXT=kind-ma ../../deployment/k8s/workflowWeb.sh logs --follow
-KUBE_CONTEXT=kind-ma ../../deployment/k8s/workflowWeb.sh stop
+../../deployment/k8s/workflowWeb.sh status --kubectl-context kind-ma --namespace ma
+../../deployment/k8s/workflowWeb.sh logs --kubectl-context kind-ma --namespace ma
+../../deployment/k8s/workflowWeb.sh logs --kubectl-context kind-ma --namespace ma --follow
+../../deployment/k8s/workflowWeb.sh stop --kubectl-context kind-ma --namespace ma
 ```
 
-Override the browser-facing port with `WORKFLOW_MANAGE_LOCAL_PORT` and the managed
-workflow with `WORKFLOW_NAME`. The chart does not start this provisional server
-automatically; `workflowWeb.sh` does so with `kubectl exec` until the web process has
-a permanent deployment model.
+Override the browser-facing port with `--local-port` and the managed workflow with
+`--workflow-name`. The chart does not start this provisional server automatically;
+`workflowWeb.sh` does so with `kubectl exec` until the web process has a permanent
+deployment model.
 
 ## Build the packaged application
 

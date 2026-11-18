@@ -233,7 +233,7 @@ together. For a local kind deployment, start the server inside the console pod a
 forward its single browser-facing port:
 
 ```shell
-KUBE_CONTEXT=kind-ma ./workflowWeb.sh start
+./workflowWeb.sh start --kubectl-context kind-ma --namespace ma
 ```
 
 Open `http://127.0.0.1:8000`. The frontend, REST API, API documentation at
@@ -241,19 +241,19 @@ Open `http://127.0.0.1:8000`. The frontend, REST API, API documentation at
 and Kubernetes from inside the pod, so developers do not need to forward either one
 to the host.
 
-The port-forward remains in the foreground. In another terminal, inspect or stop the
-in-pod process with:
+The port-forward remains in the foreground and is restarted when `kubectl` exits
+unexpectedly. In another terminal, inspect or stop the in-pod process with:
 
 ```shell
-KUBE_CONTEXT=kind-ma ./workflowWeb.sh status
-KUBE_CONTEXT=kind-ma ./workflowWeb.sh logs
-KUBE_CONTEXT=kind-ma ./workflowWeb.sh logs --follow
-KUBE_CONTEXT=kind-ma ./workflowWeb.sh stop
+./workflowWeb.sh status --kubectl-context kind-ma --namespace ma
+./workflowWeb.sh logs --kubectl-context kind-ma --namespace ma
+./workflowWeb.sh logs --kubectl-context kind-ma --namespace ma --follow
+./workflowWeb.sh stop --kubectl-context kind-ma --namespace ma
 ```
 
-Set `WORKFLOW_MANAGE_LOCAL_PORT` to use a local port other than 8000. This helper is a
-developer convenience and currently starts the server with `kubectl exec`; the Helm
-chart does not run it automatically.
+Pass `--local-port` to use a local port other than 8000. This helper is a developer
+convenience and currently starts the server with `kubectl exec`; the Helm chart does
+not run it automatically.
 
 ### Configuration
 

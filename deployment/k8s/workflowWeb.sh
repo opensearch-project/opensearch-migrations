@@ -3,20 +3,38 @@
 set -euo pipefail
 
 usage() {
-  cat <<'EOF'
+  cat <<EOF
 Start and access the packaged Workflow Web UI in the migration-console pod.
 
-Usage:
-  deployment/k8s/workflowWeb.sh start
-  deployment/k8s/workflowWeb.sh status
-  deployment/k8s/workflowWeb.sh logs [--follow]
-  deployment/k8s/workflowWeb.sh stop
+Usage: $0 <action> [options]
 
-Environment:
-  KUBE_CONTEXT                 Kubernetes context (default: current context)
-  WORKFLOW_NAMESPACE          Kubernetes namespace (default: ma)
-  WORKFLOW_NAME               Managed workflow name (default: migration-workflow)
-  WORKFLOW_MANAGE_LOCAL_PORT  Browser-facing local port (default: 8000)
+Actions:
+  start                                     Start the Web UI server if needed and keep a resilient
+                                            browser-facing port-forward open.
+  status                                    Check the Web UI process and health endpoint in the pod.
+  logs                                      Show the last 200 lines from the Web UI server log.
+  stop                                      Stop the Web UI server running in the pod.
+
+Options:
+  --kubectl-context <name>                  Kubernetes context (default: current context).
+                                            Matches aws-bootstrap.sh --kubectl-context.
+  --namespace <val>                         K8s namespace (default: ma).
+                                            Matches aws-bootstrap.sh --namespace.
+  --workflow-name <name>                    Managed workflow name (default: migration-workflow).
+  --local-port <port>                       Browser-facing local port (default: 8000).
+  --argo-server <url>                       Argo server URL used inside the migration-console pod
+                                            (default: https://argo-server:2746).
+  --console-pod <name>                      Migration console pod (default: migration-console-0).
+  --console-statefulset <name>              Migration console StatefulSet
+                                            (default: migration-console).
+  --follow                                  Follow server logs. Only valid with the logs action.
+  -h, --help                                Show this help.
+
+Examples:
+  $0 start --kubectl-context kind-ma --namespace ma
+  $0 start --kubectl-context kind-ma --local-port 8001
+  $0 logs --kubectl-context kind-ma --follow
+  $0 stop --kubectl-context kind-ma
 EOF
 }
 
@@ -42,29 +60,8 @@ validate_kubernetes_name() {
     fail "${label} must be a lowercase Kubernetes name: ${value}"
 }
 
-ACTION="${1:-}"
-case "${ACTION}" in
-  start|status|stop)
-    [[ "$#" -eq 1 ]] || fail "${ACTION} does not accept additional arguments"
-    ;;
-  logs)
-    [[ "$#" -le 2 ]] || fail "logs accepts only the optional --follow argument"
-    [[ "$#" -eq 1 || "${2}" == "--follow" ]] || fail "unknown logs argument: ${2}"
-    ;;
-  -h|--help|"")
-    usage
-    exit 0
-    ;;
-  *)
-    usage >&2
-    fail "unknown action: ${ACTION}"
-    ;;
-esac
-
 KUBECTL="${KUBECTL:-kubectl}"
-require_command "${KUBECTL}"
-
-KUBE_CONTEXT="${KUBE_CONTEXT:-$("${KUBECTL}" config current-context)}"
+KUBE_CONTEXT="${KUBE_CONTEXT:-}"
 NAMESPACE="${WORKFLOW_NAMESPACE:-ma}"
 WORKFLOW_NAME="${WORKFLOW_NAME:-migration-workflow}"
 LOCAL_PORT="${WORKFLOW_MANAGE_LOCAL_PORT:-8000}"
@@ -72,8 +69,84 @@ REMOTE_PORT=8000
 POD_NAME="${MIGRATION_CONSOLE_POD:-migration-console-0}"
 STATEFULSET_NAME="${MIGRATION_CONSOLE_STATEFULSET:-migration-console}"
 ARGO_SERVER="${WORKFLOW_ARGO_SERVER:-https://argo-server:2746}"
+ACTION=""
 FOLLOW_LOGS=false
-[[ "${ACTION}" == "logs" && "${2:-}" == "--follow" ]] && FOLLOW_LOGS=true
+
+require_option_value() {
+  local option="$1"
+  local value="${2:-}"
+  [[ -n "${value}" && "${value}" != --* ]] ||
+    fail "${option} requires a value"
+}
+
+while [[ "$#" -gt 0 ]]; do
+  case "$1" in
+    start|status|logs|stop)
+      [[ -z "${ACTION}" ]] || fail "only one action may be specified"
+      ACTION="$1"
+      shift
+      ;;
+    --kubectl-context)
+      require_option_value "$1" "${2:-}"
+      KUBE_CONTEXT="$2"
+      shift 2
+      ;;
+    --namespace)
+      require_option_value "$1" "${2:-}"
+      NAMESPACE="$2"
+      shift 2
+      ;;
+    --workflow-name)
+      require_option_value "$1" "${2:-}"
+      WORKFLOW_NAME="$2"
+      shift 2
+      ;;
+    --local-port)
+      require_option_value "$1" "${2:-}"
+      LOCAL_PORT="$2"
+      shift 2
+      ;;
+    --argo-server)
+      require_option_value "$1" "${2:-}"
+      ARGO_SERVER="$2"
+      shift 2
+      ;;
+    --console-pod)
+      require_option_value "$1" "${2:-}"
+      POD_NAME="$2"
+      shift 2
+      ;;
+    --console-statefulset)
+      require_option_value "$1" "${2:-}"
+      STATEFULSET_NAME="$2"
+      shift 2
+      ;;
+    --follow)
+      FOLLOW_LOGS=true
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      usage >&2
+      fail "unknown action or option: $1"
+      ;;
+  esac
+done
+
+if [[ -z "${ACTION}" ]]; then
+  usage
+  exit 0
+fi
+[[ "${FOLLOW_LOGS}" == "false" || "${ACTION}" == "logs" ]] ||
+  fail "--follow is only valid with the logs action"
+
+require_command "${KUBECTL}"
+if [[ -z "${KUBE_CONTEXT}" ]]; then
+  KUBE_CONTEXT="$("${KUBECTL}" config current-context)"
+fi
 
 [[ -n "${KUBE_CONTEXT}" ]] || fail "no Kubernetes context is configured"
 validate_kubernetes_name "namespace" "${NAMESPACE}"
@@ -222,7 +295,43 @@ fi
 
 echo
 echo "Forwarding http://127.0.0.1:${LOCAL_PORT}"
-echo "Press Ctrl-C to stop the port-forward. The in-pod server will remain running."
-exec "${KUBECTL}" --context "${KUBE_CONTEXT}" -n "${NAMESPACE}" \
-  port-forward "statefulset/${STATEFULSET_NAME}" "${LOCAL_PORT}:${REMOTE_PORT}" \
-  --address 127.0.0.1
+echo "The port-forward will restart after unexpected exits."
+echo "Press Ctrl-C to stop retrying. The in-pod server will remain running."
+
+PORT_FORWARD_RETRY_SECONDS=2
+port_forward_pid=""
+
+cleanup_port_forward() {
+  if [[ -n "${port_forward_pid}" ]] && kill -0 "${port_forward_pid}" 2>/dev/null; then
+    kill "${port_forward_pid}" 2>/dev/null || true
+    wait "${port_forward_pid}" 2>/dev/null || true
+  fi
+}
+
+trap cleanup_port_forward EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
+
+attempt=1
+while true; do
+  if (( attempt > 1 )); then
+    echo "Restarting port-forward (attempt ${attempt})..." >&2
+  fi
+
+  "${KUBECTL}" --context "${KUBE_CONTEXT}" -n "${NAMESPACE}" \
+    port-forward "statefulset/${STATEFULSET_NAME}" "${LOCAL_PORT}:${REMOTE_PORT}" \
+    --address 127.0.0.1 &
+  port_forward_pid="$!"
+
+  if wait "${port_forward_pid}"; then
+    port_forward_status=0
+  else
+    port_forward_status="$?"
+  fi
+  port_forward_pid=""
+
+  echo "Port-forward exited with status ${port_forward_status}; retrying in ${PORT_FORWARD_RETRY_SECONDS} seconds." >&2
+  sleep "${PORT_FORWARD_RETRY_SECONDS}"
+  attempt=$((attempt + 1))
+done

@@ -167,15 +167,15 @@ The migration-console image includes the FastAPI server and compiled frontend. S
 the server in the pod and keep its port-forward open:
 
 ```shell
-KUBE_CONTEXT=kind-ma ./workflowWeb.sh start
+./workflowWeb.sh start --kubectl-context kind-ma --namespace ma
 ```
 
 Open `http://127.0.0.1:8000`. Only this port is required on the host. To diagnose the
 server from another terminal:
 
 ```shell
-KUBE_CONTEXT=kind-ma ./workflowWeb.sh status
-KUBE_CONTEXT=kind-ma ./workflowWeb.sh logs
+./workflowWeb.sh status --kubectl-context kind-ma --namespace ma
+./workflowWeb.sh logs --kubectl-context kind-ma --namespace ma
 ```
 
 ## Cleanup
