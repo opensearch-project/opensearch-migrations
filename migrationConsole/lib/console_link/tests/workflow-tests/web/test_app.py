@@ -1,6 +1,9 @@
+import asyncio
 import json
+import threading
 from datetime import datetime, timezone
 from fastapi.testclient import TestClient
+import httpx
 import pytest
 
 from console_link.workflow.application.external_resources import (
@@ -1659,6 +1662,114 @@ def test_config_review_and_submit_start_a_tracked_operation(tmp_path):
         "11",
     ]
     assert submissions.submitted[1] == "migration-test"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("service", "method_name", "http_method", "path", "request_options"),
+    [
+        (
+            "submissions",
+            "review",
+            "POST",
+            "/api/v1/config/review",
+            {"json": {"expectedPersistedRevision": "11"}},
+        ),
+        (
+            "submissions",
+            "review",
+            "POST",
+            "/api/v1/config/submit",
+            {"json": {"expectedPersistedRevision": "11"}},
+        ),
+        (
+            "approvals",
+            "review",
+            "GET",
+            "/api/v1/approvals/review",
+            {"params": {"targetId": "approval:node-1"}},
+        ),
+        (
+            "approvals",
+            "validate",
+            "POST",
+            "/api/v1/approvals",
+            {"json": {
+                "targetId": "approval:node-1",
+                "expectedGateRevision": "11",
+            }},
+        ),
+        (
+            "resets",
+            "validate",
+            "POST",
+            "/api/v1/resets",
+            {"json": {"planToken": "reset-token"}},
+        ),
+        (
+            "submissions",
+            "prepare",
+            "POST",
+            "/api/v1/resets",
+            {"json": {
+                "planToken": "reset-token",
+                "resubmit": True,
+                "expectedPersistedRevision": "11",
+            }},
+        ),
+    ],
+)
+async def test_blocking_action_services_do_not_stall_the_event_loop(
+    tmp_path,
+    service,
+    method_name,
+    http_method,
+    path,
+    request_options,
+):
+    services = {
+        "submissions": _Submissions(_Documents()),
+        "approvals": _Approvals(),
+        "resets": _Resets(),
+    }
+    entered = threading.Event()
+    release = threading.Event()
+    blocked_service = services[service]
+    original = getattr(blocked_service, method_name)
+
+    def blocking_call(*args, **kwargs):
+        entered.set()
+        release.wait(timeout=5)
+        return original(*args, **kwargs)
+
+    setattr(blocked_service, method_name, blocking_call)
+    app = create_app(
+        static_dir=_static_bundle(tmp_path),
+        config_documents=services["submissions"],
+        approvals=services["approvals"],
+        resets=services["resets"],
+        operations=_Operations(),
+    )
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://127.0.0.1",
+    ) as client:
+        action = asyncio.create_task(
+            client.request(http_method, path, **request_options)
+        )
+        try:
+            assert await asyncio.to_thread(entered.wait, 5)
+            health = await client.get("/api/v1/system/health")
+            action_finished_first = action.done()
+        finally:
+            release.set()
+        response = await action
+
+    assert health.status_code == 200
+    assert action_finished_first is False
+    assert response.status_code < 300, response.text
 
 
 def test_submit_worker_rejects_a_saved_configuration_changed_after_acceptance(

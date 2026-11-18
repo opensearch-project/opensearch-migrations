@@ -933,7 +933,8 @@ def create_app(
             except Exception:
                 snapshot = None
         try:
-            review = submission_service().review(
+            review = await asyncio.to_thread(
+                submission_service().review,
                 request_body.expected_persisted_revision,
                 snapshot,
             )
@@ -959,7 +960,8 @@ def create_app(
                 baseline_revision = snapshot.revision
             except Exception:
                 snapshot = None
-        try:
+
+        def review_and_prepare() -> ConfigReviewV1:
             review = ConfigReviewV1.from_domain(submission_service().review(
                 request_body.expected_persisted_revision,
                 snapshot,
@@ -972,6 +974,10 @@ def create_app(
             submission_service().prepare(
                 request_body.expected_persisted_revision
             )
+            return review
+
+        try:
+            review = await asyncio.to_thread(review_and_prepare)
         except ConfigurationDocumentConflict as error:
             raise _document_conflict(error) from error
         except ValueError as error:
@@ -1120,7 +1126,8 @@ def create_app(
                 snapshot_revision = None
         try:
             return ApprovalReviewV1.from_domain(
-                approval_service().review(
+                await asyncio.to_thread(
+                    approval_service().review,
                     target_id,
                     snapshot_revision=snapshot_revision,
                 )
@@ -1143,7 +1150,8 @@ def create_app(
         request_body: ApproveRequestV1,
     ) -> OperationV1:
         try:
-            review = approval_service().validate(
+            review = await asyncio.to_thread(
+                approval_service().validate,
                 request_body.target_id,
                 request_body.expected_gate_revision,
             )
@@ -1238,7 +1246,10 @@ def create_app(
         request_body: ExecuteResetRequestV1,
     ) -> OperationV1:
         try:
-            plan = reset_service().validate(request_body.plan_token)
+            plan = await asyncio.to_thread(
+                reset_service().validate,
+                request_body.plan_token,
+            )
         except ResetPlanStale as error:
             raise _action_error(409, "reset_plan_stale", error) from error
 
@@ -1256,8 +1267,9 @@ def create_app(
                     ),
                 )
             try:
-                submission_service().prepare(
-                    request_body.expected_persisted_revision
+                await asyncio.to_thread(
+                    submission_service().prepare,
+                    request_body.expected_persisted_revision,
                 )
             except ConfigurationDocumentConflict as error:
                 raise _document_conflict(error) from error
