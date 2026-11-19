@@ -443,17 +443,19 @@ public class RfsMigrateDocuments {
 
     public static class ExperimentalArgs {
         @Parameter(required = false,
-            names = { "--experimental-previous-snapshot-name", "--experimentalPreviousSnapshotName" },
-            description = "Optional. The name of the previous snapshot for delta migration (experimental feature)",
-            hidden = true
+            names = { "--previous-snapshot-name", "--previousSnapshotName",
+                "--experimental-previous-snapshot-name", "--experimentalPreviousSnapshotName" },
+            description = "Previous snapshot for delta migration, in the same repository as --snapshot-name. " +
+                "The target must already contain its completed backfill. Requires --delta-mode."
         )
         public String previousSnapshotName = null;
 
         @Parameter(required = false,
-            names = { "--experimental-delta-mode" },
+            names = { "--delta-mode", "--deltaMode", "--experimental-delta-mode" },
             converter = DeltaModeConverter.class,
-            description = "Experimental delta snapshot migration mode. Requires --base-snapshot-name",
-            hidden = true
+            description = "Delta snapshot migration mode. Requires --previous-snapshot-name. " +
+                "For multiple workers, finish DELETES_ONLY for all shards before running UPDATES_ONLY, " +
+                "with a distinct --session-name for each phase. UPDATES_AND_DELETES is a legacy per-shard mode."
         )
         public DeltaMode experimentalDeltaMode = null;
 
@@ -656,16 +658,21 @@ public class RfsMigrateDocuments {
         if (args.experimental.experimentalDeltaMode != null) {
             if (args.experimental.previousSnapshotName == null) {
                 throw new ParameterException(
-                    "When --experimental-delta-mode is specified, --experimental-previous-snapshot-name must be provided."
+                    "When --delta-mode is specified, --previous-snapshot-name must be provided."
                 );
             }
-            log.atWarn().setMessage("EXPERIMENTAL FEATURE: Delta snapshot migration mode {} is enabled. " +
-                    "This feature is experimental and should not be used in production.")
-                    .addArgument(args.experimental.experimentalDeltaMode).log();
+            if (args.experimental.previousSnapshotName.isBlank()) {
+                throw new ParameterException("--previous-snapshot-name must not be blank.");
+            }
+            if (args.serverGeneratedIds == ServerGeneratedIdMode.ALWAYS) {
+                throw new ParameterException("Delta migration requires preserved source document IDs.");
+            }
+            if (args.experimental.enableSourcelessMigrations || args.experimental.useRecoverySource) {
+                throw new ParameterException("Delta migration requires complete stored _source in both snapshots.");
+            }
         } else if (args.experimental.previousSnapshotName != null) {
-            log.atError().setMessage("--experimental-previous-snapshot-name was provided but --experimental-delta-mode is not specified.").log();
             throw new ParameterException(
-                "When --experimental-previous-snapshot-name is specified, --experimental-delta-mode must be provided."
+                "When --previous-snapshot-name is specified, --delta-mode must be provided."
             );
         }
 
@@ -750,6 +757,9 @@ public class RfsMigrateDocuments {
         var collectionRoutedTarget = buildCollectionRoutedTarget(arguments, targetClientFactory);
         boolean useServerGeneratedIds = resolveUseServerGeneratedIds(
             arguments.serverGeneratedIds, targetClientFactory, collectionRoutedTarget);
+        if (useServerGeneratedIds && arguments.experimental.experimentalDeltaMode != null) {
+            throw new ParameterException("Delta migration requires a target that preserves source document IDs.");
+        }
 
         var docTransformerConfig = TransformerConfigUtils.getTransformerConfig(arguments.docTransformationParams);
         if (docTransformerConfig != null) {
@@ -811,18 +821,28 @@ public class RfsMigrateDocuments {
         };
     }
 
-    /** Fails before any work item is created or acquired if an allowlisted index has no collection. */
+    /** Validate routing and delta ID preservation before any work item is created or acquired. */
     static void validateCollectionRouting(
         CollectionRoutedTarget collectionRoutedTarget,
         org.opensearch.migrations.bulkload.pipeline.source.DocumentSource documentSource,
-        List<String> indexAllowlist
+        List<String> indexAllowlist,
+        DeltaMode deltaMode
     ) {
         if (collectionRoutedTarget == null) {
             return;
         }
         var allowed = FilterScheme.filterByAllowList(indexAllowlist, FilterScheme.FilterContext.INDEX);
-        collectionRoutedTarget.validateSourceIndices(
-            documentSource.listCollections().stream().filter(allowed).toList());
+        var sourceIndices = documentSource.listCollections().stream().filter(allowed).toList();
+        collectionRoutedTarget.validateSourceIndices(sourceIndices);
+        if (deltaMode != null) {
+            for (var sourceIndex : sourceIndices) {
+                var collection = collectionRoutedTarget.collectionFor(sourceIndex);
+                if (collectionRoutedTarget.requiresServerGeneratedIds(collection)) {
+                    throw new ParameterException("Delta migration requires source document IDs, but target collection '"
+                        + collection + "' uses server-generated IDs.");
+                }
+            }
+        }
     }
 
     static boolean requiresServerGeneratedIds(
@@ -1080,7 +1100,8 @@ public class RfsMigrateDocuments {
         RootDocumentMigrationContext context,
         BiFunction<WorkItem, WorkItemCursor, Map<String, Object>> metricsReporter
     ) throws IOException, InterruptedException, NoWorkLeftException {
-        validateCollectionRouting(collectionRoutedTarget, documentSource, arguments.indexAllowlist);
+        validateCollectionRouting(
+            collectionRoutedTarget, documentSource, arguments.indexAllowlist, arguments.experimental.experimentalDeltaMode);
         var scopedWorkCoordinator = prepareWorkCoordination(
             workCoordinator, processManager, documentSource,
             arguments.indexAllowlist, context);
