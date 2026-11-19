@@ -471,7 +471,8 @@ public class CaptureProxy {
     protected static Supplier<SSLEngine> loadSslEngineFromPem(
         String certChainPath, String keyPath, String trustCertPath, String trustCertPem, boolean requireClientAuth
     ) throws SSLException {
-        var builder = SslContextBuilder.forServer(new File(certChainPath), new File(keyPath));
+        var builder = SslContextBuilder.forServer(new File(certChainPath), new File(keyPath))
+            .protocols("TLSv1.3", "TLSv1.2");
         var hasTrustCertPath = trustCertPath != null && !trustCertPath.isEmpty();
         var hasTrustCertPem = trustCertPem != null && !trustCertPem.isEmpty();
         if (hasTrustCertPath && hasTrustCertPem) {

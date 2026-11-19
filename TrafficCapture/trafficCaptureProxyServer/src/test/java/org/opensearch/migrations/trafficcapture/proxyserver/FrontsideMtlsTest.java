@@ -75,6 +75,18 @@ public class FrontsideMtlsTest {
     }
 
     @Test
+    public void testEngineOnlyEnablesTls12AndTls13() throws SSLException {
+        SSLEngine engine = CaptureProxy.loadSslEngineFromPem(
+            ssc.certificate().getAbsolutePath(),
+            ssc.privateKey().getAbsolutePath(),
+            null,
+            false).get();
+        Assertions.assertEquals(
+            java.util.Set.of("TLSv1.2", "TLSv1.3"),
+            java.util.Set.copyOf(java.util.Arrays.asList(engine.getEnabledProtocols())));
+    }
+
+    @Test
     public void testWithoutTrustCertAndNoClientAuthSucceeds() throws SSLException {
         Supplier<SSLEngine> supplier = CaptureProxy.loadSslEngineFromPem(
             ssc.certificate().getAbsolutePath(),
