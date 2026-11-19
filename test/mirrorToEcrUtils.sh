@@ -73,28 +73,35 @@ fi
 queue_tasks="${queue_tmp}/tasks"
 queue_failures="${queue_tmp}/failures"
 queue_log="${queue_tmp}/events"
+third_started="${queue_tmp}/third-started"
 printf 'slow\nquick\nthird\nfail\n' > "$queue_tasks"
 : > "$queue_log"
 
+# 'slow' holds its slot until 'third' has started. A work-conserving pool hands
+# quick's freed slot to 'third', which releases 'slow'. A pool that waits on its
+# oldest job deadlocks instead; the deadline turns that into a recorded failure
+# for 'slow' rather than a hung build. No timing is involved on the success path.
 queue_worker() {
-  local task="$1"
+  local task="$1" deadline
   printf '%s-start\n' "$task" >> "$queue_log"
   case "$task" in
-    slow) sleep 0.8 ;;
-    *) sleep 0.05 ;;
+    slow)
+      deadline=$((SECONDS + 60))
+      until [[ -e "$third_started" ]]; do
+        (( SECONDS < deadline )) || return 1
+        sleep 0.05
+      done
+      ;;
+    third) : > "$third_started" ;;
   esac
   printf '%s-end\n' "$task" >> "$queue_log"
   [[ "$task" != "fail" ]]
 }
 
 queue_rc=0
-mirror_run_task_queue "$queue_tasks" 2 "$queue_failures" queue_worker &
-queue_pid=$!
-sleep 0.25
-grep -qxF 'third-start' "$queue_log" \
-  || fail "worker pool waited for the oldest task instead of using an available slot"
-wait "$queue_pid" || queue_rc=$?
+mirror_run_task_queue "$queue_tasks" 2 "$queue_failures" queue_worker || queue_rc=$?
 [[ "$queue_rc" -ne 0 ]] || fail "task queue did not report a worker failure"
-grep -qxF 'fail' "$queue_failures" || fail "failed task was not recorded"
+[[ "$(cat "$queue_failures")" == "fail" ]] \
+  || fail "worker pool did not start 'third' while 'slow' held a slot (failures: $(tr '\n' ' ' < "$queue_failures"))"
 
 echo "mirrorToEcrUtils tests passed"
