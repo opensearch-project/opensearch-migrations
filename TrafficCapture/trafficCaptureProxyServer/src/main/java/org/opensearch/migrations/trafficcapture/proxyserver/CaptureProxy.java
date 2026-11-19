@@ -11,10 +11,12 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
@@ -95,6 +97,10 @@ public class CaptureProxy {
         }
     }
 
+    static final String DEFAULT_SSL_PROTOCOLS = "TLSv1.3,TLSv1.2";
+    private static final Set<String> SUPPORTED_SSL_PROTOCOLS = Set.of("TLSv1.3", "TLSv1.2", "TLSv1.1", "TLSv1");
+    private static final Set<String> LEGACY_SSL_PROTOCOLS = Set.of("TLSv1.1", "TLSv1");
+
     public static class Parameters {
         @Parameter(required = false,
             names = { "--noCapture" },
@@ -127,6 +133,13 @@ public class CaptureProxy {
             description = "Require clients to present a valid TLS certificate (mutual TLS) when connecting to the proxy. "
                 + "Must be used with --sslTrustCertFile or --sslTrustCertPemEnvVar to specify the trusted CA for client certificates.")
         public boolean requireClientAuth;
+        @Parameter(required = false,
+            names = { "--sslProtocols" },
+            arity = 1,
+            description = "Comma-separated TLS protocols the proxy accepts from clients. Defaults to TLSv1.3,TLSv1.2. "
+                + "Enabling TLSv1.1 or TLSv1 is insecure, is intended only for legacy clients, and also requires the JVM "
+                + "property jdk.tls.disabledAlgorithms to permit those protocols.")
+        public String sslProtocols = DEFAULT_SSL_PROTOCOLS;
         @Parameter(required = false,
             names = { "--maxTrafficBufferSize" },
             arity = 1,
@@ -471,8 +484,41 @@ public class CaptureProxy {
     protected static Supplier<SSLEngine> loadSslEngineFromPem(
         String certChainPath, String keyPath, String trustCertPath, String trustCertPem, boolean requireClientAuth
     ) throws SSLException {
+        return loadSslEngineFromPem(
+            certChainPath, keyPath, trustCertPath, trustCertPem, requireClientAuth, DEFAULT_SSL_PROTOCOLS);
+    }
+
+    protected static String[] parseSslProtocols(String protocols) {
+        var parsed = Arrays.stream(protocols == null ? new String[0] : protocols.split(","))
+            .map(String::trim)
+            .filter(p -> !p.isEmpty())
+            .distinct()
+            .toArray(String[]::new);
+        if (parsed.length == 0) {
+            throw new ParameterException("--sslProtocols must list at least one protocol.");
+        }
+        for (var protocol : parsed) {
+            if (!SUPPORTED_SSL_PROTOCOLS.contains(protocol)) {
+                throw new ParameterException(
+                    "Unsupported --sslProtocols value '" + protocol + "'. Supported values: " + SUPPORTED_SSL_PROTOCOLS);
+            }
+            if (LEGACY_SSL_PROTOCOLS.contains(protocol)) {
+                log.atWarn().setMessage("Enabling legacy TLS protocol {} on the proxy listener is insecure").addArgument(protocol).log();
+            }
+        }
+        return parsed;
+    }
+
+    protected static Supplier<SSLEngine> loadSslEngineFromPem(
+        String certChainPath,
+        String keyPath,
+        String trustCertPath,
+        String trustCertPem,
+        boolean requireClientAuth,
+        String sslProtocols
+    ) throws SSLException {
         var builder = SslContextBuilder.forServer(new File(certChainPath), new File(keyPath))
-            .protocols("TLSv1.3", "TLSv1.2");
+            .protocols(parseSslProtocols(sslProtocols));
         var hasTrustCertPath = trustCertPath != null && !trustCertPath.isEmpty();
         var hasTrustCertPem = trustCertPem != null && !trustCertPem.isEmpty();
         if (hasTrustCertPath && hasTrustCertPem) {
@@ -535,7 +581,7 @@ public class CaptureProxy {
             log.info("Loading TLS from PEM files: cert={}, key={}", params.sslCertChainFilePath, params.sslKeyFilePath);
             return loadSslEngineFromPem(params.sslCertChainFilePath, params.sslKeyFilePath,
                 params.sslTrustCertFilePath, readTrustCertPemFromEnv(params.sslTrustCertPemEnvVar),
-                params.requireClientAuth);
+                params.requireClientAuth, params.sslProtocols);
         }
 
         return null;
