@@ -37,14 +37,14 @@ CR_STATUS = {
     'SnapshotMigration': {'status': {'documentBackfill': {
         'phase': 'Running', 'updatedAt': '2026-05-14T10:05:00Z',
         'summary': {'percentageCompleted': 50.0, 'shardsTotal': 4, 'shardsMigrated': 2,
-                    'shardsInProgress': 1, 'shardsWaiting': 1}}}},
+                    'shardsInProgress': 1, 'shardsWaiting': 1, 'documentsFailed': 3}}}},
     'DataSnapshot': {'status': {'snapshotCreation': {
         'phase': 'Running', 'updatedAt': '2026-05-14T10:05:00Z',
         'summary': {'shardsTotal': 4, 'shardsSuccessful': 2, 'shardsFailed': 0,
                     'dataProcessed': '12.3', 'dataProcessedUnit': 'mb', 'eta': '0h 1m 0s'}}}},
 }
 EXPECTED_TEXT = {
-    'SnapshotMigration': ['RFS: Running (50%, shards 2/4, in progress 1, waiting 1)',
+    'SnapshotMigration': ['RFS: Running (50%, shards 2/4, in progress 1, waiting 1, failed 3)',
                           'updated 2026-05-14T10:05:00Z'],
     'DataSnapshot': ['Snapshot: Running (shards 2/4', 'failed 0, data 12.3 mb, ETA 0h 1m 0s)',
                      'updated 2026-05-14T10:05:00Z'],

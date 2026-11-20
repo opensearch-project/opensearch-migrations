@@ -456,6 +456,12 @@ def _format_backfill_status(backfill: Dict[str, Any]):
     shards_waiting = summary.get('shardsWaiting')
     if shards_waiting:
         details.append(f"shards waiting: {shards_waiting}")
+    failed = summary.get('documentsFailed') or 0
+    if failed > 0:
+        parts.append(f"failed {failed}")
+        details.append(f"failed documents: {failed} (non-retryable {summary.get('documentsFailedNonRetryable') or 0}, "
+                       f"retries exhausted {summary.get('documentsFailedRetriesExhausted') or 0})")
+        details.extend(_format_failed_shards(backfill.get('failures') or {}))
     eta_ms = summary.get('etaMs')
     if eta_ms:
         secs = int(eta_ms / 1000)
@@ -475,6 +481,20 @@ def _format_backfill_status(backfill: Dict[str, Any]):
     if parts:
         return f"Backfill status: {', '.join(parts)}", details
     return None
+
+
+def _format_failed_shards(failures: Dict[str, Any]) -> List[str]:
+    """One line per shard the SnapshotMigration lists (the most failures first), then how many more there are
+    and where the failed documents were written."""
+    shards = failures.get('shards') or []
+    lines = [f"failed in {s.get('index')} shard {s.get('shard')}: "
+             f"{(s.get('nonRetryable') or 0) + (s.get('retriesExhausted') or 0)}" for s in shards]
+    more = (failures.get('shardCount') or 0) - len(shards)
+    if more > 0:
+        lines.append(f"... and {more} more shards with failures (console backfill status --deep-check lists them)")
+    if failures.get('streamLocation'):
+        lines.append(f"failed document stream: {failures['streamLocation']}")
+    return lines
 
 
 def _format_snapshot_creation_status(creation: Dict[str, Any]):

@@ -663,6 +663,9 @@ def _format_snapshot_migration_backfill_status(status: Dict[str, Any]) -> Option
     if shards_waiting is not None:
         details.append(f"waiting {shards_waiting}")
 
+    if (summary.get('documentsFailed') or 0) > 0:
+        details.append(f"failed {_format_number(summary['documentsFailed'])}")
+
     parts = [str(phase)] if phase else []
     if details:
         parts.append(f"({', '.join(details)})")

@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 from enum import Enum
 from pydantic import BaseModel, Field, field_validator, field_serializer
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from console_link.models.schema_tools import contains_one_of
 from console_link.models.step_state import StepStateWithPause
@@ -81,6 +81,14 @@ class Backfill(ABC):
         return self.config
 
 
+class ShardFailedDocuments(BaseModel):
+    """Documents a shard's committed work items gave up on."""
+    index: str
+    shard: int
+    non_retryable: int
+    retries_exhausted: int
+
+
 class BackfillOverallStatus(BaseModel):
     status: StepStateWithPause
     percentage_completed: float
@@ -99,6 +107,12 @@ class BackfillOverallStatus(BaseModel):
     shard_complete: Optional[int] = None
     shard_in_progress: Optional[int] = None
     shard_waiting: Optional[int] = None
+    # Documents given up on, summed over the work items committed so far (None when not yet countable).
+    documents_failed: Optional[int] = None
+    documents_failed_non_retryable: Optional[int] = None
+    documents_failed_retries_exhausted: Optional[int] = None
+    # Every shard with a failed document, most failures first.
+    shards_with_failures: Optional[List[ShardFailedDocuments]] = None
 
     @field_serializer('started', 'finished')
     def serialize_datetime(self, dt: Optional[datetime]) -> str | None:

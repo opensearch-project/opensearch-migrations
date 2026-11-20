@@ -66,3 +66,39 @@ def test_backfill_describe_includes_salient_details_k8s_rfs(k8s_rfs_backfill: K8
 
     assert "docker" not in description
     assert "opensearch_ingestion" not in description
+
+
+def test_deep_status_text_lists_failed_documents_overall_and_per_shard(monkeypatch):
+    from console_link.models import backfill_rfs
+    from console_link.models.backfill_base import BackfillOverallStatus, ShardFailedDocuments
+    from console_link.models.step_state import StepStateWithPause
+
+    status = BackfillOverallStatus(
+        status=StepStateWithPause.RUNNING, percentage_completed=50.0, shard_total=4, shard_complete=2,
+        shard_in_progress=1, shard_waiting=1, documents_failed=8, documents_failed_non_retryable=7,
+        documents_failed_retries_exhausted=1,
+        shards_with_failures=[ShardFailedDocuments(index="idx-b", shard=0, non_retryable=5, retries_exhausted=0),
+                              ShardFailedDocuments(index="idx-a", shard=0, non_retryable=2, retries_exhausted=1)])
+    monkeypatch.setattr(backfill_rfs, "get_detailed_status_obj", lambda **kwargs: status)
+
+    lines = backfill_rfs.get_detailed_status(target_cluster=None, session_name="s").splitlines()
+
+    assert lines[-3:] == [
+        "Failed documents: 8 (non-retryable 7, retries exhausted 1)",
+        "  idx-b shard 0: 5 (non-retryable 5, retries exhausted 0)",
+        "  idx-a shard 0: 3 (non-retryable 2, retries exhausted 1)",
+    ]
+
+
+def test_deep_status_text_omits_failed_documents_when_they_could_not_be_counted(monkeypatch):
+    from console_link.models import backfill_rfs
+    from console_link.models.backfill_base import BackfillOverallStatus
+    from console_link.models.step_state import StepStateWithPause
+
+    status = BackfillOverallStatus(status=StepStateWithPause.RUNNING, percentage_completed=50.0, shard_total=4,
+                                   shard_complete=2, shard_in_progress=1, shard_waiting=1)
+    monkeypatch.setattr(backfill_rfs, "get_detailed_status_obj", lambda **kwargs: status)
+
+    text = backfill_rfs.get_detailed_status(target_cluster=None, session_name="s")
+
+    assert text.splitlines()[-1] == "Waiting shards: 1" and "Failed documents" not in text
