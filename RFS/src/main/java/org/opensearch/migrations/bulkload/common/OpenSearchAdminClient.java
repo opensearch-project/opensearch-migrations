@@ -258,9 +258,10 @@ final class OpenSearchAdminClient {
     void registerSnapshotRepo(
         String repoName,
         ObjectNode settings,
-        IRfsContexts.ICreateSnapshotContext context
+        IRfsContexts.ICreateSnapshotContext context,
+        boolean verify
     ) {
-        String targetPath = SNAPSHOT_PREFIX_STR + repoName;
+        String targetPath = SNAPSHOT_PREFIX_STR + repoName + (verify ? "" : "?verify=false");
         log.info("Starting registerSnapshotRepo for repoName={}", repoName);
         long startTime = System.currentTimeMillis();
         var putResponse = client.putAsync(targetPath, settings.toString(), context.createRegisterRequest())

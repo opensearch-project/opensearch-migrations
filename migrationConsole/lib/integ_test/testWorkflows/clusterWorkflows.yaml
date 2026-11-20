@@ -786,6 +786,10 @@ spec:
             # repository is registered, so they are inert for non-GCS tests.
             gcs.client.default.endpoint: "http://fake-gcs-server.__NAMESPACE__.svc.cluster.local:4443"
             gcs.client.default.token_uri: "http://gcs-token-stub.__NAMESPACE__.svc.cluster.local:8080/token"
+            # repository-azure client settings for local Azure testing against Azurite (see the
+            # azure/ helm templates). 7.10 has no endpoint setting but appends endpoint_suffix to its
+            # connection string, so the later protocol and BlobEndpoint keys take effect.
+            azure.client.default.endpoint_suffix: "ignored;DefaultEndpointsProtocol=http;BlobEndpoint=http://azurite.__NAMESPACE__.svc.cluster.local:10000/devstoreaccount1"
             ESCFG
             sed -i "s/__CLUSTER_NAME__/${CLUSTER_NAME}/g" /tmp/elasticsearch.yml
             sed -i "s/__NAMESPACE__/${NAMESPACE}/g" /tmp/elasticsearch.yml
@@ -837,6 +841,12 @@ spec:
                       volumeMounts:
                         - name: plugins
                           mountPath: /usr/share/elasticsearch/plugins
+                    - name: install-azure-plugin
+                      image: {{inputs.parameters.image-registry-prefix}}migrations/custom-elasticsearch:7.10.2
+                      command: ["sh", "-c", "bin/elasticsearch-plugin install --batch repository-azure"]
+                      volumeMounts:
+                        - name: plugins
+                          mountPath: /usr/share/elasticsearch/plugins
                     - name: inject-aws-creds
                       image: {{inputs.parameters.image-registry-prefix}}migrations/custom-elasticsearch:7.10.2
                       command:
@@ -847,6 +857,10 @@ spec:
                           echo 'y' | bin/elasticsearch-keystore create
                           echo "test" | bin/elasticsearch-keystore add --stdin s3.client.default.access_key --force
                           echo "test" | bin/elasticsearch-keystore add --stdin s3.client.default.secret_key --force
+                          # Azurite's published development account; endpoint_suffix in elasticsearch.yml
+                          # requires both at startup, so they are set even when no Azure repo is used.
+                          echo "devstoreaccount1" | bin/elasticsearch-keystore add --stdin azure.client.default.account --force
+                          echo "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==" | bin/elasticsearch-keystore add --stdin azure.client.default.key --force
                           # GCS credentials for local fake-gcs-server testing, mounted from the
                           # gcs-test-credentials ConfigMap (created by the gcs helm templates only
                           # when fake-gcs-server is enabled). repository-gcs requires service_account
@@ -996,6 +1010,9 @@ spec:
             # repository is registered, so they are inert for non-GCS tests.
             gcs.client.default.endpoint: "http://fake-gcs-server.__NAMESPACE__.svc.cluster.local:4443"
             gcs.client.default.token_uri: "http://gcs-token-stub.__NAMESPACE__.svc.cluster.local:8080/token"
+            # repository-azure client endpoint for local Azure testing against Azurite (see the
+            # azure/ helm templates). Mutually exclusive with endpoint_suffix in 8.x.
+            azure.client.default.endpoint: "http://azurite.__NAMESPACE__.svc.cluster.local:10000/devstoreaccount1"
             ESCFG
             sed -i "s/__CLUSTER_NAME__/${CLUSTER_NAME}/g" /tmp/elasticsearch.yml
             sed -i "s/__NAMESPACE__/${NAMESPACE}/g" /tmp/elasticsearch.yml
@@ -1057,6 +1074,10 @@ spec:
                           echo 'y' | bin/elasticsearch-keystore create
                           echo "test" | bin/elasticsearch-keystore add --stdin s3.client.default.access_key --force
                           echo "test" | bin/elasticsearch-keystore add --stdin s3.client.default.secret_key --force
+                          # Azurite's published development account; the endpoint setting in elasticsearch.yml
+                          # requires the account at startup, so they are set even when no Azure repo is used.
+                          echo "devstoreaccount1" | bin/elasticsearch-keystore add --stdin azure.client.default.account --force
+                          echo "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==" | bin/elasticsearch-keystore add --stdin azure.client.default.key --force
                           # GCS credentials for local fake-gcs-server testing, mounted from the
                           # gcs-test-credentials ConfigMap (created by the gcs helm templates only
                           # when fake-gcs-server is enabled). repository-gcs requires service_account

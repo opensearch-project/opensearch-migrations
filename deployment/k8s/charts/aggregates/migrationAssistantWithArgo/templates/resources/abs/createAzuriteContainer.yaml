@@ -1,0 +1,53 @@
+{{- if index .Values.conditionalPackageInstalls "azurite" }}
+{{- $account := .Values.azureStorageConfiguration.accountName | default "devstoreaccount1" }}
+{{- $container := .Values.azureStorageConfiguration.containerName | default "migration-test-bucket" }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: create-azurite-container-{{ .Release.Name }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "1"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  # No ttlSecondsAfterFinished, so a failed hook pod stays for kubectl logs (as in createS3Bucket.yaml).
+  backoffLimit: 2
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels:
+        app: azurite-container-create
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: azure-cli
+          image: {{ .Values.azureStorageConfiguration.containerOperationImage }}
+          imagePullPolicy: {{ .Values.azureStorageConfiguration.containerOperationImagePullPolicy }}
+          env:
+            - name: ACCOUNT_NAME
+              value: {{ $account | quote }}
+            - name: CONTAINER_NAME
+              value: {{ $container | quote }}
+            - name: BLOB_ENDPOINT
+              value: {{ printf "http://%s.%s.svc.cluster.local:10000/%s" .Values.azureStorageConfiguration.localAzuriteEndpoint .Release.Namespace $account | quote }}
+            - name: ACCOUNT_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.azureStorageConfiguration.localCredentialsSecretName }}
+                  key: accountKey
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              CONN="DefaultEndpointsProtocol=http;AccountName=${ACCOUNT_NAME};AccountKey=${ACCOUNT_KEY};BlobEndpoint=${BLOB_ENDPOINT};"
+              # Azurite has no seed directory like fake-gcs-server; repository-azure needs the container to exist.
+              for attempt in 1 2 3 4 5 6 7 8 9 10; do
+                if az storage container create --name "$CONTAINER_NAME" --connection-string "$CONN" -o json; then
+                  exit 0
+                fi
+                echo "Azurite not ready (attempt $attempt/10); retrying in 5 seconds"
+                sleep 5
+              done
+              exit 1
+{{- end }}

@@ -37,7 +37,7 @@ import {
     setupLog4jConfigForContainer,
     setupTestCredsForContainer,
 } from "./commonUtils/containerFragments";
-import {CommonWorkflowParameters, workflowIdentityEnvVars, workflowScriptCommand, workflowScriptRootEnvVars} from "./commonUtils/workflowParameters";
+import {CommonWorkflowParameters, cloudProviderResolvedInput, workflowIdentityEnvVars, workflowScriptCommand, workflowScriptRootEnvVars} from "./commonUtils/workflowParameters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 import {makeTargetParamDict, makeRfsCoordinatorParamDict} from "./commonUtils/clusterSettingManipulators";
 import {getHttpAuthSecretName} from "./commonUtils/clusterSettingManipulators";
@@ -166,6 +166,7 @@ const startHistoricalBackfillInputs = {
     taskK8sLabel: defineParam<string>({expression: expr.literal("reindexFromSnapshot")}),
     ...workloadNodePoolResolvedInput("rfsNodePoolName"),
     ...workloadZoneSpreadResolvedInput(),
+    ...cloudProviderResolvedInput(),
     ...makeRequiredImageParametersForKeys(["ReindexFromSnapshot"])
 };
 
@@ -203,6 +204,7 @@ function getRfsDeploymentManifest
     workloadNodePoolName: BaseExpression<string>,
     workloadZoneSpread: BaseExpression<string>,
     workloadZoneSpreadExtras: BaseExpression<string>,
+    cloudProvider: BaseExpression<string>
 }): Deployment {
     const ownerReferences: OwnerReference[] = [{
         apiVersion: "migrations.opensearch.org/v1alpha1",
@@ -304,6 +306,11 @@ function getRfsDeploymentManifest
                         "migrations.opensearch.org/from-snapshot-migration": makeStringTypeProxy(args.fromSnapshotMigrationK8sLabel),
                         "migrations.opensearch.org/task": makeStringTypeProxy(args.taskK8sLabel),
                         [MIGRATION_RESOURCE_UID_LABEL]: makeStringTypeProxy(args.crdUid),
+                        // Microsoft Entra Workload ID mutates only pods labeled "true"; "false" leaves them alone.
+                        "azure.workload.identity/use": makeStringTypeProxy(expr.ternary(
+                            expr.equals(args.cloudProvider, expr.literal("azure")),
+                            expr.literal("true"),
+                            expr.literal("false"))),
                     },
                 },
                 spec: {
@@ -527,6 +534,7 @@ function makeRfsDeploymentDefinition(
             workloadNodePoolName: inputs.workloadNodePoolName,
             workloadZoneSpread: inputs.workloadZoneSpread,
             workloadZoneSpreadExtras: inputs.workloadZoneSpreadExtras,
+            cloudProvider: inputs.cloudProvider,
         })
     };
 }
