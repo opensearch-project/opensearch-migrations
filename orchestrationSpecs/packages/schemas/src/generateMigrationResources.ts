@@ -38,12 +38,18 @@ function isPlainObject(value: unknown): value is Record<string, YamlValue> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+// Kubernetes reads manifests with YAML 1.1 rules, which resolve these plain scalars to booleans, nulls
+// or numbers rather than strings: an unquoted ON or OFF in an enum would become true or false.
+const YAML_11_NON_STRING_WORD = /^(?:y|yes|n|no|true|false|on|off|null|~|[-+]?\.(?:inf|nan))$/i;
+// Integers, floats, sexagesimals (1:30) and dates all start like this.
+const YAML_11_NUMBER_LIKE = /^[-+.]?[0-9]/;
+
 function yamlScalar(value: YamlScalar): string {
     if (value === null) return "null";
     if (typeof value === "number" || typeof value === "boolean") return String(value);
-    if (value === "true" || value === "false" || value === "null") return JSON.stringify(value);
     if (value === "{}") return "{}";
-    if (/^[A-Za-z0-9_.{}[\]\/:"' -]+$/.test(value) && !value.startsWith("{{")) {
+    if (/^[A-Za-z0-9_.{}[\]\/:"' -]+$/.test(value) && !value.startsWith("{{")
+        && !YAML_11_NON_STRING_WORD.test(value) && !YAML_11_NUMBER_LIKE.test(value)) {
         return value;
     }
     return JSON.stringify(value);

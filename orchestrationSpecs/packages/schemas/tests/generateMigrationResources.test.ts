@@ -13,6 +13,7 @@ import {
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import {parseAllDocuments} from "yaml";
 
 describe("generated migration resources", () => {
     test("uses the same override annotation keys as the console command that writes them", () => {
@@ -61,6 +62,33 @@ describe("generated migration resources", () => {
         ]) {
             expect(crds).toContain(`${fieldName}:\n                  type: string`);
         }
+    });
+
+    test("keeps string enum values and defaults strings under the YAML 1.1 rules Kubernetes reads them with", () => {
+        // Unquoted ON and OFF are booleans in YAML 1.1, which made emitDocType's enum [AUTO, true, false].
+        const documents = parseAllDocuments(crds, {version: "1.1"});
+        expect(documents.flatMap(document => document.errors)).toEqual([]);
+        const nonStrings: string[] = [];
+        let emitDocTypeEnum: unknown;
+        const visit = (node: unknown, path: string[]) => {
+            if (Array.isArray(node)) {
+                node.forEach((child, i) => visit(child, [...path, String(i)]));
+                return;
+            }
+            if (typeof node !== "object" || node === null) return;
+            const schema = node as Record<string, unknown>;
+            if (schema.type === "string") {
+                for (const value of [...(Array.isArray(schema.enum) ? schema.enum : []), ...("default" in schema ? [schema.default] : [])]) {
+                    if (typeof value !== "string") nonStrings.push(`${path.join(".")}: ${JSON.stringify(value)}`);
+                }
+            }
+            if (path[path.length - 1] === "documentBackfillEmitDocType") emitDocTypeEnum = schema.enum;
+            for (const [key, child] of Object.entries(schema)) visit(child, [...path, key]);
+        };
+        documents.forEach(document => visit(document.toJS(), []));
+
+        expect(nonStrings).toEqual([]);
+        expect(emitDocTypeEnum).toEqual(["AUTO", "ON", "OFF"]);
     });
 
     test("does not add dependency fields to approval gates", () => {

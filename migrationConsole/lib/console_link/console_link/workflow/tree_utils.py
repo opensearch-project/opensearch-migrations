@@ -19,6 +19,12 @@ SNAPSHOT_MIGRATION_PLURAL = 'snapshotmigrations'
 DATA_SNAPSHOT_PLURAL = 'datasnapshots'
 
 APPROVAL_TEMPLATE_NAME = 'waitforuserapproval'
+# resource-management templates that block on a CR whose status the monitor CronJobs
+# keep current. Matched by template rather than step name: step names vary by caller
+# (waitIndefinitelyForSnapshotMigration, ...Deps, waitIndefinitelyForSnapshot,
+# waitIndefinitelyForCompletion) and a rename silently blanked the overlay before.
+SNAPSHOT_MIGRATION_WAIT_TEMPLATE_NAME = 'waitindefinitelyforsnapshotmigration'
+DATA_SNAPSHOT_WAIT_TEMPLATE_NAME = 'waitindefinitelyfordatasnapshot'
 
 
 @dataclass
@@ -184,12 +190,18 @@ def _default_data_snapshot_reader(name: str, namespace: str) -> Dict[str, Any]:
     )
 
 
+def _node_template_name(node: Dict[str, Any]) -> str:
+    tref = node.get('templateRef') or node.get('template_ref') or {}
+    name = tref.get('template') or node.get('templateName') or node.get('template_name') or ''
+    return name.lower()
+
+
 def _is_snapshot_migration_wait_node(node: Dict[str, Any]) -> bool:
-    return _normalize_attempt_suffix(node.get('display_name', '')) == 'waitForSnapshotMigration'
+    return _node_template_name(node) == SNAPSHOT_MIGRATION_WAIT_TEMPLATE_NAME
 
 
 def _is_data_snapshot_wait_node(node: Dict[str, Any]) -> bool:
-    return _normalize_attempt_suffix(node.get('display_name', '')) == 'waitForDataSnapshot'
+    return _node_template_name(node) == DATA_SNAPSHOT_WAIT_TEMPLATE_NAME
 
 
 def overlay_snapshot_migration_backfill_status(
