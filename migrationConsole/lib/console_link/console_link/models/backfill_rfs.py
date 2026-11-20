@@ -23,6 +23,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 WORKING_STATE_INDEX = ".migrations_working_state"
+JSON_HEADERS = {"Content-Type": "application/json"}
 
 DOCKER_RFS_SCHEMA = {
     "type": "dict",
@@ -272,7 +273,7 @@ def _get_max_completed_epoch(cluster, index_name: str) -> Optional[int]:
         resp = cluster.call_api(
             f"/{index_name}/_search",
             data=json.dumps(body),
-            headers={"Content-Type": "application/json"},
+            headers=JSON_HEADERS,
         )
         aggs = resp.json().get("aggregations", {})
         val = aggs.get("max_completed", {}).get("value")
@@ -459,7 +460,7 @@ def get_failed_document_counts(cluster: Cluster, index_name: str) -> Optional[Fa
 
 def _search(cluster: Cluster, index_name: str, body: dict) -> dict:
     return cluster.call_api(f"/{index_name}/_search", method=HttpMethod.POST, data=json.dumps(body),
-                            headers={'Content-Type': 'application/json'}).json()
+                            headers=JSON_HEADERS).json()
 
 
 def _failure_sums() -> dict:
@@ -644,7 +645,7 @@ def parse_query_response(query: dict, cluster: Cluster, index_name: str, label: 
     try:
         logger.debug(f"Creating request: /{index_name}/_search; {query}")
         response = cluster.call_api(f"/{index_name}/_search", method=HttpMethod.POST, data=json.dumps(query),
-                                    headers={'Content-Type': 'application/json'})
+                                    headers=JSON_HEADERS)
     except Exception as e:
         logger.error(f"Failed to execute query: {e}")
         return None
@@ -663,7 +664,7 @@ def parse_shard_setup_response(query: dict, cluster: Cluster, index_name: str) -
     """Check if shard_setup document has completedAt field set"""
     try:
         response = cluster.call_api(f"/{index_name}/_search", method=HttpMethod.POST, data=json.dumps(query),
-                                    headers={'Content-Type': 'application/json'})
+                                    headers=JSON_HEADERS)
         body = response.json()
         hits = body.get('hits', {}).get('hits', [])
         if hits:

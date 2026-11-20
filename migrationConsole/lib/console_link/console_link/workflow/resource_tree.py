@@ -450,37 +450,46 @@ def _format_backfill_status(backfill: Dict[str, Any]):
     if shards_total is not None:
         parts.append(f"shards {shards_migrated or 0}/{shards_total}")
         details.append(f"shards migrated: {shards_migrated or 0}/{shards_total}")
-    shards_in_progress = summary.get('shardsInProgress')
-    if shards_in_progress:
-        details.append(f"shards in progress: {shards_in_progress}")
-    shards_waiting = summary.get('shardsWaiting')
-    if shards_waiting:
-        details.append(f"shards waiting: {shards_waiting}")
-    failed = summary.get('documentsFailed') or 0
-    if failed > 0:
-        parts.append(f"failed {failed}")
-        details.append(f"failed documents: {failed} (non-retryable {summary.get('documentsFailedNonRetryable') or 0}, "
-                       f"retries exhausted {summary.get('documentsFailedRetriesExhausted') or 0})")
-        details.extend(_format_failed_shards(backfill.get('failures') or {}))
-    eta_ms = summary.get('etaMs')
-    if eta_ms:
-        secs = int(eta_ms / 1000)
-        m, s = divmod(secs, 60)
-        h, m = divmod(m, 60)
-        parts.append(f"ETA {h}h {m}m {s}s")
-        details.append(f"ETA: {h}h {m}m {s}s")
-    started = summary.get('started')
-    if started:
-        details.append(f"started: {started}")
-    finished = summary.get('finished')
-    if finished:
-        details.append(f"finished: {finished}")
-    updated_at = backfill.get('updatedAt')
-    if updated_at:
-        details.append(f"updated at: {updated_at}")
+    _append_present(details, ("shards in progress", summary.get('shardsInProgress')),
+                    ("shards waiting", summary.get('shardsWaiting')))
+    failed_part, failed_details = _format_failed_documents(backfill)
+    if failed_part:
+        parts.append(failed_part)
+        details.extend(failed_details)
+    eta = _format_eta(summary.get('etaMs'))
+    if eta:
+        parts.append(f"ETA {eta}")
+        details.append(f"ETA: {eta}")
+    _append_present(details, ("started", summary.get('started')), ("finished", summary.get('finished')),
+                    ("updated at", backfill.get('updatedAt')))
     if parts:
         return f"Backfill status: {', '.join(parts)}", details
     return None
+
+
+def _append_present(details: List[str], *labeled_values) -> None:
+    """Append "label: value" for each value that's set (not None, empty or zero)."""
+    details.extend(f"{label}: {value}" for label, value in labeled_values if value)
+
+
+def _format_eta(eta_ms) -> Optional[str]:
+    if not eta_ms:
+        return None
+    m, s = divmod(int(eta_ms / 1000), 60)
+    h, m = divmod(m, 60)
+    return f"{h}h {m}m {s}s"
+
+
+def _format_failed_documents(backfill: Dict[str, Any]):
+    """The summary-line part and the detail lines for failed documents, or (None, []) when none were counted."""
+    summary = backfill.get('summary') or {}
+    failed = summary.get('documentsFailed') or 0
+    if failed <= 0:
+        return None, []
+    details = [f"failed documents: {failed} (non-retryable {summary.get('documentsFailedNonRetryable') or 0}, "
+               f"retries exhausted {summary.get('documentsFailedRetriesExhausted') or 0})"]
+    details.extend(_format_failed_shards(backfill.get('failures') or {}))
+    return f"failed {failed}", details
 
 
 def _format_failed_shards(failures: Dict[str, Any]) -> List[str]:
