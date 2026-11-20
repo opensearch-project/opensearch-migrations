@@ -375,6 +375,39 @@ run "snapshot_role_omitted_when_disabled" {
   }
 }
 
+run "account_readonly_access_granted_to_an_iam_caller" {
+  command = plan
+
+  assert {
+    condition     = length(aws_eks_access_entry.account_readonly) == 1 && length(aws_eks_access_policy_association.account_readonly) == 1
+    error_message = "The account read-only access entry must be created when an IAM principal applies the module."
+  }
+
+  assert {
+    condition     = aws_eks_access_entry.account_readonly[0].principal_arn == "arn:aws:iam::123456789012:root"
+    error_message = "The account read-only access entry must target the account root principal."
+  }
+}
+
+# EKS already gives the account root user a cluster-admin entry as the cluster creator, so a
+# second entry for the same principal fails at apply time with ResourceInUseException.
+run "account_readonly_access_skipped_for_the_account_root_caller" {
+  command = plan
+
+  override_data {
+    target = data.aws_caller_identity.current
+    values = {
+      account_id = "123456789012"
+      arn        = "arn:aws:iam::123456789012:root"
+    }
+  }
+
+  assert {
+    condition     = length(aws_eks_access_entry.account_readonly) == 0 && length(aws_eks_access_policy_association.account_readonly) == 0
+    error_message = "The account read-only access entry must not be created when the account root user applies the module."
+  }
+}
+
 # The otel collector's awsemf exporters do not set log_group_name, so they fall back
 # to the exporter's default /metrics/default group. Scoping the CloudWatchLogs
 # statement to only the migration-assistant group silently blocks every EKS metric.
