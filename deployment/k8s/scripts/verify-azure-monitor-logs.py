@@ -30,7 +30,7 @@ MONITOR_SETTINGS = {
 }
 FLUENT_BIT_VALUES = re.compile(
     r'VALUES_B64="([A-Za-z0-9+/=]+)"\s*\n\s*echo "\$VALUES_B64" \| base64 -d > /tmp/values-fluent-bit\.yaml')
-AZURE_METADATA = re.compile(r'^kind: ConfigMap\nmetadata:\n  name: azure-metadata\n(?:.*\n)*?data:\n((?:  .*\n)+)',
+AZURE_METADATA = re.compile(r'^kind: ConfigMap\nmetadata:\n {2}name: azure-metadata\n(?:.*\n)*?data:\n((?: {2}.*\n)+)',
                             re.MULTILINE)
 CONFIG_MAP_KEYS = re.compile(r'configMapKeyRef:\s*\n\s*key: (\S+)\s*\n\s*name: azure-metadata')
 
@@ -71,16 +71,7 @@ def monitor_args(chart, *, without=None):
     return args
 
 
-def main():
-    args = sys.argv[1:]
-    # The Gradle task passes the pinned Helm client it resolved; default to helm on the PATH.
-    helm = "helm"
-    if len(args) == 3 and args[1] == "--helm":
-        helm = args[2]
-    elif len(args) != 1:
-        fail("Usage: verify-azure-monitor-logs.py CHART_DIRECTORY [--helm HELM_EXECUTABLE]")
-    chart = Path(args[0]).resolve()
-
+def verify_aks_without_monitor(helm, chart):
     aks = rendered(helm, chart, "AKS")
     if AZURE_METADATA.search(aks):
         fail("The AKS chart without valuesAksMonitor.yaml renders azure-metadata")
@@ -88,11 +79,13 @@ def main():
     if "azure_logs_ingestion" in aks_fluent_bit or "Name               file" not in aks_fluent_bit:
         fail("The AKS chart without valuesAksMonitor.yaml must keep the fluent-bit file output")
 
+
+def verify_aks_with_monitor(helm, chart):
     shipping = rendered(helm, chart, "AKS monitor", *monitor_args(chart))
     metadata = AZURE_METADATA.search(shipping)
     if not metadata:
         fail("The AKS monitor chart does not render azure-metadata")
-    data = dict(re.findall(r'^  (\w+): "([^"]*)"$', metadata.group(1), re.MULTILINE))
+    data = dict(re.findall(r'^ {2}(\w+): "([^"]*)"$', metadata.group(1), re.MULTILINE))
     expected = {
         "TENANT_ID": MONITOR_SETTINGS["tenantId"],
         "CLIENT_ID": MONITOR_SETTINGS["clientId"],
@@ -117,13 +110,30 @@ def main():
     if not re.search(r'secretKeyRef:\s*\n\s*key: clientSecret\s*\n\s*name: azure-monitor-logs-credentials',
                      shipping_fluent_bit):
         fail("fluent-bit does not read clientSecret from the azure-monitor-logs-credentials Secret")
-    if re.search(r'^kind: PersistentVolumeClaim\n(?:.*\n)*?  name: logs-pvc$', shipping, re.MULTILINE):
+    if re.search(r'^kind: PersistentVolumeClaim\n(?:.*\n)*? {2}name: logs-pvc$', shipping, re.MULTILINE):
         fail("The AKS monitor chart still renders the shared logs volume")
 
+
+def verify_missing_values_fail(helm, chart):
     for key in MONITOR_SETTINGS:
         missing = render(helm, chart, *monitor_args(chart, without=key))
         if missing.returncode == 0 or f"Missing required value: .Values.azure.monitor.{key}" not in missing.stdout:
             fail(f"A missing azure.monitor.{key} must fail the AKS monitor chart render")
+
+
+def main():
+    args = sys.argv[1:]
+    # The Gradle task passes the pinned Helm client it resolved; default to helm on the PATH.
+    helm = "helm"
+    if len(args) == 3 and args[1] == "--helm":
+        helm = args[2]
+    elif len(args) != 1:
+        fail("Usage: verify-azure-monitor-logs.py CHART_DIRECTORY [--helm HELM_EXECUTABLE]")
+    chart = Path(args[0]).resolve()
+
+    verify_aks_without_monitor(helm, chart)
+    verify_aks_with_monitor(helm, chart)
+    verify_missing_values_fail(helm, chart)
 
     print("Validated Azure Monitor logs: AKS keeps the file output, valuesAksMonitor.yaml ships to "
           "azure_logs_ingestion with every azure-metadata key and the client secret Secret, missing values rejected")
