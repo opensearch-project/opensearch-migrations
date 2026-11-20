@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 set -eu
+RFS_SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=rfsBackfillStatusLib.sh
+. "$RFS_SCRIPT_DIR/rfsBackfillStatusLib.sh"
 
 RFS_MONITOR_WORKFLOW_UID_LABEL="${RFS_MONITOR_WORKFLOW_UID_LABEL}"
 K8S_API_SERVER="https://${KUBERNETES_SERVICE_HOST}:${KUBERNETES_SERVICE_PORT_HTTPS:-443}"
@@ -76,65 +79,8 @@ delete_runtime_resources() {
     fi
 }
 
-make_backfill_status_patch() {
-    phase="$1"
-    message="$2"
-    status_json_text="${3:-}"
-    now="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-
-    if [ -n "$status_json_text" ] && printf '%s' "$status_json_text" | jq -e 'type == "object"' >/dev/null 2>&1; then
-        jq -nc \
-            --arg phase "$phase" \
-            --arg updatedAt "$now" \
-            --arg message "$message" \
-            --argjson raw "$status_json_text" \
-            '($raw // {}) as $r |
-             {status:{documentBackfill:{
-                phase:$phase,
-                updatedAt:$updatedAt,
-                message:$message,
-                summary:{
-                    percentageCompleted:($r.percentage_completed // 0),
-                    etaMs:$r.eta_ms,
-                    started:$r.started,
-                    finished:$r.finished,
-                    shardsTotal:($r.shard_total // 0),
-                    shardsMigrated:($r.shard_complete // 0),
-                    shardsInProgress:($r.shard_in_progress // 0),
-                    shardsWaiting:($r.shard_waiting // 0)
-                }
-             }}}'
-        return 0
-    fi
-
-    jq -nc \
-        --arg phase "$phase" \
-        --arg updatedAt "$now" \
-        --arg message "$message" \
-        '{status:{documentBackfill:{
-            phase:$phase,
-            updatedAt:$updatedAt,
-            message:$message,
-            summary:{
-                percentageCompleted:0,
-                etaMs:null,
-                started:null,
-                finished:null,
-                shardsTotal:0,
-                shardsMigrated:0,
-                shardsInProgress:0,
-                shardsWaiting:0
-            }
-        }}}'
-}
-
 patch_backfill_status() {
-    phase="$1"
-    message="$2"
-    status_json_text="${3:-}"
-    patch_body="$(make_backfill_status_patch "$phase" "$message" "$status_json_text")"
-    kubectl patch snapshotmigration "$SNAPSHOT_MIGRATION_NAME" \
-        --subresource=status --type=merge -p "$patch_body"
+    replace_document_backfill "$(document_backfill "$1" "$2" "${3:-}")"
 }
 
 parent_workflow_running() {
@@ -205,13 +151,11 @@ fi
 # cleanup below. If the status PATCH fails, this execution exits non-zero and
 # leaves the runtime + CronJob in place so a future run can retry safely.
 echo "phase 3: backfill complete; committing and cleaning up"
-patch_body="$(jq -nc \
-    --arg cc "$CONFIG_CHECKSUM" \
-    --arg cr "$CHECKSUM_FOR_REPLAYER" \
-    --argjson backfill "$(make_backfill_status_patch "$status" "$status_message" "$status_json" | jq -c '.status.documentBackfill')" \
-    '{status:{phase:"Completed",configChecksum:$cc,checksumForReplayer:$cr,documentBackfill:$backfill}}')"
-kubectl patch snapshotmigration "$SNAPSHOT_MIGRATION_NAME" \
-    --subresource=status --type=merge -p "$patch_body"
+commit_ops="$(jq -nc --arg cc "$CONFIG_CHECKSUM" --arg cr "$CHECKSUM_FOR_REPLAYER" \
+    '[{op: "add", path: "/status/phase", value: "Completed"},
+      {op: "add", path: "/status/configChecksum", value: $cc},
+      {op: "add", path: "/status/checksumForReplayer", value: $cr}]')"
+replace_document_backfill "$(document_backfill "$status" "$status_message" "$status_json")" "$commit_ops"
 
 delete_runtime_resources
 delete_cronjob_with_preconditions || true

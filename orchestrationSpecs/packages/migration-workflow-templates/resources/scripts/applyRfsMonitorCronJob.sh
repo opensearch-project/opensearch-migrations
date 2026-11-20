@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 set -eu
+RFS_SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=rfsBackfillStatusLib.sh
+. "$RFS_SCRIPT_DIR/rfsBackfillStatusLib.sh"
 
 : "${CRONJOB_NAME:?}"
 : "${SESSION_NAME:?}"
@@ -158,27 +161,9 @@ else
 fi
 
 # Seed the typed progress status so UI tooling has an authoritative CR status
-# field to read before the monitor's first scheduled poll.
-now="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-seed_status_patch="$(jq -nc \
-    --arg updatedAt "$now" \
-    '{status:{documentBackfill:{
-        phase:"Pending",
-        updatedAt:$updatedAt,
-        message:"Backfill monitor is installed",
-        summary:{
-            percentageCompleted:0,
-            etaMs:null,
-            started:null,
-            finished:null,
-            shardsTotal:0,
-            shardsMigrated:0,
-            shardsInProgress:0,
-            shardsWaiting:0
-        }
-    }}}')"
-kubectl patch snapshotmigration "$SNAPSHOT_MIGRATION_NAME" \
-    --subresource=status --type=merge -p "$seed_status_patch"
+# field to read before the monitor's first scheduled poll. Replacing it whole
+# also clears anything an earlier run left there, such as its failure counts.
+replace_document_backfill "$(document_backfill "Pending" "Backfill monitor is installed")"
 
 # Read-back loop until labels and env converge.
 deadline=$(( $(date +%s) + 60 ))
