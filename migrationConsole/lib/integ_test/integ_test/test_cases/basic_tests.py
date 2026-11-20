@@ -1,5 +1,7 @@
 import logging
 import json
+import os
+import re
 import subprocess
 import time
 import uuid
@@ -22,6 +24,37 @@ INNER_WORKFLOW_NAME = "migration-workflow"
 DEFAULT_S3_CONFIG_MAP = "migrations-default-s3-config"
 
 SNAPSHOT_MIGRATION_PLURAL = "snapshotmigrations"
+
+# The RFS monitor CronJob refreshes SnapshotMigration.status.documentBackfill once a minute. A
+# document transform that spins for longer than that keeps a backfill running across at least one
+# refresh, leaving time to read `workflow status` before it finishes.
+BACKFILL_HOLD_SECONDS = 90
+HOLD_BACKFILL_TRANSFORM = json.dumps([{"JsonJSTransformerProvider": {
+    "initializationScript": "context => documents => { const until = Date.now() + %d; "
+                            "while (Date.now() < until) {} return documents; }" % (BACKFILL_HOLD_SECONDS * 1000),
+    "bindingsObject": "{}",
+}}])
+
+# `workflow status` wraps at the terminal width; a wide one keeps each step on one line.
+WIDE_TERMINAL = {**os.environ, "COLUMNS": "400"}
+# The step view appends the backfill status to the step that waits for the SnapshotMigration.
+STEP_VIEW_BACKFILL = re.compile(
+    r"\((?P<step_phase>\w+)\): RFS: (?P<phase>\w+) \((?P<pct>[\d.]+)%, shards (?P<migrated>\d+)/(?P<total>\d+)"
+    r"[^)]*\) updated (?P<updated>\S+)")
+# The resource view lists it under the SnapshotMigration, percentage rounded to a whole number.
+RESOURCE_VIEW_BACKFILL = re.compile(
+    r"Backfill status: (?P<pct>[\d.]+)%, shards (?P<migrated>\d+)/(?P<total>\d+) .*?"
+    r"phase: (?P<phase>\w+) .*?updated at: (?P<updated>\S+)")
+
+
+def workflow_status_output(*args) -> str:
+    """`workflow status` output with whitespace collapsed, so wrapped lines read as one."""
+    result = subprocess.run(["workflow", "status", *args], capture_output=True, text=True, timeout=180,
+                            env=WIDE_TERMINAL)
+    if result.returncode != 0:
+        raise AssertionError(f"`workflow status {' '.join(args)}` failed (rc={result.returncode}). "
+                             f"stdout={result.stdout!r} stderr={result.stderr!r}")
+    return " ".join(result.stdout.split())
 
 
 def run_console(args: list, timeout: int = 180) -> subprocess.CompletedProcess:
@@ -108,7 +141,13 @@ class Test0001SingleDocumentBackfill(MATestBase):
 
 
 class Test0002SingleDocumentBackfillWithRfsCoordinatorCluster(MATestBase):
-    """Covers RFS worker -> S3 -> console -> CompletedWithErrors with a terminally failing document."""
+    """Covers RFS worker -> S3 -> console -> CompletedWithErrors with a terminally failing document.
+
+    A document transform holds the backfill for BACKFILL_HOLD_SECONDS. While it's held, both views of
+    `workflow status` must report the SnapshotMigration's backfill status: the step view on the running
+    step that waits for it, the resource view on the SnapshotMigration. Once it's done, the resource view
+    must report CompletedWithErrors at 100%.
+    """
 
     # Mapped `long` on the target so a non-numeric value fails to parse.
     FAILING_FIELD = "quantity"
@@ -142,6 +181,17 @@ class Test0002SingleDocumentBackfillWithRfsCoordinatorCluster(MATestBase):
                 "type": "s3",
                 "bucket": bucket,
             }
+            migration["documentBackfillConfig"]["docTransformerConfig"] = HOLD_BACKFILL_TRANSFORM
+            # AUTO would start emitting _type for ES <= 6 sources now that a transformer is set; this one
+            # leaves documents alone, so keep the untransformed behavior.
+            migration["documentBackfillConfig"]["emitDocType"] = "OFF"
+
+    def while_migrating(self, timeout_seconds: int):
+        self._wait_for_backfill_phase("Running", timeout_seconds)
+        backfill = self._assert_step_view_reports_backfill()
+        if backfill.get("phase") != "Running":
+            raise AssertionError(f"The backfill finished before the step view was checked: {backfill}")
+        self._assert_resource_view_reports_backfill()
 
     def _deployment_default_s3_bucket(self) -> str:
         load_k8s_config()
@@ -199,6 +249,9 @@ class Test0002SingleDocumentBackfillWithRfsCoordinatorCluster(MATestBase):
 
         self._assert_session_location(session_uid)
         self._assert_backfill_completed_with_errors()
+        # The step view can't be checked here: the migration workflow is deleted once it finishes.
+        backfill = self._assert_resource_view_reports_backfill()
+        self._assert_field(backfill, "phase", "CompletedWithErrors")
         logger.info("Failed document observed through the console: %s", record)
 
     def _snapshot_migration_uid(self) -> str:
@@ -280,6 +333,68 @@ class Test0002SingleDocumentBackfillWithRfsCoordinatorCluster(MATestBase):
                 f"Backfill reported CompletedWithErrors with shardsMigrated={migrated} != "
                 f"shardsTotal={total}: {summary}"
             )
+
+    def _backfill_status(self) -> dict:
+        """SnapshotMigration.status.documentBackfill, or {} until the workflow creates the resource."""
+        load_k8s_config()
+        items = client.CustomObjectsApi().list_namespaced_custom_object(
+            group=CRD_GROUP, version=CRD_VERSION, namespace=self.argo_service.namespace,
+            plural=SNAPSHOT_MIGRATION_PLURAL).get("items", []) or []
+        if len(items) > 1:
+            raise AssertionError(f"Expected at most one SnapshotMigration, found {len(items)}")
+        return ((items[0].get("status") or {}).get("documentBackfill") or {}) if items else {}
+
+    def _wait_for_backfill_phase(self, phase: str, timeout_seconds: int) -> dict:
+        deadline = time.time() + timeout_seconds
+        backfill = {}
+        while time.time() < deadline:
+            backfill = self._backfill_status()
+            if backfill.get("phase") == phase:
+                return backfill
+            time.sleep(5)
+        raise AssertionError(f"Backfill never reported {phase} within {timeout_seconds}s. Last status: {backfill}")
+
+    def _read_while_unchanged(self, read):
+        """Run `read` between two reads of the backfill status that agree, so the monitor's once-a-minute
+        patch can't land mid-comparison. Returns (that status, what `read` returned)."""
+        for _ in range(3):
+            before = self._backfill_status()
+            result = read()
+            if self._backfill_status() == before:
+                return before, result
+        raise AssertionError("SnapshotMigration.status.documentBackfill kept changing during `workflow status`")
+
+    def _assert_step_view_reports_backfill(self) -> dict:
+        """The step view shows the backfill status on the running step that waits for it. Returns the status."""
+        def read():
+            return [m.groupdict() for m in STEP_VIEW_BACKFILL.finditer(workflow_status_output())]
+        backfill, shown = self._read_while_unchanged(read)
+        if len(shown) != 1:
+            raise AssertionError(f"Expected one backfill status in the step view, found {shown}. Status: {backfill}")
+        self._assert_view_matches("step view", shown[0], backfill, pct_tolerance=0.01)
+        self._assert_field(shown[0], "step_phase", "Running")
+        return backfill
+
+    def _assert_resource_view_reports_backfill(self) -> dict:
+        """The resource view shows the backfill status under the SnapshotMigration. Returns the status."""
+        def read():
+            match = RESOURCE_VIEW_BACKFILL.search(workflow_status_output("--resource-view"))
+            return match.groupdict() if match else None
+        backfill, shown = self._read_while_unchanged(read)
+        if not shown:
+            raise AssertionError(f"No backfill status in the resource view. Status: {backfill}")
+        self._assert_view_matches("resource view", shown, backfill, pct_tolerance=0.5)
+        return backfill
+
+    @staticmethod
+    def _assert_view_matches(view: str, shown: dict, backfill: dict, pct_tolerance: float):
+        summary = backfill.get("summary") or {}
+        expected = (backfill.get("phase"), summary.get("shardsMigrated"), summary.get("shardsTotal"),
+                    backfill.get("updatedAt"))
+        actual = (shown["phase"], int(shown["migrated"]), int(shown["total"]), shown["updated"])
+        pct = summary.get("percentageCompleted")
+        if actual != expected or pct is None or abs(float(shown["pct"]) - pct) > pct_tolerance:
+            raise AssertionError(f"The {view} shows {shown}, but the SnapshotMigration reports {backfill}")
 
 
 class Test0008OptionalSnapshotStages(MATestBase):

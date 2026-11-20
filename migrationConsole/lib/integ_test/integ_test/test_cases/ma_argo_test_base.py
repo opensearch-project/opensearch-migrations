@@ -284,10 +284,16 @@ class MATestBase:
         if not self.workflow_name:
             raise ValueError("Workflow name is not available, workflow may not have been started")
         if self.imported_clusters:
+            self.while_migrating(timeout_seconds)
             self.argo_service.wait_for_ending_phase(workflow_name=self.workflow_name, timeout_seconds=timeout_seconds)
         else:
             self.argo_service.resume_workflow(workflow_name=self.workflow_name)
+            self.while_migrating(timeout_seconds)
             self.argo_service.wait_for_suspend(workflow_name=self.workflow_name, timeout_seconds=timeout_seconds)
+
+    def while_migrating(self, timeout_seconds: int):
+        """Hook for checks while the migration runs, before waiting for it to finish."""
+        pass
 
     def post_migration_actions(self):
         """Hook for actions after migration completes but before verification.
