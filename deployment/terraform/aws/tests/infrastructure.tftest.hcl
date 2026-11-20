@@ -408,6 +408,28 @@ run "account_readonly_access_skipped_for_the_account_root_caller" {
   }
 }
 
+# aws-bootstrap.sh mirrors charts and images into charts/* and mirrored/* repositories; the
+# in-cluster chart installer pulls them with the pod role, so scoping ECR to the module's own
+# repository alone fails every chart pull with 403.
+run "ecr_covers_the_bootstrap_mirror_repositories_read_only" {
+  command = plan
+
+  variables {
+    region = "us-east-1"
+  }
+
+  assert {
+    condition = anytrue([
+      for s in data.aws_iam_policy_document.migration_pods.statement :
+      contains(s.resources, "arn:aws:ecr:us-east-1:123456789012:repository/charts/*") &&
+      contains(s.resources, "arn:aws:ecr:us-east-1:123456789012:repository/mirrored/*") &&
+      !anytrue([for a in s.actions : contains(["ecr:PutImage", "ecr:InitiateLayerUpload", "ecr:UploadLayerPart", "ecr:CompleteLayerUpload"], a)])
+      if s.sid == "EcrMirroredPull"
+    ])
+    error_message = "EcrMirroredPull must grant pull-only access to the charts/* and mirrored/* repositories."
+  }
+}
+
 # The otel collector's awsemf exporters do not set log_group_name, so they fall back
 # to the exporter's default /metrics/default group. Scoping the CloudWatchLogs
 # statement to only the migration-assistant group silently blocks every EKS metric.
