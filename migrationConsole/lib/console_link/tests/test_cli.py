@@ -1095,6 +1095,7 @@ def test_get_backfill_status_with_deep_check_as_json(runner, mocker):
         "documents_failed_non_retryable": 2,
         "documents_failed_retries_exhausted": 1,
         "shards_with_failures": [{"index": "idx", "shard": 0, "non_retryable": 2, "retries_exhausted": 1}],
+        "failed_documents_count_error": None,
     }
     mock_build_status = mocker.patch.object(
         K8sRFSBackfill,

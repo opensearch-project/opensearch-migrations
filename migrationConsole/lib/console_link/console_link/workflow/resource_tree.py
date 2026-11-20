@@ -455,7 +455,7 @@ def _format_backfill_status(backfill: Dict[str, Any]):
     failed_part, failed_details = _format_failed_documents(backfill)
     if failed_part:
         parts.append(failed_part)
-        details.extend(failed_details)
+    details.extend(failed_details)
     eta = _format_eta(summary.get('etaMs'))
     if eta:
         parts.append(f"ETA {eta}")
@@ -480,16 +480,33 @@ def _format_eta(eta_ms) -> Optional[str]:
     return f"{h}h {m}m {s}s"
 
 
+def failed_count_as_of(backfill: Dict[str, Any]) -> Optional[str]:
+    """When the failed-document count shown was taken, if that wasn't this refresh: the monitor keeps the last
+    count when it can't take a new one, and counts only grow, so that one is a lower bound."""
+    counted_at = (backfill.get('failures') or {}).get('countedAt')
+    return counted_at if counted_at and counted_at != backfill.get('updatedAt') else None
+
+
 def _format_failed_documents(backfill: Dict[str, Any]):
-    """The summary-line part and the detail lines for failed documents, or (None, []) when none were counted."""
+    """The summary-line part and the detail lines for failed documents: (None, []) when none were counted and
+    nothing went wrong counting them."""
     summary = backfill.get('summary') or {}
-    failed = summary.get('documentsFailed') or 0
-    if failed <= 0:
-        return None, []
-    details = [f"failed documents: {failed} (non-retryable {summary.get('documentsFailedNonRetryable') or 0}, "
-               f"retries exhausted {summary.get('documentsFailedRetriesExhausted') or 0})"]
-    details.extend(_format_failed_shards(backfill.get('failures') or {}))
-    return f"failed {failed}", details
+    failures = backfill.get('failures') or {}
+    failed = summary.get('documentsFailed')
+    error = failures.get('countError')
+    as_of = failed_count_as_of(backfill)
+    if failed is None:
+        return None, ([f"failed documents: not counted yet ({error})"] if error else [])
+    details = []
+    if failed > 0 or as_of:
+        count = f"at least {failed} as of {as_of}" if as_of else str(failed)
+        details.append(f"failed documents: {count} (non-retryable {summary.get('documentsFailedNonRetryable') or 0}, "
+                       f"retries exhausted {summary.get('documentsFailedRetriesExhausted') or 0})")
+        details.extend(_format_failed_shards(failures))
+    if error:
+        details.append(f"couldn't count failed documents at {backfill.get('updatedAt')}: {error}")
+    part = (f"failed at least {failed}" if as_of else f"failed {failed}") if failed > 0 else None
+    return part, details
 
 
 def _format_failed_shards(failures: Dict[str, Any]) -> List[str]:

@@ -22,10 +22,14 @@ STATUS_LIB = SCRIPTS / "rfsBackfillStatusLib.sh"
 pytestmark = pytest.mark.skipif(shutil.which("jq") is None, reason="jq is not installed")
 
 
-def document_backfill(console_json: dict, phase="Running", message="Document backfill is Running") -> dict:
+NOW = "2026-11-20T07:03:02Z"
+
+
+def document_backfill(console_json: dict, phase="Running", message="Document backfill is Running",
+                      previous=None, updated_at=NOW) -> dict:
     result = subprocess.run(
-        ["jq", "-c", "--arg", "phase", phase, "--arg", "message", message,
-         "--arg", "updatedAt", "2026-11-20T07:03:02Z", "-f", str(JQ_SCRIPT)],
+        ["jq", "-c", "--arg", "phase", phase, "--arg", "message", message, "--arg", "updatedAt", updated_at,
+         "--argjson", "previous", json.dumps(previous), "-f", str(JQ_SCRIPT)],
         input=json.dumps(console_json), capture_output=True, text=True, check=True)
     return json.loads(result.stdout)
 
@@ -60,6 +64,8 @@ def test_maps_progress_and_failed_document_counts():
         "indexCount": 2,
         "indices": [{"index": "idx-b", "nonRetryable": 5, "retriesExhausted": 0},
                     {"index": "idx-a", "nonRetryable": 2, "retriesExhausted": 1}],
+        "countedAt": NOW,
+        "countError": None,
         "streamLocation": "s3://bucket/prefix/session=abc/",
         "streamHasRecords": True,
     }
@@ -69,7 +75,9 @@ def test_keeps_the_20_shards_and_indices_with_the_most_failures_and_counts_all_o
     shards = [ShardFailedDocuments(index=f"idx-{i % 30}", shard=i, non_retryable=100 - i, retries_exhausted=0)
               for i in range(45)]
     failures = document_backfill(console_status(
-        status=StepStateWithPause.RUNNING, percentage_completed=50.0, shards_with_failures=shards))["failures"]
+        status=StepStateWithPause.RUNNING, percentage_completed=50.0, documents_failed=sum(100 - i for i in range(45)),
+        documents_failed_non_retryable=sum(100 - i for i in range(45)), documents_failed_retries_exhausted=0,
+        shards_with_failures=shards))["failures"]
 
     assert (failures["shardCount"], len(failures["shards"])) == (45, 20)
     assert failures["shards"][0] == {"index": "idx-0", "shard": 0, "nonRetryable": 100, "retriesExhausted": 0}
@@ -84,7 +92,83 @@ def test_without_a_status_result_reports_no_progress_and_unknown_failures():
     assert backfill["summary"]["shardsTotal"] == 0
     assert backfill["summary"]["documentsFailed"] is None
     assert backfill["failures"] == {"shardCount": 0, "shards": [], "indexCount": 0, "indices": [],
+                                    "countedAt": None, "countError": None,
                                     "streamLocation": None, "streamHasRecords": None}
+
+
+EARLIER = "2026-11-20T07:02:01Z"
+
+
+def counted_earlier() -> dict:
+    """A documentBackfill the monitor wrote a minute ago, when it could count: 5 failed in idx/2."""
+    return document_backfill(console_status(
+        status=StepStateWithPause.RUNNING, percentage_completed=40.0, shard_total=5, shard_complete=2,
+        documents_failed=5, documents_failed_non_retryable=5, documents_failed_retries_exhausted=0,
+        shards_with_failures=[ShardFailedDocuments(index="idx", shard=2, non_retryable=5, retries_exhausted=0)]),
+        updated_at=EARLIER)
+
+
+def test_keeps_the_last_count_when_a_refresh_cannot_count():
+    backfill = document_backfill(console_status(
+        status=StepStateWithPause.RUNNING, percentage_completed=60.0, shard_total=5, shard_complete=3,
+        failed_documents_count_error="ConnectionError: coordinator unreachable"), previous=counted_earlier())
+
+    assert backfill["summary"]["shardsMigrated"] == 3  # progress is this refresh's
+    assert (backfill["summary"]["documentsFailed"], backfill["summary"]["documentsFailedNonRetryable"]) == (5, 5)
+    assert backfill["failures"]["shards"] == [{"index": "idx", "shard": 2, "nonRetryable": 5, "retriesExhausted": 0}]
+    assert backfill["failures"]["countedAt"] == EARLIER
+    assert backfill["failures"]["countError"] == "ConnectionError: coordinator unreachable"
+
+
+def test_keeps_the_last_count_when_the_whole_status_check_failed():
+    backfill = document_backfill({}, phase="Unknown", message="Status check failed", previous=counted_earlier())
+
+    assert backfill["summary"]["documentsFailed"] == 5
+    assert backfill["failures"]["countedAt"] == EARLIER
+
+
+def test_a_new_count_replaces_the_carried_one():
+    backfill = document_backfill(console_status(
+        status=StepStateWithPause.RUNNING, percentage_completed=80.0, documents_failed=0,
+        documents_failed_non_retryable=0, documents_failed_retries_exhausted=0, shards_with_failures=[]),
+        previous=counted_earlier())
+
+    assert backfill["summary"]["documentsFailed"] == 0
+    assert (backfill["failures"]["shards"], backfill["failures"]["countedAt"]) == ([], NOW)
+
+
+def test_views_mark_a_carried_count_as_a_lower_bound_and_say_why():
+    from console_link.workflow.resource_tree import ResourceNode, format_live_status
+    from console_link.workflow.tree_utils import _format_snapshot_migration_backfill_status
+
+    backfill = document_backfill(console_status(
+        status=StepStateWithPause.RUNNING, percentage_completed=60.0, shard_total=5, shard_complete=3,
+        failed_documents_count_error="ConnectionError: coordinator unreachable"), previous=counted_earlier())
+    resource = ResourceNode(name="sm-0", plural="snapshotmigrations", phase="Running", depends_on=[], spec={},
+                            status={"documentBackfill": backfill})
+
+    summary, details = format_live_status(resource)
+
+    assert summary == "Backfill status: 60%, shards 3/5, failed at least 5"
+    assert f"failed documents: at least 5 as of {EARLIER} (non-retryable 5, retries exhausted 0)" in details
+    assert f"couldn't count failed documents at {NOW}: ConnectionError: coordinator unreachable" in details
+    assert "failed at least 5)" in _format_snapshot_migration_backfill_status(backfill)
+
+
+def test_views_say_the_count_is_missing_rather_than_zero_before_any_count():
+    from console_link.workflow.resource_tree import ResourceNode, format_live_status
+
+    backfill = document_backfill(console_status(
+        status=StepStateWithPause.RUNNING, percentage_completed=60.0, shard_total=5, shard_complete=3,
+        failed_documents_count_error="ConnectionError: coordinator unreachable"))
+    resource = ResourceNode(name="sm-0", plural="snapshotmigrations", phase="Running", depends_on=[], spec={},
+                            status={"documentBackfill": backfill})
+
+    summary, details = format_live_status(resource)
+
+    assert backfill["summary"]["documentsFailed"] is None
+    assert "failed" not in summary
+    assert "failed documents: not counted yet (ConnectionError: coordinator unreachable)" in details
 
 
 def test_both_views_show_the_failed_documents_the_monitor_writes():
@@ -163,6 +247,16 @@ def test_replaces_document_backfill_whole_with_a_json_patch(tmp_path):
     assert patch_type == "json"
     assert [(op["op"], op["path"]) for op in patch] == [("add", "/status/phase"), ("add", "/status/documentBackfill")]
     assert patch[1]["value"]["phase"] == "Pending" and patch[1]["value"]["message"] == "installed"
+
+
+def test_document_backfill_keeps_the_count_of_the_status_it_replaces(tmp_path):
+    previous = json.dumps(counted_earlier())
+    script = f"replace_document_backfill \"$(document_backfill Unknown failed '' '{previous}')\""
+    calls = run_status_lib(tmp_path, script, fail_json_patch=False)
+
+    written = patch_of(calls[0])[1][0]["value"]
+    assert (written["phase"], written["summary"]["documentsFailed"], written["failures"]["countedAt"]) == (
+        "Unknown", 5, EARLIER)
 
 
 def test_falls_back_to_a_merge_patch_before_status_exists(tmp_path):

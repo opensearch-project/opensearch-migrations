@@ -521,10 +521,12 @@ status:
       shardsMigrated: <integer>
       shardsInProgress: <integer>
       shardsWaiting: <integer>
-      documentsFailed: <integer|null>                  # null when the working state couldn't be counted
+      documentsFailed: <integer|null>                  # null until the first successful count
       documentsFailedNonRetryable: <integer|null>
       documentsFailedRetriesExhausted: <integer|null>
     failures:
+      countedAt: <UTC timestamp|null>                  # when the count above was taken
+      countError: <string|null>                        # why this poll couldn't count, if it couldn't
       shardCount: <integer>                            # shards with a failed document
       shards: [{index, shard, nonRetryable, retriesExhausted}]   # the 20 with the most
       indexCount: <integer>
@@ -533,7 +535,9 @@ status:
       streamHasRecords: <boolean|null>
 ```
 
-The failed-document counts are recomputed from scratch on every poll: an aggregation over the working-state index sums the `committed_metrics.metrics.failures` that each RFS work item records when it commits. Each work item covers its own range of a shard and its metrics are written once, so the sum is exact; it lags only the work items still in flight. A positive count also makes a finished backfill `CompletedWithErrors`, with or without a failed document stream. `console backfill status --deep-check` lists every shard with failures; the CR keeps the top 20.
+The failed-document counts cover the whole SnapshotMigration. They are recomputed from scratch on every poll: an aggregation over the working-state index sums the `committed_metrics.metrics.failures` that each RFS work item records when it commits. Each work item covers its own range of a shard and its metrics are written once, so the sum is exact; it lags only the work items still in flight. The status refreshes the index first and reads it through one search `preference`, so all of a status's queries see the same point in time. The per-shard breakdown (one row per shard with a failure; `console backfill status --deep-check` lists all of them, the CR keeps the top 20) identifies shards by index name and shard number.
+
+If a poll can't count, the CronJob doesn't wait or fail: it keeps the previous count, whose `countedAt` stays older than `updatedAt`, and records `countError`. Counts only grow, so the kept count is a lower bound, and `workflow status` shows it as "at least N". The final status is held to a stricter rule: a backfill whose shards are all done but whose failures couldn't be counted reports `Running`, not `Completed`, so the CronJob doesn't commit it and tries again on its next run. Once counted, a positive count makes it `CompletedWithErrors`, with or without a failed document stream.
 
 The mapping from the console's JSON to this object is `rfsBackfillStatus.jq`. The CronJob, and the workflow's seed of the initial `Pending` value during CronJob apply, replace `documentBackfill` whole with a JSON patch (`rfsBackfillStatusLib.sh`), so no field outlives the refresh or the run that wrote it. The CronJob is the only writer after that seed. `workflow status` and `workflow manage` read it for RFS wait nodes instead of rerunning live checks.
 

@@ -664,7 +664,10 @@ def _format_snapshot_migration_backfill_status(status: Dict[str, Any]) -> Option
         details.append(f"waiting {shards_waiting}")
 
     if (summary.get('documentsFailed') or 0) > 0:
-        details.append(f"failed {_format_number(summary['documentsFailed'])}")
+        # A count carried over from an earlier refresh is a lower bound (see resource_tree.failed_count_as_of).
+        counted_at = (status.get('failures') or {}).get('countedAt')
+        at_least = "at least " if counted_at and counted_at != updated_at else ""
+        details.append(f"failed {at_least}{_format_number(summary['documentsFailed'])}")
 
     parts = [str(phase)] if phase else []
     if details:

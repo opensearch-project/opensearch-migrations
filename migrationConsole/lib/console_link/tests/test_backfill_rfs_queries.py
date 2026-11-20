@@ -10,6 +10,7 @@ import yaml
 
 from console_link.environment import Environment
 from console_link.models.cluster import Cluster, HttpMethod
+from console_link.models import backfill_rfs
 from console_link.models.backfill_rfs import get_detailed_status_obj, BackfillOverallStatus
 from console_link.models.step_state import StepStateWithPause
 from tests.search_containers import SearchContainer, Version
@@ -395,6 +396,44 @@ def test_completed_backfill_with_counted_failures_is_completed_with_errors_witho
 
     assert status.status == StepStateWithPause.COMPLETED_WITH_ERRORS, f"{status}"
     assert status.documents_failed == 8
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("env_with_cluster", [TEST_VERSION], indirect=True)
+def test_status_sees_work_items_committed_since_the_last_refresh(env_with_cluster: Environment):
+    # RFS creates the index with a 30s refresh interval and refreshes it only for its own checks.
+    target_cluster = env_with_cluster.target_cluster
+    create_working_state_index(target_cluster)
+    target_cluster.call_api(f"/{WORKING_STATE_INDEX}/_settings", HttpMethod.PUT,
+                            data=json.dumps({"index": {"refresh_interval": "30s"}}),
+                            headers={"Content-Type": "application/json"})
+    target_cluster.call_api(f"/{WORKING_STATE_INDEX}/_doc/shard_setup", HttpMethod.PUT,
+                            data=json.dumps({"completedAt": current_time, "status": "completed"}),
+                            headers={"Content-Type": "application/json"})
+    put_work_item(target_cluster, "idx-b", 0, 0, 80, True, non_retryable=5, shard_complete=True)  # not refreshed
+
+    status = get_detailed_status_obj(target_cluster)
+
+    assert (status.status, status.documents_failed) == (StepStateWithPause.COMPLETED_WITH_ERRORS, 5), f"{status}"
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("env_with_cluster", [TEST_VERSION], indirect=True)
+def test_finished_backfill_stays_running_until_its_failed_documents_can_be_counted(
+        env_with_cluster: Environment, monkeypatch):
+    target_cluster = env_with_cluster.target_cluster
+    create_working_state_index(target_cluster)
+    create_working_state_with_failures(target_cluster)
+
+    def unreachable(*args, **kwargs):
+        raise ConnectionError("coordinator unreachable")
+    monkeypatch.setattr(backfill_rfs, "_search", unreachable)  # only the failed-document queries use it
+
+    status = get_detailed_status_obj(target_cluster)
+
+    assert (status.status, status.percentage_completed, status.finished) == (StepStateWithPause.RUNNING, 100.0, None)
+    assert status.documents_failed is None
+    assert status.failed_documents_count_error == "ConnectionError: coordinator unreachable"
 
 
 @pytest.mark.slow

@@ -1,3 +1,4 @@
+import json
 from kubernetes import config
 import pathlib
 
@@ -88,6 +89,78 @@ def test_deep_status_text_lists_failed_documents_overall_and_per_shard(monkeypat
         "  idx-b shard 0: 5 (non-retryable 5, retries exhausted 0)",
         "  idx-a shard 0: 3 (non-retryable 2, retries exhausted 1)",
     ]
+
+
+def test_deep_status_text_says_failed_documents_could_not_be_counted(monkeypatch):
+    from console_link.models import backfill_rfs
+    from console_link.models.backfill_base import BackfillOverallStatus
+    from console_link.models.step_state import StepStateWithPause
+
+    status = BackfillOverallStatus(status=StepStateWithPause.RUNNING, percentage_completed=100.0, shard_total=4,
+                                   shard_complete=4, shard_in_progress=0, shard_waiting=0,
+                                   failed_documents_count_error="ConnectionError: coordinator unreachable")
+    monkeypatch.setattr(backfill_rfs, "get_detailed_status_obj", lambda **kwargs: status)
+
+    text = backfill_rfs.get_detailed_status(target_cluster=None, session_name="s")
+
+    assert text.splitlines()[-1] == "Failed documents: couldn't be counted (ConnectionError: coordinator unreachable)"
+
+
+class _RecordingCluster:
+    """Answers the status's working-state requests with a finished backfill and records each one."""
+
+    def __init__(self):
+        self.requests = []
+
+    def call_api(self, path, method=None, data=None, headers=None, **kwargs):
+        from unittest.mock import MagicMock
+        self.requests.append((getattr(method, "name", "GET"), path))
+        body = json.loads(data) if data else {}
+        aggs = body.get("aggs") or {}
+        if "unique_pair_count" in aggs:  # every progress query: 2 shards, so total == completed (finished)
+            result = {"aggregations": {"unique_pair_count": {"value": 2}}, "hits": {"total": {"value": 2}, "hits": []}}
+        elif "shards" in aggs:
+            result = {"aggregations": {"shards": {"buckets": []}}, "_shards": {"failed": 0}}
+        elif "non_retryable" in aggs:
+            result = {"aggregations": {"non_retryable": {"value": 0}, "retries_exhausted": {"value": 0}},
+                      "_shards": {"failed": 0}}
+        elif "max_completed" in aggs:
+            result = {"aggregations": {"max_completed": {"value": 1700000000}}}
+        elif "_mapping" in path:
+            result = {}
+        else:
+            result = {"hits": {"total": {"value": 1}, "hits": [{"_source": {"completedAt": 1700000000}}]},
+                      "_source": {"completedAt": 1700000000}}
+        response = MagicMock()
+        response.json.return_value = result
+        return response
+
+
+def test_status_refreshes_the_working_state_first_and_reads_one_copy_of_it():
+    from console_link.models import backfill_rfs
+
+    cluster = _RecordingCluster()
+    backfill_rfs.get_detailed_status_obj(cluster, session_name="s")
+
+    searches = [i for i, (_, path) in enumerate(cluster.requests) if "/_search" in path]
+    refresh = cluster.requests.index(("POST", "/.migrations_working_state_s/_refresh"))
+    assert searches and refresh < searches[0], cluster.requests
+    assert all(cluster.requests[i][1].endswith("/_search?preference=" + backfill_rfs.STATUS_SEARCH_PREFERENCE)
+               for i in searches), cluster.requests
+
+
+@pytest.mark.parametrize("incomplete", [{"timed_out": True}, {"_shards": {"total": 1, "failed": 1}}],
+                         ids=["timed-out", "shard-failed"])
+def test_failed_document_count_refuses_a_partial_search(incomplete):
+    from unittest.mock import MagicMock
+    from console_link.models import backfill_rfs
+
+    cluster = MagicMock()
+    cluster.call_api.return_value.json.return_value = {
+        "aggregations": {"non_retryable": {"value": 1}, "retries_exhausted": {"value": 0}}, **incomplete}
+
+    with pytest.raises(backfill_rfs.FailedDocumentCountUnavailable, match="incomplete search"):
+        backfill_rfs.get_failed_document_counts(cluster, ".migrations_working_state")
 
 
 def test_deep_status_text_omits_failed_documents_when_they_could_not_be_counted(monkeypatch):

@@ -79,8 +79,12 @@ delete_runtime_resources() {
     fi
 }
 
+# The status being replaced; its failed-document count is kept when a refresh can't count.
+previous_backfill="$(printf '%s' "$sm_json" | jq -c '.status.documentBackfill // null' 2>/dev/null || true)"
+previous_backfill="${previous_backfill:-null}"
+
 patch_backfill_status() {
-    replace_document_backfill "$(document_backfill "$1" "$2" "${3:-}")"
+    replace_document_backfill "$(document_backfill "$1" "$2" "${3:-}" "$previous_backfill")"
 }
 
 parent_workflow_running() {
@@ -130,9 +134,13 @@ if [ -z "$status_json" ] || [ -z "$status" ]; then
     exit 0
 fi
 
+# Every shard done but no failed-document count yet: the console reports Running, so this run doesn't commit
+# Completed, and the next run tries again.
 status_message="$(printf '%s' "$status_json" | jq -r '
     if .status == "Pending" then
         "Shards are initializing"
+    elif .failed_documents_count_error and (.percentage_completed // 0) >= 100 then
+        "Every shard is migrated; waiting to count failed documents before finishing"
     else
         "Document backfill is " + (.status | tostring)
     end
@@ -155,7 +163,8 @@ commit_ops="$(jq -nc --arg cc "$CONFIG_CHECKSUM" --arg cr "$CHECKSUM_FOR_REPLAYE
     '[{op: "add", path: "/status/phase", value: "Completed"},
       {op: "add", path: "/status/configChecksum", value: $cc},
       {op: "add", path: "/status/checksumForReplayer", value: $cr}]')"
-replace_document_backfill "$(document_backfill "$status" "$status_message" "$status_json")" "$commit_ops"
+replace_document_backfill "$(document_backfill "$status" "$status_message" "$status_json" "$previous_backfill")" \
+    "$commit_ops"
 
 delete_runtime_resources
 delete_cronjob_with_preconditions || true

@@ -24,6 +24,14 @@ logger = logging.getLogger(__name__)
 
 WORKING_STATE_INDEX = ".migrations_working_state"
 JSON_HEADERS = {"Content-Type": "application/json"}
+# Every status search names the same copy of the working-state index (it has a replica), so the queries
+# behind one status, and successive statuses, never see that index at different points in time.
+STATUS_SEARCH_PREFERENCE = "migration-console-status"
+
+
+def search_path(index_name: str) -> str:
+    return f"/{index_name}/_search?preference={STATUS_SEARCH_PREFERENCE}"
+
 
 DOCKER_RFS_SCHEMA = {
     "type": "dict",
@@ -222,7 +230,9 @@ def get_detailed_status(target_cluster: Cluster, session_name: str,
         f"In progress shards: {values.shard_in_progress}",
         f"Waiting shards: {values.shard_waiting}",
     ]
-    if values.documents_failed is not None:
+    if values.failed_documents_count_error:
+        lines.append(f"Failed documents: couldn't be counted ({values.failed_documents_count_error})")
+    elif values.documents_failed is not None:
         lines.append(f"Failed documents: {values.documents_failed} (non-retryable "
                      f"{values.documents_failed_non_retryable}, retries exhausted "
                      f"{values.documents_failed_retries_exhausted})")
@@ -271,7 +281,7 @@ def _get_max_completed_epoch(cluster, index_name: str) -> Optional[int]:
     }
     try:
         resp = cluster.call_api(
-            f"/{index_name}/_search",
+            search_path(index_name),
             data=json.dumps(body),
             headers=JSON_HEADERS,
         )
@@ -322,6 +332,7 @@ def get_detailed_status_obj(target_cluster: Cluster,
     except requests.exceptions.RequestException as e:
         logger.debug(f"Working state index does not yet exist, deep status checks can't be performed. {e}")
         raise DeepStatusNotYetAvailable
+    _refresh_working_state(target_cluster, index_to_check)
 
     # Check shard_setup separately
     shard_setup_query = generate_shard_setup_query()
@@ -366,12 +377,18 @@ def get_detailed_status_obj(target_cluster: Cluster,
     started_epoch = _get_shard_setup_started_epoch(target_cluster, index_to_check)
     started_iso = datetime.fromtimestamp(started_epoch, tz=timezone.utc).isoformat() if started_epoch else None
 
-    failures = get_failed_document_counts(target_cluster, index_to_check)
+    # Counted after the progress queries, against the same copy, so a status that reports every shard
+    # done includes the failures those shards' last work items committed.
+    try:
+        failures, count_error = get_failed_document_counts(target_cluster, index_to_check), None
+    except FailedDocumentCountUnavailable as e:
+        failures, count_error = None, str(e)
 
     # finished: only if everything is done, take max completedAt
     finished_iso, percentage_completed, eta_ms, status = compute_dervived_values(
         target_cluster, index_to_check, counts.total, counts.completed, started_epoch, active_workers,
-        has_failed_documents, failed_documents=failures.total if failures else None)
+        has_failed_documents, failed_documents=failures.total if failures else None,
+        failed_documents_counted=failures is not None)
 
     return BackfillOverallStatus(
         status=status,
@@ -387,15 +404,17 @@ def get_detailed_status_obj(target_cluster: Cluster,
         documents_failed_non_retryable=failures.non_retryable if failures else None,
         documents_failed_retries_exhausted=failures.retries_exhausted if failures else None,
         shards_with_failures=failures.shards if failures else None,
+        failed_documents_count_error=count_error,
     )
 
 
 def compute_dervived_values(target_cluster, index_to_check, total, completed, started_epoch, active_workers: bool,
-                            has_failed_documents: Optional[bool] = None, failed_documents: Optional[int] = None):
+                            has_failed_documents: Optional[bool] = None, failed_documents: Optional[int] = None,
+                            failed_documents_counted: bool = True):
     """``has_failed_documents`` is None only when the stream was not configured, so never
     consulted; an unreadable stream raises upstream rather than arriving here as None.
     ``failed_documents`` is the count the work items committed, so it sees failures even when no
-    stream is configured."""
+    stream is configured. ``failed_documents_counted`` is False when that count couldn't be read."""
     # Consider it completed if there's nothing to do (total = 0) or we've completed all shards
     if total == 0 or (total > 0 and completed >= total):
         max_completed_epoch = _get_max_completed_epoch(target_cluster, index_to_check)
@@ -406,6 +425,10 @@ def compute_dervived_values(target_cluster, index_to_check, total, completed, st
         )
         percentage_completed = 100.0
         eta_ms = None
+        if not failed_documents_counted:
+            # Every shard is done, but whether it finished with errors isn't known yet. Report it still running,
+            # so nothing records it finished (the RFS monitor commits only Completed/CompletedWithErrors).
+            return None, percentage_completed, eta_ms, StepStateWithPause.RUNNING
         # Only a definite True or a positive count downgrades to CompletedWithErrors; None means not consulted.
         status = (StepStateWithPause.COMPLETED_WITH_ERRORS
                   if has_failed_documents is True or (failed_documents or 0) > 0
@@ -440,27 +463,49 @@ class FailedDocumentCounts:
         return self.non_retryable + self.retries_exhausted
 
 
-def get_failed_document_counts(cluster: Cluster, index_name: str) -> Optional[FailedDocumentCounts]:
-    """Failed documents summed over every committed work item, overall and per shard; None if the working
-    state couldn't be queried, so an outage never reads as "no failures"."""
+class FailedDocumentCountUnavailable(Exception):
+    """The working state couldn't be queried for failed documents, so how many there are isn't known."""
+
+
+def get_failed_document_counts(cluster: Cluster, index_name: str) -> FailedDocumentCounts:
+    """Failed documents summed over every committed work item, overall and per shard. Raises
+    FailedDocumentCountUnavailable rather than reporting a count it couldn't read."""
     try:
-        totals = _search(cluster, index_name, {
+        response = _search(cluster, index_name, {
             "size": 0,
             "query": {"exists": {"field": "committed_metrics"}},
             "aggs": _failure_sums(),
-        })["aggregations"]
+        })
+        totals = response["aggregations"]
         shards = _shards_with_failures(cluster, index_name)
     except Exception as e:
         logger.warning(f"Could not count failed documents in {index_name}: {e}")
-        return None
+        raise FailedDocumentCountUnavailable(f"{type(e).__name__}: {e}") from e
     return FailedDocumentCounts(non_retryable=_sum_value(totals, "non_retryable"),
                                 retries_exhausted=_sum_value(totals, "retries_exhausted"),
                                 shards=shards)
 
 
+def _refresh_working_state(cluster: Cluster, index_name: str) -> None:
+    """Make every committed work item searchable before the status reads it: RFS refreshes the index only
+    for its own checks, and it's created with a 30s refresh interval. Best effort: without it the status
+    just lags by up to that interval."""
+    try:
+        cluster.call_api(f"/{index_name}/_refresh", method=HttpMethod.POST)
+    except Exception as e:
+        logger.warning(f"Could not refresh {index_name}; status may lag recent work items: {e}")
+
+
 def _search(cluster: Cluster, index_name: str, body: dict) -> dict:
-    return cluster.call_api(f"/{index_name}/_search", method=HttpMethod.POST, data=json.dumps(body),
-                            headers=JSON_HEADERS).json()
+    """A search that fails outright, partly (a shard failed) or by timing out raises: a sum over part of the
+    working state would undercount."""
+    response = cluster.call_api(search_path(index_name), method=HttpMethod.POST, data=json.dumps(body),
+                                headers=JSON_HEADERS).json()
+    shards = response.get("_shards") or {}
+    if response.get("timed_out") or shards.get("failed"):
+        raise RuntimeError(f"incomplete search of {index_name}: timed_out={response.get('timed_out')}, "
+                           f"_shards={shards}")
+    return response
 
 
 def _failure_sums() -> dict:
@@ -644,7 +689,7 @@ def backup_working_state_index(cluster: Cluster, index_name: str, backup_path: s
 def parse_query_response(query: dict, cluster: Cluster, index_name: str, label: str) -> Optional[int]:
     try:
         logger.debug(f"Creating request: /{index_name}/_search; {query}")
-        response = cluster.call_api(f"/{index_name}/_search", method=HttpMethod.POST, data=json.dumps(query),
+        response = cluster.call_api(search_path(index_name), method=HttpMethod.POST, data=json.dumps(query),
                                     headers=JSON_HEADERS)
     except Exception as e:
         logger.error(f"Failed to execute query: {e}")
@@ -663,7 +708,7 @@ def parse_query_response(query: dict, cluster: Cluster, index_name: str, label: 
 def parse_shard_setup_response(query: dict, cluster: Cluster, index_name: str) -> bool:
     """Check if shard_setup document has completedAt field set"""
     try:
-        response = cluster.call_api(f"/{index_name}/_search", method=HttpMethod.POST, data=json.dumps(query),
+        response = cluster.call_api(search_path(index_name), method=HttpMethod.POST, data=json.dumps(query),
                                     headers=JSON_HEADERS)
         body = response.json()
         hits = body.get('hits', {}).get('hits', [])
