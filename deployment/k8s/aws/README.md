@@ -106,8 +106,8 @@ deployment.
 
 ## Use an existing Migration Assistant stack
 
-When the CloudFormation stack was deployed separately, including by Terraform
-or external CDK, skip the CloudFormation step:
+When the CloudFormation stack was deployed separately, for example by external
+CDK, skip the CloudFormation step:
 
 ```bash
 ./deployment/k8s/aws/aws-bootstrap.sh \
@@ -117,7 +117,14 @@ or external CDK, skip the CloudFormation step:
 ```
 
 The script resolves the cluster and other resources from the Migration
-Assistant CloudFormation exports for the selected stage.
+Assistant CloudFormation exports for the selected stage, so
+`--skip-cfn-deploy` only reuses an existing CloudFormation stack.
+
+An environment provisioned with the
+[AWS Terraform module](../../terraform/aws/README.md) has no CloudFormation
+stack or exports, so `aws-bootstrap.sh` cannot install into it. Use the
+module's `deploy_helm = true` option instead, as described in
+[Install the Helm chart with Terraform](../../terraform/aws/README.md#install-the-helm-chart-with-terraform).
 
 ## Build and deploy the current checkout
 
