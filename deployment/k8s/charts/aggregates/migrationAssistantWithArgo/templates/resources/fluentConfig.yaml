@@ -28,6 +28,9 @@ data:
             end
             if record["log_processed"]["level"] then
                 record["level"] = record["log_processed"]["level"]
+            elseif record["log_processed"]["log.level"] then
+                -- ECS JSON (RFS's JsonTemplateLayout) names the level log.level
+                record["level"] = record["log_processed"]["log.level"]
             end
         elseif record["log"] then
             if record["msg"] then
