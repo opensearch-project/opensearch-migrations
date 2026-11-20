@@ -41,10 +41,11 @@ WIDE_TERMINAL = {**os.environ, "COLUMNS": "400"}
 STEP_VIEW_BACKFILL = re.compile(
     r"\((?P<step_phase>\w+)\): RFS: (?P<phase>\w+) \((?P<pct>[\d.]+)%, shards (?P<migrated>\d+)/(?P<total>\d+)"
     r"[^)]*\) updated (?P<updated>\S+)")
-# The resource view lists it under the SnapshotMigration, percentage rounded to a whole number.
+# The resource view lists it under the SnapshotMigration, percentage rounded to a whole number and an
+# ETA appended while one is known ("Backfill status: 40%, shards 2/5, ETA 0h 1m 27s").
 RESOURCE_VIEW_BACKFILL = re.compile(
-    r"Backfill status: (?P<pct>[\d.]+)%, shards (?P<migrated>\d+)/(?P<total>\d+) .*?"
-    r"phase: (?P<phase>\w+) .*?updated at: (?P<updated>\S+)")
+    r"Backfill status: (?P<pct>[\d.]+)%, shards (?P<migrated>\d+)/(?P<total>\d+)\b.*?"
+    r"phase: (?P<phase>\w+)\b.*?updated at: (?P<updated>\S+)")
 
 
 def workflow_status_output(*args) -> str:
@@ -144,7 +145,7 @@ class Test0002SingleDocumentBackfillWithRfsCoordinatorCluster(MATestBase):
     """Covers RFS worker -> S3 -> console -> CompletedWithErrors with a terminally failing document.
 
     A document transform holds the backfill for BACKFILL_HOLD_SECONDS. While it's held, both views of
-    `workflow status` must report the SnapshotMigration's backfill status: the step view on the running
+    `workflow status` must report the SnapshotMigration's backfill status: the step view on the unfinished
     step that waits for it, the resource view on the SnapshotMigration. Once it's done, the resource view
     must report CompletedWithErrors at 100%.
     """
@@ -374,14 +375,16 @@ class Test0002SingleDocumentBackfillWithRfsCoordinatorCluster(MATestBase):
         raise AssertionError("SnapshotMigration.status.documentBackfill kept changing during `workflow status`")
 
     def _assert_step_view_reports_backfill(self) -> dict:
-        """The step view shows the backfill status on the running step that waits for it. Returns the status."""
+        """The step view shows the backfill status on the step still waiting for it. Returns the status."""
         def read():
             return [m.groupdict() for m in STEP_VIEW_BACKFILL.finditer(workflow_status_output())]
         backfill, shown = self._read_while_unchanged(read)
         if len(shown) != 1:
             raise AssertionError(f"Expected one backfill status in the step view, found {shown}. Status: {backfill}")
         self._assert_view_matches("step view", shown[0], backfill, pct_tolerance=0.01)
-        self._assert_field(shown[0], "step_phase", "Running")
+        # The wait retries in a fresh pod each attempt, so between attempts the step is Pending.
+        if shown[0]["step_phase"] not in ("Pending", "Running"):
+            raise AssertionError(f"The step waiting for the backfill has already finished: {shown[0]}")
         return backfill
 
     def _assert_resource_view_reports_backfill(self) -> dict:
