@@ -106,6 +106,9 @@ def main():
     shipping_fluent_bit = fluent_bit_values(shipping, "AKS monitor")
     if "Name                  azure_logs_ingestion" not in shipping_fluent_bit:
         fail("The AKS monitor chart does not configure the azure_logs_ingestion output")
+    if not re.search(r'Name\s+azure_logs_ingestion\n\s+Match\s+fluentbit-\*\n\s+log_level\s+warn\n',
+                     shipping_fluent_bit):
+        fail("The azure_logs_ingestion output must log at warn, or its per-upload info lines are shipped back")
     if "Name               file" in shipping_fluent_bit:
         fail("The AKS monitor chart still configures the fluent-bit file output")
     read_keys = set(CONFIG_MAP_KEYS.findall(shipping_fluent_bit))

@@ -55,10 +55,12 @@ charts:
         # azure_logs_ingestion authenticates only with an Entra client secret; it has no managed
         # identity or Workload ID option. Every Log Analytics table needs TimeGenerated, so the
         # record's own timestamp is written there in ISO 8601 rather than left to ingestion time.
+        # The plugin logs every upload at info, and fluent-bit ships its own logs, so info would loop.
         outputs: |
           [OUTPUT]
               Name                  azure_logs_ingestion
               Match                 fluentbit-*
+              log_level             warn
               tenant_id             ${MONITOR_TENANT_ID}
               client_id             ${MONITOR_CLIENT_ID}
               client_secret         ${MONITOR_CLIENT_SECRET}

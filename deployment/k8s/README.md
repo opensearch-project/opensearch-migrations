@@ -140,8 +140,13 @@ helm install -n ma ma \
   --set azure.monitor.tableName=<table-name>_CL
 ```
 
-Each record carries `TimeGenerated` and `log`, plus fields such as `level`, `namespace`, `pod`, and `container`. The
-data collection rule's stream declaration decides which of them become table columns.
+`dceUrl` takes either a data collection endpoint or the `logsIngestion` endpoint of a data collection rule created
+with `"kind": "Direct"`, which needs no separate data collection endpoint unless you use private link. Each record
+carries `TimeGenerated` and `log`, plus fields such as `level`, `namespace`, `pod`, and `container`. The data
+collection rule's stream declaration decides which of them become table columns.
+
+Fluent Bit reads the `azure.monitor` values when its pods start, so after changing them with `helm upgrade`, run
+`kubectl rollout restart daemonset/fluent-bit -n ma`.
 
 ## Prerequisites
 
