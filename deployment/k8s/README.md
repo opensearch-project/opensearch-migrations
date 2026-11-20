@@ -102,6 +102,47 @@ helm install --create-namespace -n ma ma \
 GCS snapshot repositories are configured per-workflow at workflow-submission time (via the `gcs` snapshot type in the
 workflow config) rather than at Helm-install time, in the same way S3 repositories are configured for EKS deployments.
 
+### AKS
+
+On Azure Kubernetes Service (AKS), install the Helm chart using the AKS overlay
+[valuesAks.yaml](charts/aggregates/migrationAssistantWithArgo/valuesAks.yaml), passing the client ID of the
+managed identity that Microsoft Entra Workload ID federates to the chart's service accounts:
+
+```bash
+helm install --create-namespace -n ma ma \
+  charts/aggregates/migrationAssistantWithArgo \
+  --values charts/aggregates/migrationAssistantWithArgo/valuesAks.yaml \
+  --set azure.workloadIdentityClientId=<managed-identity-client-id> \
+  --set azureStorageConfiguration.accountName=<storage-account>
+```
+
+To ship workload logs to Azure Monitor Logs instead of the shared logs volume, add
+[valuesAksMonitor.yaml](charts/aggregates/migrationAssistantWithArgo/valuesAksMonitor.yaml). Fluent Bit's
+`azure_logs_ingestion` output authenticates only with a Microsoft Entra application's client secret, so create that
+application, give it the Monitoring Metrics Publisher role on the data collection rule, and store its secret in the
+release namespace before installing. The file must not end with a newline:
+
+```bash
+kubectl create namespace ma
+kubectl create secret generic azure-monitor-logs-credentials -n ma \
+  --from-file=clientSecret=<path-to-client-secret-file>
+
+helm install -n ma ma \
+  charts/aggregates/migrationAssistantWithArgo \
+  --values charts/aggregates/migrationAssistantWithArgo/valuesAks.yaml \
+  --values charts/aggregates/migrationAssistantWithArgo/valuesAksMonitor.yaml \
+  --set azure.workloadIdentityClientId=<managed-identity-client-id> \
+  --set azureStorageConfiguration.accountName=<storage-account> \
+  --set azure.monitor.tenantId=<tenant-id> \
+  --set azure.monitor.clientId=<application-client-id> \
+  --set azure.monitor.dceUrl=<ingestion-endpoint> \
+  --set azure.monitor.dcrImmutableId=<dcr-immutable-id> \
+  --set azure.monitor.tableName=<table-name>_CL
+```
+
+Each record carries `TimeGenerated` and `log`, plus fields such as `level`, `namespace`, `pod`, and `container`. The
+data collection rule's stream declaration decides which of them become table columns.
+
 ## Prerequisites
 
 As a developer, you'll need to install

@@ -101,6 +101,16 @@ azure:
   # (azure.workload.identity/client-id) and label the pods (azure.workload.identity/use) that read
   # Azure Blob Storage.
   workloadIdentityClientId: ""
+  # Azure Monitor Logs destination for the fluent-bit azure_logs_ingestion output, enabled by
+  # valuesAksMonitor.yaml. clientId and tenantId identify the Microsoft Entra application whose
+  # secret is read from the azure-monitor-logs-credentials Secret (key clientSecret).
+  monitor:
+    enabled: false
+    tenantId: ""
+    clientId: ""
+    dceUrl: ""
+    dcrImmutableId: ""
+    tableName: ""
 
 gcp:
   project: ""
