@@ -345,12 +345,21 @@ class Test0002SingleDocumentBackfillWithRfsCoordinatorCluster(MATestBase):
         return ((items[0].get("status") or {}).get("documentBackfill") or {}) if items else {}
 
     def _wait_for_backfill_phase(self, phase: str, timeout_seconds: int) -> dict:
+        """Wait for the backfill to report `phase`, failing as soon as it can't: the workflow ended (e.g. its
+        submit was rejected) or the backfill reached a terminal phase without passing through `phase`."""
         deadline = time.time() + timeout_seconds
         backfill = {}
         while time.time() < deadline:
             backfill = self._backfill_status()
             if backfill.get("phase") == phase:
                 return backfill
+            if backfill.get("phase") in ("Completed", "CompletedWithErrors", "Failed"):
+                raise AssertionError(f"Backfill reached {backfill['phase']} without reporting {phase}: {backfill}")
+            workflow = self.argo_service.get_workflow_status(self.workflow_name)
+            workflow_phase = workflow.value.get("phase", "") if workflow.success else ""
+            if workflow_phase in ENDING_ARGO_PHASES:
+                raise AssertionError(f"Workflow {self.workflow_name} ended {workflow_phase} before the backfill "
+                                     f"reported {phase}. Last status: {backfill}")
             time.sleep(5)
         raise AssertionError(f"Backfill never reported {phase} within {timeout_seconds}s. Last status: {backfill}")
 
