@@ -1,0 +1,71 @@
+# Ships AKS workload logs to Azure Monitor Logs. Layer this AFTER valuesAks.yaml and set the
+# azure.monitor values. Create the azure-monitor-logs-credentials Secret (key clientSecret) in the
+# release namespace first: fluent-bit pods cannot start without it.
+azure:
+  monitor:
+    enabled: true
+
+logs:
+  sharedLogsVolume:
+    enabled: false
+
+charts:
+  fluent-bit:
+    values:
+      env:
+        - name: MONITOR_TENANT_ID
+          valueFrom:
+            configMapKeyRef:
+              name: azure-metadata
+              key: TENANT_ID
+        - name: MONITOR_CLIENT_ID
+          valueFrom:
+            configMapKeyRef:
+              name: azure-metadata
+              key: CLIENT_ID
+        - name: MONITOR_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: azure-monitor-logs-credentials
+              key: clientSecret
+        - name: MONITOR_DCE_URL
+          valueFrom:
+            configMapKeyRef:
+              name: azure-metadata
+              key: DCE_URL
+        - name: MONITOR_DCR_IMMUTABLE_ID
+          valueFrom:
+            configMapKeyRef:
+              name: azure-metadata
+              key: DCR_IMMUTABLE_ID
+        - name: MONITOR_TABLE_NAME
+          valueFrom:
+            configMapKeyRef:
+              name: azure-metadata
+              key: TABLE_NAME
+      extraVolumes:
+        - name: lua-scripts
+          configMap:
+            name: fluentbit-lua-scripts
+      extraVolumeMounts:
+        - name: lua-scripts
+          mountPath: /fluentbit/scripts
+          readOnly: true
+      config:
+        # azure_logs_ingestion authenticates only with an Entra client secret; it has no managed
+        # identity or Workload ID option. Every Log Analytics table needs TimeGenerated, so the
+        # record's own timestamp is written there in ISO 8601 rather than left to ingestion time.
+        # The plugin logs every upload at info, and fluent-bit ships its own logs, so info would loop.
+        outputs: |
+          [OUTPUT]
+              Name                  azure_logs_ingestion
+              Match                 fluentbit-*
+              log_level             warn
+              tenant_id             ${MONITOR_TENANT_ID}
+              client_id             ${MONITOR_CLIENT_ID}
+              client_secret         ${MONITOR_CLIENT_SECRET}
+              dce_url               ${MONITOR_DCE_URL}
+              dcr_id                ${MONITOR_DCR_IMMUTABLE_ID}
+              table_name            ${MONITOR_TABLE_NAME}
+              time_key              TimeGenerated
+              time_generated        true
