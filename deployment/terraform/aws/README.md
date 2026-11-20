@@ -223,6 +223,11 @@ Use an actual published Migration Assistant release tag. Terraform applies
 `valuesEks.yaml`, passes the AWS account, region, stage, and snapshot role to the
 chart, and waits `helm_timeout_seconds` (1500, or 25 minutes) for the release.
 
+Do not use `aws-bootstrap.sh --skip-cfn-deploy` to install the chart on a
+Terraform-provisioned cluster. The script reads the cluster and other resources
+from the Migration Assistant CloudFormation exports, which this module does not
+create.
+
 The module creates a private ECR repository for parity with the CloudFormation
 deployment and exposes it as `ecr_repository_url`. The optional Terraform Helm
 path uses public images; image mirroring or source builds remain a separate step.
