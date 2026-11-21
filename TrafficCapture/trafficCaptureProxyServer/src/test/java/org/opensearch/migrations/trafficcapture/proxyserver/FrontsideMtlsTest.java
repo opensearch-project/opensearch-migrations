@@ -75,6 +75,52 @@ public class FrontsideMtlsTest {
     }
 
     @Test
+    public void testEngineOnlyEnablesTls12AndTls13() throws SSLException {
+        SSLEngine engine = CaptureProxy.loadSslEngineFromPem(
+            ssc.certificate().getAbsolutePath(),
+            ssc.privateKey().getAbsolutePath(),
+            null,
+            false).get();
+        Assertions.assertEquals(
+            java.util.Set.of("TLSv1.2", "TLSv1.3"),
+            java.util.Set.copyOf(java.util.Arrays.asList(engine.getEnabledProtocols())));
+    }
+
+    @Test
+    public void testExplicitSslProtocolsLimitsEngineProtocols() throws SSLException {
+        SSLEngine engine = CaptureProxy.loadSslEngineFromPem(
+            ssc.certificate().getAbsolutePath(),
+            ssc.privateKey().getAbsolutePath(),
+            null,
+            null,
+            false,
+            "TLSv1.2").get();
+        Assertions.assertArrayEquals(new String[] { "TLSv1.2" }, engine.getEnabledProtocols());
+    }
+
+    @Test
+    public void testParseSslProtocolsTrimsAndDeduplicates() {
+        Assertions.assertArrayEquals(
+            new String[] { "TLSv1.3", "TLSv1.2" },
+            CaptureProxy.parseSslProtocols(" TLSv1.3 , TLSv1.2,TLSv1.3"));
+    }
+
+    @Test
+    public void testParseSslProtocolsAcceptsLegacyWhenExplicit() {
+        Assertions.assertArrayEquals(
+            new String[] { "TLSv1.2", "TLSv1.1" },
+            CaptureProxy.parseSslProtocols("TLSv1.2,TLSv1.1"));
+    }
+
+    @Test
+    public void testParseSslProtocolsRejectsUnknownAndEmpty() {
+        Assertions.assertThrows(ParameterException.class, () -> CaptureProxy.parseSslProtocols("SSLv3"));
+        Assertions.assertThrows(ParameterException.class, () -> CaptureProxy.parseSslProtocols("TLSv1.2,bogus"));
+        Assertions.assertThrows(ParameterException.class, () -> CaptureProxy.parseSslProtocols(" , "));
+        Assertions.assertThrows(ParameterException.class, () -> CaptureProxy.parseSslProtocols(null));
+    }
+
+    @Test
     public void testWithoutTrustCertAndNoClientAuthSucceeds() throws SSLException {
         Supplier<SSLEngine> supplier = CaptureProxy.loadSslEngineFromPem(
             ssc.certificate().getAbsolutePath(),
