@@ -53,6 +53,20 @@ def kubernetes_filter_lines(config):
     return None
 
 
+def service_account_name(values):
+    """The name under the top-level serviceAccount key of the fluent-bit values, or None."""
+    lines = [line.rstrip() for line in values.splitlines()]
+    if "serviceAccount:" not in lines:
+        return None
+    for line in lines[lines.index("serviceAccount:") + 1:]:
+        if line and not line[0].isspace():
+            return None
+        words = line.split()
+        if len(words) == 2 and words[0] == "name:":
+            return words[1]
+    return None
+
+
 def render(helm, chart, variant, extra):
     args = [str(chart / a) if a.endswith(".yaml") else a for a in extra]
     result = subprocess.run(
@@ -80,13 +94,13 @@ def verify(helm, chart, variant, extra):
     if ["Buffer_Size", "0"] not in [line.split() for line in kubernetes_filter]:
         fail(f"The {variant} kubernetes filter must set Buffer_Size 0, or large pod specs fail the metadata lookup")
 
-    service_account = re.search(r'^serviceAccount:[ \t]*\n(?:[ \t]+.*\n)*?[ \t]+name:[ \t]*(\S+)', values, re.MULTILINE)
+    service_account = service_account_name(values)
     if not service_account:
         fail(f"The {variant} fluent-bit values name no service account")
     annotated = SERVICE_ACCOUNT_UID.findall(rendered)
-    if annotated != [service_account.group(1)]:
+    if annotated != [service_account]:
         fail(f"The {variant} fluent-bit install must annotate its pods with the UID of service account "
-             f"{service_account.group(1)!r}; found {annotated!r}")
+             f"{service_account!r}; found {annotated!r}")
 
 
 def main():
