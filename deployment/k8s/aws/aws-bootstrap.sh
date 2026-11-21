@@ -141,6 +141,8 @@ while [[ $# -gt 0 ]]; do
       echo "  --skip-cfn-deploy                         Skip CloudFormation deployment. Use when the Migration"
       echo "                                            Assistant stack is already deployed and you only want to"
       echo "                                            bootstrap the EKS cluster (install helm chart, images, etc)."
+      echo "                                            For a Terraform-provisioned cluster, first load the module's"
+      echo "                                            migration_environment output into the shell."
       echo ""
       echo "CloudFormation deployment options:"
       echo "  --stack-name <name>                       CloudFormation stack name (required with --deploy-*-cfn)."
@@ -265,6 +267,10 @@ while [[ $# -gt 0 ]]; do
       echo "     --vpc-id vpc-0abc123 --subnet-ids subnet-111,subnet-222 --region us-east-1"
       echo ""
       echo "  # Bootstrap only (CloudFormation stack already deployed):"
+      echo "  $0 --skip-cfn-deploy --stage dev --region us-east-1"
+      echo ""
+      echo "  # Bootstrap a cluster provisioned by deployment/terraform/aws:"
+      echo "  eval \"\$(terraform -chdir=deployment/terraform/aws output -raw migration_environment)\""
       echo "  $0 --skip-cfn-deploy --stage dev --region us-east-1"
       echo ""
       echo "  # Add an admin to an existing cluster WITHOUT re-running the whole bootstrap:"
@@ -1152,18 +1158,39 @@ if [[ "$deploy_cfn" == "true" ]]; then
   echo "CloudFormation stack deployed successfully: $cfn_stack_name"
 fi
 
-if ! output=$(get_cfn_export); then
-  echo "Unable to find any CloudFormation stacks with a 'MigrationsExportString' export${region:+ in region '$region'}${stage_filter:+ matching stage '$stage_filter'}." >&2
-  echo "Has the Migration Assistant CloudFormation template been deployed?" >&2
-  if [[ -z "$region" ]]; then
-    echo "No --region specified; used default region from AWS CLI config." >&2
+# The AWS Terraform module's migration_environment output exports the same values as the
+# MigrationsExportString, so an environment that already holds them needs no CloudFormation stack.
+exports_from_environment=false
+if [[ "$deploy_cfn" == "false" && -n "${MIGRATIONS_EKS_CLUSTER_NAME:-}" &&
+      -n "${MIGRATIONS_ECR_REGISTRY:-}" && -n "${SNAPSHOT_ROLE+set}" ]]; then
+  if [[ -n "$stage_filter" && "$stage_filter" != "${STAGE:-}" ]]; then
+    echo "Error: --stage '$stage_filter' does not match STAGE='${STAGE:-}' from the environment." >&2
+    echo "  Unset the MIGRATIONS_* exports to use CloudFormation, or load the matching environment." >&2
+    exit 1
   fi
-  echo "If the stack is in a different region, re-run with --region <region>." >&2
-  echo "To deploy the stack now, re-run with --deploy-create-vpc-cfn or --deploy-import-vpc-cfn." >&2
-  exit 1
+  if [[ -n "$region" && -n "${AWS_CFN_REGION:-}" && "$region" != "$AWS_CFN_REGION" ]]; then
+    echo "Error: --region '$region' does not match AWS_CFN_REGION='$AWS_CFN_REGION' from the environment." >&2
+    echo "  Unset the MIGRATIONS_* exports to use CloudFormation, or load the matching environment." >&2
+    exit 1
+  fi
+  exports_from_environment=true
+  echo "Using Migration Assistant exports from the environment (cluster ${MIGRATIONS_EKS_CLUSTER_NAME});" \
+    "skipping the CloudFormation export lookup."
+else
+  if ! output=$(get_cfn_export); then
+    echo "Unable to find any CloudFormation stacks with a 'MigrationsExportString' export${region:+ in region '$region'}${stage_filter:+ matching stage '$stage_filter'}." >&2
+    echo "Has the Migration Assistant CloudFormation template been deployed?" >&2
+    if [[ -z "$region" ]]; then
+      echo "No --region specified; used default region from AWS CLI config." >&2
+    fi
+    echo "If the stack is in a different region, re-run with --region <region>." >&2
+    echo "To deploy the stack now, re-run with --deploy-create-vpc-cfn or --deploy-import-vpc-cfn." >&2
+    echo "For a Terraform-provisioned environment, first run: eval \"\$(terraform output -raw migration_environment)\"" >&2
+    exit 1
+  fi
+  echo "Setting ENV variables: $output"
+  eval "$output"
 fi
-echo "Setting ENV variables: $output"
-eval "$output"
 
 AWS_ACCOUNT="${AWS_ACCOUNT:-$(aws sts get-caller-identity --query Account --output text)}"
 AWS_CFN_REGION="${AWS_CFN_REGION:-$(aws configure get region)}"
@@ -1171,8 +1198,13 @@ STAGE="${STAGE:-${MA_STAGE:-dev}}"
 MA_QUALIFIER="${MA_QUALIFIER:-${MIGRATIONS_QUALIFIER:-default}}"
 
 # Validate required variables from CFN exports
+required_vars=(MIGRATIONS_EKS_CLUSTER_NAME MIGRATIONS_ECR_REGISTRY)
+# Terraform exports an empty SNAPSHOT_ROLE when create_opensearch_service_snapshot_role is false.
+if [[ "$exports_from_environment" != "true" ]]; then
+  required_vars+=(SNAPSHOT_ROLE)
+fi
 missing_vars=()
-for var in MIGRATIONS_EKS_CLUSTER_NAME MIGRATIONS_ECR_REGISTRY SNAPSHOT_ROLE; do
+for var in "${required_vars[@]}"; do
   if [[ -z "${!var:-}" ]]; then
     missing_vars+=("$var")
   fi
