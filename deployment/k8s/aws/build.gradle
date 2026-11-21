@@ -21,6 +21,10 @@ def bashTests = [
         'test/awsBootstrapCfnResume.sh',
         'Tests reconnecting to an in-progress CloudFormation deployment',
     ],
+    testBootstrapEnvironmentExports: [
+        'test/awsBootstrapEnvironmentExports.sh',
+        'Tests bootstrapping from Terraform migration_environment exports',
+    ],
 ]
 
 bashTests.each { taskName, spec ->

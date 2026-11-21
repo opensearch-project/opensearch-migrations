@@ -59,6 +59,22 @@ data "aws_iam_policy_document" "migration_pods" {
     resources = [aws_ecr_repository.migration.arn]
   }
 
+  # aws-bootstrap.sh mirrors Helm charts and third-party images into charts/* and mirrored/*
+  # repositories from the operator's machine; pods only pull from them.
+  statement {
+    sid    = "EcrMirroredPull"
+    effect = "Allow"
+    actions = [
+      "ecr:BatchGetImage",
+      "ecr:GetDownloadUrlForLayer",
+      "ecr:BatchCheckLayerAvailability",
+    ]
+    resources = [
+      "arn:${data.aws_partition.current.partition}:ecr:${var.region}:${data.aws_caller_identity.current.account_id}:repository/charts/*",
+      "arn:${data.aws_partition.current.partition}:ecr:${var.region}:${data.aws_caller_identity.current.account_id}:repository/mirrored/*",
+    ]
+  }
+
   # EFS filesystems are created at runtime (by the app / EKS), so their ARNs are
   # not known here; left on "*".
   statement {

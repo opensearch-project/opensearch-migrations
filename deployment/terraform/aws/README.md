@@ -223,10 +223,10 @@ Use an actual published Migration Assistant release tag. Terraform applies
 `valuesEks.yaml`, passes the AWS account, region, stage, and snapshot role to the
 chart, and waits `helm_timeout_seconds` (1500, or 25 minutes) for the release.
 
-Do not use `aws-bootstrap.sh --skip-cfn-deploy` to install the chart on a
-Terraform-provisioned cluster. The script reads the cluster and other resources
-from the Migration Assistant CloudFormation exports, which this module does not
-create.
+To install with `aws-bootstrap.sh` instead, which can also mirror images to the
+private ECR repository or build them from source, load the `migration_environment`
+output and run the script with `--skip-cfn-deploy`, as described in
+[Use an existing Migration Assistant stack](../../k8s/aws/README.md#use-an-existing-migration-assistant-stack).
 
 The module creates a private ECR repository for parity with the CloudFormation
 deployment and exposes it as `ecr_repository_url`. The optional Terraform Helm
@@ -290,7 +290,7 @@ Important outputs include:
 | `cluster_security_group_id` | EKS-managed cluster security group, for rules that must allow the cluster |
 | `helm_release_status` | Helm release status, or null when `deploy_helm` is false |
 
-To load the compatibility environment into the current shell:
+To load the values `aws-bootstrap.sh` reads into the current shell:
 
 ```bash
 eval "$(terraform output -raw migration_environment)"

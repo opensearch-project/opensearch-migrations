@@ -150,18 +150,39 @@ resource "aws_eks_cluster" "migration" {
   ]
 }
 
+locals {
+  account_root_arn = "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:root"
+  # When the account root user applies the module, EKS has already given it a cluster-admin
+  # access entry as the cluster creator, and a second entry for the same principal fails.
+  grant_account_readonly = data.aws_caller_identity.current.arn != local.account_root_arn
+}
+
 resource "aws_eks_access_entry" "account_readonly" {
+  count         = local.grant_account_readonly ? 1 : 0
   cluster_name  = aws_eks_cluster.migration.name
-  principal_arn = "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:root"
+  principal_arn = local.account_root_arn
   type          = "STANDARD"
 }
 
 resource "aws_eks_access_policy_association" "account_readonly" {
+  count         = local.grant_account_readonly ? 1 : 0
   cluster_name  = aws_eks_cluster.migration.name
-  principal_arn = aws_eks_access_entry.account_readonly.principal_arn
+  principal_arn = aws_eks_access_entry.account_readonly[0].principal_arn
   policy_arn    = "arn:${data.aws_partition.current.partition}:eks::aws:cluster-access-policy/AmazonEKSViewPolicy"
 
   access_scope {
     type = "cluster"
   }
+}
+
+# The account read-only access entry became count-gated (grant_account_readonly). These map the
+# pre-count singleton addresses to index 0 so existing clusters keep their entry.
+moved {
+  from = aws_eks_access_entry.account_readonly
+  to   = aws_eks_access_entry.account_readonly[0]
+}
+
+moved {
+  from = aws_eks_access_policy_association.account_readonly
+  to   = aws_eks_access_policy_association.account_readonly[0]
 }
