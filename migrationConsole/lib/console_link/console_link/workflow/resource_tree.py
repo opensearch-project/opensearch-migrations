@@ -450,31 +450,77 @@ def _format_backfill_status(backfill: Dict[str, Any]):
     if shards_total is not None:
         parts.append(f"shards {shards_migrated or 0}/{shards_total}")
         details.append(f"shards migrated: {shards_migrated or 0}/{shards_total}")
-    shards_in_progress = summary.get('shardsInProgress')
-    if shards_in_progress:
-        details.append(f"shards in progress: {shards_in_progress}")
-    shards_waiting = summary.get('shardsWaiting')
-    if shards_waiting:
-        details.append(f"shards waiting: {shards_waiting}")
-    eta_ms = summary.get('etaMs')
-    if eta_ms:
-        secs = int(eta_ms / 1000)
-        m, s = divmod(secs, 60)
-        h, m = divmod(m, 60)
-        parts.append(f"ETA {h}h {m}m {s}s")
-        details.append(f"ETA: {h}h {m}m {s}s")
-    started = summary.get('started')
-    if started:
-        details.append(f"started: {started}")
-    finished = summary.get('finished')
-    if finished:
-        details.append(f"finished: {finished}")
-    updated_at = backfill.get('updatedAt')
-    if updated_at:
-        details.append(f"updated at: {updated_at}")
+    _append_present(details, ("shards in progress", summary.get('shardsInProgress')),
+                    ("shards waiting", summary.get('shardsWaiting')))
+    failed_part, failed_details = _format_failed_documents(backfill)
+    if failed_part:
+        parts.append(failed_part)
+    details.extend(failed_details)
+    eta = _format_eta(summary.get('etaMs'))
+    if eta:
+        parts.append(f"ETA {eta}")
+        details.append(f"ETA: {eta}")
+    _append_present(details, ("started", summary.get('started')), ("finished", summary.get('finished')),
+                    ("updated at", backfill.get('updatedAt')))
     if parts:
         return f"Backfill status: {', '.join(parts)}", details
     return None
+
+
+def _append_present(details: List[str], *labeled_values) -> None:
+    """Append "label: value" for each value that's set (not None, empty or zero)."""
+    details.extend(f"{label}: {value}" for label, value in labeled_values if value)
+
+
+def _format_eta(eta_ms) -> Optional[str]:
+    if not eta_ms:
+        return None
+    m, s = divmod(int(eta_ms / 1000), 60)
+    h, m = divmod(m, 60)
+    return f"{h}h {m}m {s}s"
+
+
+def failed_count_as_of(backfill: Dict[str, Any]) -> Optional[str]:
+    """When the failed-document count shown was taken, if that wasn't this refresh: the monitor keeps the last
+    count when it can't take a new one, and counts only grow, so that one is a lower bound."""
+    counted_at = (backfill.get('failures') or {}).get('countedAt')
+    return counted_at if counted_at and counted_at != backfill.get('updatedAt') else None
+
+
+def _format_failed_documents(backfill: Dict[str, Any]):
+    """The summary-line part and the detail lines for failed documents: (None, []) when none were counted and
+    nothing went wrong counting them."""
+    summary = backfill.get('summary') or {}
+    failures = backfill.get('failures') or {}
+    failed = summary.get('documentsFailed')
+    error = failures.get('countError')
+    as_of = failed_count_as_of(backfill)
+    if failed is None:
+        return None, ([f"failed documents: not counted yet ({error})"] if error else [])
+    details = []
+    if failed > 0 or as_of:
+        count = f"at least {failed} as of {as_of}" if as_of else str(failed)
+        details.append(f"failed documents: {count} (non-retryable {summary.get('documentsFailedNonRetryable') or 0}, "
+                       f"retries exhausted {summary.get('documentsFailedRetriesExhausted') or 0})")
+        details.extend(_format_failed_shards(failures))
+    if error:
+        details.append(f"couldn't count failed documents at {backfill.get('updatedAt')}: {error}")
+    part = (f"failed at least {failed}" if as_of else f"failed {failed}") if failed > 0 else None
+    return part, details
+
+
+def _format_failed_shards(failures: Dict[str, Any]) -> List[str]:
+    """One line per shard the SnapshotMigration lists (the most failures first), then how many more there are
+    and where the failed documents were written."""
+    shards = failures.get('shards') or []
+    lines = [f"failed in {s.get('index')} shard {s.get('shard')}: "
+             f"{(s.get('nonRetryable') or 0) + (s.get('retriesExhausted') or 0)}" for s in shards]
+    more = (failures.get('shardCount') or 0) - len(shards)
+    if more > 0:
+        lines.append(f"... and {more} more shards with failures (console backfill status --deep-check lists them)")
+    if failures.get('streamLocation'):
+        lines.append(f"failed document stream: {failures['streamLocation']}")
+    return lines
 
 
 def _format_snapshot_creation_status(creation: Dict[str, Any]):

@@ -10,6 +10,7 @@ import yaml
 
 from console_link.environment import Environment
 from console_link.models.cluster import Cluster, HttpMethod
+from console_link.models import backfill_rfs
 from console_link.models.backfill_rfs import get_detailed_status_obj, BackfillOverallStatus
 from console_link.models.step_state import StepStateWithPause
 from tests.search_containers import SearchContainer, Version
@@ -324,3 +325,124 @@ def test_get_detailed_status_obj_completed_with_failed_documents(env_with_cluste
 
     without_failures = get_detailed_status_obj(target_cluster, has_failed_documents=False)
     assert without_failures.status == StepStateWithPause.COMPLETED
+
+
+def put_work_item(cluster: Cluster, index: str, shard: int, from_position: int, next_position: int,
+                  completed: bool, non_retryable: int = 0, retries_exhausted: int = 0,
+                  shard_complete: bool = False, successor: str | None = None):
+    """A work item as RFS commits it: completedAt plus committed_metrics (omitted while it's in flight)."""
+    body = {"expiration": future_time, "completedAt": past_time if completed else None,
+            "successor_items": successor, "status": "Completed" if completed else "InProgress"}
+    if completed:
+        body["committed_metrics"] = {
+            "schemaVersion": 1, "snapshotName": "snap", "indexName": index, "shardNumber": shard,
+            "fromPosition": from_position, "nextPosition": next_position, "shardComplete": shard_complete,
+            "metrics": {"failures": {"nonRetryable": non_retryable, "retryableExhausted": retries_exhausted},
+                        "workItem": {"durationMillis": 1000}},
+        }
+    cluster.call_api(f"/{WORKING_STATE_INDEX}/_doc/{index}__{shard}__{from_position}", HttpMethod.PUT,
+                     data=json.dumps(body), headers={"Content-Type": "application/json"})
+
+
+def create_working_state_with_failures(cluster: Cluster):
+    cluster.call_api(f"/{WORKING_STATE_INDEX}/_doc/shard_setup", HttpMethod.PUT,
+                     data=json.dumps({"completedAt": current_time, "status": "completed"}),
+                     headers={"Content-Type": "application/json"})
+    # idx-a shard 0 was checkpointed: its first work item failed 3 documents, its successor none.
+    put_work_item(cluster, "idx-a", 0, 0, 100, True, non_retryable=2, retries_exhausted=1,
+                  successor="idx-a__0__100")
+    put_work_item(cluster, "idx-a", 0, 100, 200, True, shard_complete=True)
+    put_work_item(cluster, "idx-a", 1, 0, 50, True, shard_complete=True)
+    put_work_item(cluster, "idx-b", 0, 0, 80, True, non_retryable=5, shard_complete=True)
+    cluster.call_api("/_refresh", HttpMethod.POST)
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("env_with_cluster", [TEST_VERSION], indirect=True)
+@pytest.mark.parametrize("index_name_mapping", [None, {"type": "keyword"}], ids=["dynamic", "keyword"])
+def test_get_detailed_status_obj_sums_failed_documents_from_work_items(env_with_cluster: Environment,
+                                                                       index_name_mapping):
+    # The index name is aggregatable either way it can be mapped: dynamically (text + .keyword) or as keyword.
+    target_cluster = env_with_cluster.target_cluster
+    create_working_state_index(target_cluster)
+    if index_name_mapping:
+        target_cluster.call_api(f"/{WORKING_STATE_INDEX}/_mapping", HttpMethod.PUT, data=json.dumps(
+            {"properties": {"committed_metrics": {"properties": {"indexName": index_name_mapping}}}}),
+            headers={"Content-Type": "application/json"})
+    create_working_state_with_failures(target_cluster)
+    # A shard still in flight: nothing committed yet, so nothing counted.
+    put_work_item(target_cluster, "idx-b", 1, 0, 0, completed=False)
+    target_cluster.call_api("/_refresh", HttpMethod.POST)
+
+    status = get_detailed_status_obj(target_cluster)
+
+    assert (status.documents_failed, status.documents_failed_non_retryable,
+            status.documents_failed_retries_exhausted) == (8, 7, 1), f"{status}"
+    assert [(s.index, s.shard, s.non_retryable, s.retries_exhausted) for s in status.shards_with_failures] == [
+        ("idx-b", 0, 5, 0), ("idx-a", 0, 2, 1)], f"{status}"
+    assert status.status == StepStateWithPause.RUNNING
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("env_with_cluster", [TEST_VERSION], indirect=True)
+def test_completed_backfill_with_counted_failures_is_completed_with_errors_without_a_stream(
+        env_with_cluster: Environment):
+    # No failed document stream configured (has_failed_documents=None): the work items' count decides.
+    target_cluster = env_with_cluster.target_cluster
+    create_working_state_index(target_cluster)
+    create_working_state_with_failures(target_cluster)
+
+    status = get_detailed_status_obj(target_cluster, has_failed_documents=None)
+
+    assert status.status == StepStateWithPause.COMPLETED_WITH_ERRORS, f"{status}"
+    assert status.documents_failed == 8
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("env_with_cluster", [TEST_VERSION], indirect=True)
+def test_status_sees_work_items_committed_since_the_last_refresh(env_with_cluster: Environment):
+    # RFS creates the index with a 30s refresh interval and refreshes it only for its own checks.
+    target_cluster = env_with_cluster.target_cluster
+    create_working_state_index(target_cluster)
+    target_cluster.call_api(f"/{WORKING_STATE_INDEX}/_settings", HttpMethod.PUT,
+                            data=json.dumps({"index": {"refresh_interval": "30s"}}),
+                            headers={"Content-Type": "application/json"})
+    target_cluster.call_api(f"/{WORKING_STATE_INDEX}/_doc/shard_setup", HttpMethod.PUT,
+                            data=json.dumps({"completedAt": current_time, "status": "completed"}),
+                            headers={"Content-Type": "application/json"})
+    put_work_item(target_cluster, "idx-b", 0, 0, 80, True, non_retryable=5, shard_complete=True)  # not refreshed
+
+    status = get_detailed_status_obj(target_cluster)
+
+    assert (status.status, status.documents_failed) == (StepStateWithPause.COMPLETED_WITH_ERRORS, 5), f"{status}"
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("env_with_cluster", [TEST_VERSION], indirect=True)
+def test_finished_backfill_stays_running_until_its_failed_documents_can_be_counted(
+        env_with_cluster: Environment, monkeypatch):
+    target_cluster = env_with_cluster.target_cluster
+    create_working_state_index(target_cluster)
+    create_working_state_with_failures(target_cluster)
+
+    def unreachable(*args, **kwargs):
+        raise ConnectionError("coordinator unreachable")
+    monkeypatch.setattr(backfill_rfs, "_search", unreachable)  # only the failed-document queries use it
+
+    status = get_detailed_status_obj(target_cluster)
+
+    assert (status.status, status.percentage_completed, status.finished) == (StepStateWithPause.RUNNING, 100.0, None)
+    assert status.documents_failed is None
+    assert status.failed_documents_count_error == "ConnectionError: coordinator unreachable"
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("env_with_cluster", [TEST_VERSION], indirect=True)
+def test_failed_documents_are_zero_before_any_work_item_commits(env_with_cluster: Environment):
+    target_cluster = env_with_cluster.target_cluster
+    create_working_state_index(target_cluster)
+    create_test_documents(target_cluster)
+
+    status = get_detailed_status_obj(target_cluster)
+
+    assert (status.documents_failed, status.shards_with_failures) == (0, []), f"{status}"

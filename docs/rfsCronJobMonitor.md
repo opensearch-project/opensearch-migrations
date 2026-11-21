@@ -67,7 +67,7 @@ The design rests on nine invariants. Each carries a one-line *why* tag identifyi
 
 | # | Invariant | Why |
 | --- | --- | --- |
-| INV-1 | The CronJob is the **sole writer** of `SM.status.{phase, configChecksum, checksumForReplayer}` for RFS-enabled migrations. The workflow never patches any of these three fields. (Metadata-only path keeps the workflow-side patch.) Patches are field-scoped JSON-merge or strategic-merge; never full-status replacement. | Single committer; lets other controllers update other `status.*` subtrees safely. |
+| INV-1 | The CronJob is the **sole writer** of `SM.status.{phase, configChecksum, checksumForReplayer}` for RFS-enabled migrations. The workflow never patches any of these three fields. (Metadata-only path keeps the workflow-side patch.) Patches are field-scoped (JSON patch `add` of those fields and `documentBackfill`, or JSON-merge before `status` exists); never full-status replacement. | Single committer; lets other controllers update other `status.*` subtrees safely. |
 | INV-2 | The CronJob is the **sole application-level deleter** of session resources (RFS `Deployment`, coordinator `StatefulSet`/`Service`/`Secret`, the CronJob itself). Kubernetes garbage collection via `ownerReferences` cascade (when the SM is deleted) is the only other deletion path. | Avoids the workflow tearing down work the CronJob is still managing. |
 | INV-3 | Names are deterministic by `workloadIdentityChecksum` (INV-9). At most one of each session resource exists at any time. All apply paths use UPSERT semantics: try-create-then-patch+drain for the CronJob; `kubectl apply` (or server-side apply) for runtime resources. | Removes resource-multiplicity races; lets two workflow runs share one session. |
 | INV-4 | Every Job pod carries `WORKFLOW_UID`, `CONFIG_CHECKSUM`, and `CHECKSUM_FOR_REPLAYER` in its env, snapshotted at the moment its parent workflow last applied the CronJob. The Job script's first action is `GET cronjob`; if `metadata.labels[workflow-uid] != env.WORKFLOW_UID`, the script is **superseded** and exits 0 with no mutations. The supersession check happens before any mutating call. | A pod from a prior claim, surviving past drain, must self-arrest before mutating. |
@@ -509,7 +509,7 @@ The CronJob persists the most recent `console --json backfill status --deep-chec
 ```yaml
 status:
   documentBackfill:
-    phase: Pending|Running|Paused|Completed|Failed|Unknown
+    phase: Pending|Running|Paused|Completed|CompletedWithErrors|Failed|Unknown
     updatedAt: <UTC timestamp>
     message: <short diagnostic message>
     summary:
@@ -521,9 +521,25 @@ status:
       shardsMigrated: <integer>
       shardsInProgress: <integer>
       shardsWaiting: <integer>
+      documentsFailed: <integer|null>                  # null until the first successful count
+      documentsFailedNonRetryable: <integer|null>
+      documentsFailedRetriesExhausted: <integer|null>
+    failures:
+      countedAt: <UTC timestamp|null>                  # when the count above was taken
+      countError: <string|null>                        # why this poll couldn't count, if it couldn't
+      shardCount: <integer>                            # shards with a failed document
+      shards: [{index, shard, nonRetryable, retriesExhausted}]   # the 20 with the most
+      indexCount: <integer>
+      indices: [{index, nonRetryable, retriesExhausted}]         # the 20 with the most
+      streamLocation: <failed document stream URI|null>
+      streamHasRecords: <boolean|null>
 ```
 
-The CronJob is the only writer after the workflow seeds the initial `Pending` value during CronJob apply. `workflow status` and `workflow manage` read it for RFS wait nodes instead of rerunning live checks.
+The failed-document counts cover the whole SnapshotMigration. They are recomputed from scratch on every poll: an aggregation over the working-state index sums the `committed_metrics.metrics.failures` that each RFS work item records when it commits. Each work item covers its own range of a shard and its metrics are written once, so the sum is exact; it lags only the work items still in flight. The status refreshes the index first and reads it through one search `preference`, so all of a status's queries see the same point in time. The per-shard breakdown (one row per shard with a failure; `console backfill status --deep-check` lists all of them, the CR keeps the top 20) identifies shards by index name and shard number.
+
+If a poll can't count, the CronJob doesn't wait or fail: it keeps the previous count, whose `countedAt` stays older than `updatedAt`, and records `countError`. Counts only grow, so the kept count is a lower bound, and `workflow status` shows it as "at least N". The final status is held to a stricter rule: a backfill whose shards are all done but whose failures couldn't be counted reports `Running`, not `Completed`, so the CronJob doesn't commit it and tries again on its next run. Once counted, a positive count makes it `CompletedWithErrors`, with or without a failed document stream.
+
+The mapping from the console's JSON to this object is `rfsBackfillStatus.jq`. The CronJob, and the workflow's seed of the initial `Pending` value during CronJob apply, replace `documentBackfill` whole with a JSON patch (`rfsBackfillStatusLib.sh`), so no field outlives the refresh or the run that wrote it. The CronJob is the only writer after that seed. `workflow status` and `workflow manage` read it for RFS wait nodes instead of rerunning live checks.
 
 ## Workflow Wait
 
@@ -580,7 +596,7 @@ Organized by invariant.
 **INV-1, INV-2 (sole writer / sole deleter):**
 - RFS-enabled workflow path runs no `patchSnapshotMigrationCompleted` and no runtime delete.
 - Metadata-only path still runs the workflow-side `patchSnapshotMigrationCompleted`.
-- CronJob's `SM.status` patch is JSON-merge or strategic-merge over only `phase`/`configChecksum`/`checksumForReplayer` and `documentBackfill`; never a full-status replacement.
+- CronJob's `SM.status` patch touches only `phase`/`configChecksum`/`checksumForReplayer` and `documentBackfill`; never a full-status replacement. `documentBackfill` itself is replaced whole (JSON patch `add`, with a merge-patch fallback before `status` exists).
 - CronJob owner-ref points to `SnapshotMigration`; same for RFS Deployment and coordinator.
 
 **INV-3 (deterministic naming, UPSERT):**
