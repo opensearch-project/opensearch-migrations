@@ -30,7 +30,6 @@ PROVIDERS = {
 }
 FLUENT_BIT_VALUES = re.compile(
     r'VALUES_B64="([A-Za-z0-9+/=]+)"\s*\n\s*echo "\$VALUES_B64" \| base64 -d > /tmp/values-fluent-bit\.yaml')
-KUBERNETES_FILTER = re.compile(r'\[FILTER\]\s*\n\s*Name\s+kubernetes\s*\n((?:[ \t]*(?:#.*|\w+\s+.*)\n)+)')
 SERVICE_ACCOUNT_UID = re.compile(
     r'--set-string "podAnnotations\.migrations\\\\\.opensearch\\\\\.org/service-account-uid='
     r'\$\(kubectl get serviceaccount (\S+) -n ma -o jsonpath=\'\{\.metadata\.uid\}\'\)"')
@@ -38,6 +37,20 @@ SERVICE_ACCOUNT_UID = re.compile(
 
 def fail(message):
     raise RuntimeError(message)
+
+
+def kubernetes_filter_lines(config):
+    """The property lines of the [FILTER] section whose Name is kubernetes, or None."""
+    lines = config.splitlines()
+    for i, line in enumerate(lines):
+        if line.split() == ["Name", "kubernetes"]:
+            section = []
+            for following in lines[i + 1:]:
+                if not following.strip() or following.strip().startswith("["):
+                    return section
+                section.append(following.strip())
+            return section
+    return None
 
 
 def render(helm, chart, variant, extra):
@@ -61,13 +74,13 @@ def verify(helm, chart, variant, extra):
         fail(f"The {variant} render installs fluent-bit {len(encoded)} times; expected once")
     values = base64.b64decode(encoded[0]).decode()
 
-    kubernetes_filter = KUBERNETES_FILTER.search(values)
-    if not kubernetes_filter:
+    kubernetes_filter = kubernetes_filter_lines(values)
+    if kubernetes_filter is None:
         fail(f"The {variant} fluent-bit configuration has no kubernetes filter")
-    if not re.search(r'^\s*Buffer_Size\s+0\s*$', kubernetes_filter.group(1), re.MULTILINE):
+    if ["Buffer_Size", "0"] not in [line.split() for line in kubernetes_filter]:
         fail(f"The {variant} kubernetes filter must set Buffer_Size 0, or large pod specs fail the metadata lookup")
 
-    service_account = re.search(r'^serviceAccount:\s*\n(?:\s+.*\n)*?\s+name:\s*(\S+)', values, re.MULTILINE)
+    service_account = re.search(r'^serviceAccount:[ \t]*\n(?:[ \t]+.*\n)*?[ \t]+name:[ \t]*(\S+)', values, re.MULTILINE)
     if not service_account:
         fail(f"The {variant} fluent-bit values name no service account")
     annotated = SERVICE_ACCOUNT_UID.findall(rendered)
