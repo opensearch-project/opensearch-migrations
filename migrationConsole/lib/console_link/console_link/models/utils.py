@@ -7,7 +7,7 @@ import requests.utils
 from botocore.auth import SigV4Auth
 from botocore.awsrequest import AWSRequest
 from requests.models import PreparedRequest
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import quote, unquote_plus, urlparse, urlunparse
 
 
 from console_link.models.client_options import ClientOptions
@@ -93,10 +93,24 @@ class SigV4AuthPlugin(requests.auth.AuthBase):
         signing_parts = urlparse(self.signing_endpoint)
         return urlunparse(request_parts._replace(scheme=signing_parts.scheme, netloc=signing_parts.netloc))
 
+    @staticmethod
+    def _encode_query(request_url: str) -> str:
+        # botocore signs the query string as given, but the service percent-encodes every reserved
+        # character before checking the signature, so encode it the same way before signing and sending.
+        parts = urlparse(request_url)
+        if not parts.query:
+            return request_url
+        query = '&'.join(
+            '='.join(quote(unquote_plus(token), safe='-_.~') for token in pair.split('=', 1))
+            for pair in parts.query.split('&')
+        )
+        return urlunparse(parts._replace(query=query))
+
     def __call__(self, r: PreparedRequest) -> PreparedRequest:
         # Exclude signing headers that may change after signing
         default_headers = requests.utils.default_headers()
         excluded_headers = default_headers.keys()
+        r.url = self._encode_query(r.url)
         signing_url = self._get_signing_url(r.url)
 
         # Opensearch has unique port signing behavior where it cannot be in the signature
