@@ -12,6 +12,7 @@ from console_link.models.client_options import ClientOptions
 from console_link.models.cluster import AuthMethod, Cluster, HttpMethod, SourceCluster
 from moto import mock_aws
 from tests.utils import create_valid_cluster
+from urllib.parse import parse_qsl, urlsplit
 import requests
 
 
@@ -535,6 +536,47 @@ def test_sigv4_authentication_signature(requests_mock, method, endpoint, data, h
         # Compare signatures
         original_signature = signature_match.group(1)
         assert original_signature == new_signature, "Signatures do not match"
+
+
+@pytest.mark.parametrize("path", [
+    "/_cat/indices?h=index,docs.count",
+    "/_cat/shards?h=index:shard",
+    "/_cat/indices?index=stress-*",
+    "/_cat/indices?h=index,docs.count&s=index",
+    "/_cat/indices?h=index%2Cdocs.count",
+])
+def test_sigv4_signature_matches_service_canonical_query(requests_mock, aws_credentials, path):
+    cluster = Cluster({
+        "endpoint": "https://opensearchtarget:9200",
+        "allow_insecure": True,
+        "sigv4": {
+            "region": "us-east-1",
+            "service": "es"
+        }
+    })
+    requests_mock.get(f"{cluster.endpoint}{path.split('?')[0]}", json={})
+
+    with mock_aws():
+        cluster.call_api(path)
+        last_request = requests_mock.last_request
+
+        # The service decodes the query it receives and signs it with every reserved character encoded
+        sent_url = urlsplit(last_request.url)
+        aws_request = AWSRequest(
+            method=last_request.method,
+            url=f"{sent_url.scheme}://{sent_url.netloc}{sent_url.path}",
+            params=parse_qsl(sent_url.query, keep_blank_values=True),
+            headers={k: v for k, v in last_request.headers.items()
+                     if k.lower() not in requests.utils.default_headers().keys()}
+        )
+        auth = SigV4Auth(boto3.Session().get_credentials(), "es", "us-east-1")
+        aws_request.context['timestamp'] = last_request.headers['x-amz-date']
+        auth._modify_request_before_signing(aws_request)
+        canonical_request = auth.canonical_request(aws_request)
+        expected_signature = auth.signature(auth.string_to_sign(aws_request, canonical_request), aws_request)
+
+    signature = re.search(r"Signature=([a-f0-9]+)", last_request.headers['Authorization']).group(1)
+    assert signature == expected_signature
 
 
 def test_valid_basic_auth_secret(mocker):
