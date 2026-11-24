@@ -52,7 +52,6 @@ jobs:
         with:
           gradle-cache-enabled: true
           gradle-cache-read-only: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
-          gradle-wrapper-download: true
 
       - name: Get registry cache key
         id: registry-cache-key

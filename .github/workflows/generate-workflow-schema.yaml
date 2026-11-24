@@ -51,7 +51,6 @@ jobs:
         with:
           gradle-cache-enabled: 'true'
           gradle-cache-read-only: 'false'
-          gradle-wrapper-download: 'true'
 
       - name: Alias docker-registry to 127.0.0.1
         run: |

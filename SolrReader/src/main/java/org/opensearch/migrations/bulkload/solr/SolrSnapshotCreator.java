@@ -1,9 +1,7 @@
 package org.opensearch.migrations.bulkload.solr;
 
 import java.net.URI;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 import org.opensearch.migrations.bulkload.common.RepoUri;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
@@ -20,14 +18,6 @@ public class SolrSnapshotCreator {
 
     private static final String STATUS_FIELD = "status";
 
-    /**
-     * REQUESTSTATUS looks the request id up in Solr's completed, failed, and running maps and then
-     * the work queue, one after another. A task that finishes between those lookups can briefly be
-     * reported as "notfound", so only treat "notfound" as a failure after this many consecutive polls.
-     */
-    static final int MAX_CONSECUTIVE_NOT_FOUND_POLLS = 3;
-
-    private final Map<String, Integer> consecutiveNotFoundPolls = new HashMap<>();
     private final String solrBaseUrl;
     private final String contextPath;
     private final SolrHttpClient httpClient;
@@ -209,13 +199,6 @@ public class SolrSnapshotCreator {
             );
             var response = httpClient.getJson(url);
             var state = response.path(STATUS_FIELD).path("state").asText("");
-            if (!"notfound".equalsIgnoreCase(state)) {
-                consecutiveNotFoundPolls.remove(collection);
-            } else if (consecutiveNotFoundPolls.merge(collection, 1, Integer::sum) < MAX_CONSECUTIVE_NOT_FOUND_POLLS) {
-                log.atInfo().setMessage("SolrCloud backup for collection '{}' was not found; polling again in case it just finished")
-                    .addArgument(collection).log();
-                return false;
-            }
             if ("completed".equalsIgnoreCase(state)) {
                 log.atInfo().setMessage("SolrCloud backup completed for collection '{}'").addArgument(collection).log();
                 continue;

@@ -171,20 +171,8 @@ public class AzureRepo implements SourceRepo {
         try {
             containerClient.getBlobClient(azureUri.key).downloadToFile(localPath.toString(), true);
         } catch (BlobStorageException e) {
-            // The SDK deletes the file it created in a doFinally hook, which can run after this
-            // thread has already received the error, so delete it here before reporting failure.
-            deletePartialDownload(localPath);
             // Local filesystem errors are not BlobStorageException, so they keep their own classification.
             throw new CouldNotReadFromAzure(azureUri.containerName, azureUri.key, e);
-        }
-    }
-
-    // A file left behind would be treated as already downloaded on the next read.
-    private static void deletePartialDownload(Path localPath) {
-        try {
-            Files.deleteIfExists(localPath);
-        } catch (IOException e) {
-            log.atWarn().setCause(e).setMessage("Failed to delete partial download: {}").addArgument(localPath).log();
         }
     }
 
