@@ -129,6 +129,7 @@ exports[`resolved migration resources extracts resolved resource parameters from
       "sourceEndpoint": "https://source.example.com",
       "sourceLabel": "source",
       "sourceVersion": "ES 7.10.2",
+      "sslProtocols": "TLSv1.3,TLSv1.2",
       "suppressCaptureForHeaderMatch": [],
       "suppressCaptureForMethod": "",
       "suppressCaptureForUriPath": "",

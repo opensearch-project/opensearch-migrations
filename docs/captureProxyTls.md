@@ -179,8 +179,17 @@ When TLS is loaded from PEM files (`--sslCertChainFile`), the proxy accepts TLS 
 TLS 1.2 from clients by default. TLS 1.1 and TLS 1.0 are not offered, regardless of the
 JVM's own security policy.
 
-To change the accepted versions for a deployment that has legacy clients, pass a
-comma-separated list:
+In a workflow configuration, set `sslProtocols` under the proxy's `proxyConfig`. It
+defaults to `TLSv1.3,TLSv1.2`, and values other than the supported ones are rejected when
+the configuration is validated:
+
+```yaml
+proxyConfig:
+  listenPort: 9201
+  sslProtocols: "TLSv1.3,TLSv1.2"
+```
+
+When running the proxy directly, pass a comma-separated list to the command line:
 
 ```
 --sslProtocols TLSv1.3,TLSv1.2,TLSv1.1

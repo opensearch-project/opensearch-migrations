@@ -757,6 +757,14 @@ export const USER_PROXY_PROCESS_OPTIONS = withOtelExportOptions(z.object({
     tls: PROXY_TLS_CONFIG.optional()
         .describe("TLS certificate configuration for HTTPS termination at the proxy. When configured, the proxy serves HTTPS and the TLS secret is mounted at /etc/proxy-tls/.")
         .changeRestriction('gated'),
+    sslProtocols: z.string()
+        .regex(/^\s*(TLSv1\.3|TLSv1\.2|TLSv1\.1|TLSv1)\s*(,\s*(TLSv1\.3|TLSv1\.2|TLSv1\.1|TLSv1)\s*)*$/,
+            "Must be a comma-separated list of TLSv1.3, TLSv1.2, TLSv1.1 or TLSv1")
+        .default("TLSv1.3,TLSv1.2").optional()
+        .describe("Comma-separated TLS protocols the proxy accepts from clients when TLS is enabled (e.g. 'TLSv1.3,TLSv1.2'). " +
+            "Enabling TLSv1.1 or TLSv1 is insecure, is intended only for legacy clients, and also requires the JVM " +
+            "property jdk.tls.disabledAlgorithms to permit those protocols.")
+        .changeRestriction('gated'),
     enableMSKAuth: z.boolean().default(false).optional()
         .describe("Enable SASL/IAM authentication for the proxy's Kafka producer when connecting to Amazon MSK. Uses the pod's IAM role via EKS Pod Identity.")
         .changeRestriction('gated'),

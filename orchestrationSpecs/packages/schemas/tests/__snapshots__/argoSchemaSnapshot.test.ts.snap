@@ -1208,6 +1208,11 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "description": "TLS certificate configuration for HTTPS termination at the proxy. When configured, the proxy serves HTTPS and the TLS secret is mounted at /etc/proxy-tls/.",
                       "changeRestriction": "gated"
                     },
+                    "sslProtocols": {
+                      "type": "string",
+                      "pattern": "^\\\\s*(TLSv1\\\\.3|TLSv1\\\\.2|TLSv1\\\\.1|TLSv1)\\\\s*(,\\\\s*(TLSv1\\\\.3|TLSv1\\\\.2|TLSv1\\\\.1|TLSv1)\\\\s*)*$",
+                      "default": "TLSv1.3,TLSv1.2"
+                    },
                     "enableMSKAuth": {
                       "type": "boolean",
                       "default": false
@@ -6329,6 +6334,13 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       }
                     ],
                     "description": "TLS certificate configuration for HTTPS termination at the proxy. When configured, the proxy serves HTTPS and the TLS secret is mounted at /etc/proxy-tls/.",
+                    "changeRestriction": "gated"
+                  },
+                  "sslProtocols": {
+                    "type": "string",
+                    "pattern": "^\\\\s*(TLSv1\\\\.3|TLSv1\\\\.2|TLSv1\\\\.1|TLSv1)\\\\s*(,\\\\s*(TLSv1\\\\.3|TLSv1\\\\.2|TLSv1\\\\.1|TLSv1)\\\\s*)*$",
+                    "default": "TLSv1.3,TLSv1.2",
+                    "description": "Comma-separated TLS protocols the proxy accepts from clients when TLS is enabled (e.g. 'TLSv1.3,TLSv1.2'). Enabling TLSv1.1 or TLSv1 is insecure, is intended only for legacy clients, and also requires the JVM property jdk.tls.disabledAlgorithms to permit those protocols.",
                     "changeRestriction": "gated"
                   },
                   "enableMSKAuth": {
