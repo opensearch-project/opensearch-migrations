@@ -1,4 +1,4 @@
-import Ajv, {ErrorObject} from "ajv";
+import Ajv, {ErrorObject, ValidateFunction} from "ajv";
 import {
     assertUnifiedSchemaIsUsable,
     classifyKafkaBrokerConfigKey,
@@ -124,16 +124,29 @@ export function buildValidationElements(errors: ErrorObject[]) {
     return elements;
 }
 
+// Compiling the large unified schema is most of the cost of validating a config, so reuse the
+// compiled validator while the schema content is unchanged. The schema is still loaded on every
+// call; keying on its serialized content means a changed schema file or cluster schema recompiles.
+let cachedValidator: {schemaKey: string, validate: ValidateFunction} | undefined;
+
+function getUnifiedSchemaValidator(schema: Record<string, unknown>): ValidateFunction {
+    const schemaKey = JSON.stringify(schema);
+    if (cachedValidator?.schemaKey !== schemaKey) {
+        const ajv = new Ajv(({
+            allErrors: true,
+            strict: false,
+        } as unknown) as ConstructorParameters<typeof Ajv>[0]);
+        cachedValidator = {schemaKey, validate: ajv.compile(schema)};
+    }
+    return cachedValidator.validate;
+}
+
 export function validateInputAgainstUnifiedSchema(data: unknown): void {
     const strippedData = stripComments(data);
     const loaded = loadUnifiedSchema();
     assertUnifiedSchemaIsUsable(loaded);
 
-    const ajv = new Ajv(({
-        allErrors: true,
-        strict: false,
-    } as unknown) as ConstructorParameters<typeof Ajv>[0]);
-    const validate = ajv.compile(loaded.schema);
+    const validate = getUnifiedSchemaValidator(loaded.schema);
     if (validate(strippedData)) {
         return;
     }
