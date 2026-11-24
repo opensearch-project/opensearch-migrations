@@ -9,24 +9,6 @@ version: 2
 #         updates ignore groups entirely and open one PR per advisory.
 #   * Multiple manifests of the same ecosystem are folded into one update entry
 #     via `directories:` (plural) so a single config covers every lockfile.
-#   * The GitHub Advisory Database has no docker or helm advisories, so those
-#     ecosystems only get version updates today. Their "*-security" groups
-#     keep the convention in case that changes.
-#
-# Pins Dependabot can't see:
-#   * Most MA images take their base image from an `ARG X=image:tag` default
-#     used as `FROM ${X}`, overridden by buildImages/build.gradle (including the
-#     custom-es-images entries). Dependabot only reads literal `FROM image:tag`
-#     lines, so those pins aren't updated here. They mostly float on OS-level
-#     tags such as amazonlinux:2023 and amazoncorretto:21-al2023-headless.
-#   * The third-party charts that MA installs are pinned under `charts:` in
-#     deployment/k8s/charts/aggregates/migrationAssistantWithArgo/values.yaml,
-#     and those charts plus their images are listed again in that chart's
-#     infra/mirror/private-ecr-manifest.yaml. Neither file is in a format
-#     Dependabot understands, and the two have to change together.
-#   The weekly "Dependency Staleness Report" workflow reports newer upstream
-#   versions for these pins. The "Image Vulnerability Scan" workflow scans the
-#   built images.
 
 updates:
   - package-ecosystem: "npm"
@@ -149,17 +131,11 @@ updates:
         patterns:
           - "*"
 
-  # Only Dockerfiles with literal `FROM image:tag` lines are listed. See "Pins
-  # Dependabot can't see" above. Left out on purpose:
-  #   - custom-solr-images: amazoncorretto:8-alpine has to stay on Java 8 for
-  #     Solr 6, so a major bump is the only update Dependabot could offer.
-  #   - dev-tools/jenkinsdocker: jenkins/jenkins:lts isn't a version tag, so
-  #     Dependabot has nothing to compare.
-  #   - deployment/k8s: Dockerfile.transforms is FROM scratch.
+  # Dependabot reads only literal `FROM image:tag` lines, not `ARG` defaults or
+  # buildImages/build.gradle, so this is the one Dockerfile it can update.
   - package-ecosystem: "docker"
     directories:
-      # grafana/k6 is only the runtime base. The image replaces its k6 binary
-      # with the one from `xk6 build v<version>`, so bump that line too.
+      # When grafana/k6 is bumped, bump the `xk6 build v<version>` line to match.
       - "/TrafficCapture/trafficLoadTest"
     schedule:
       interval: "weekly"
@@ -174,15 +150,8 @@ updates:
         patterns:
           - "*"
 
-  # Chart.yaml `dependencies:`. Dependabot also reads image pins in values.yaml
-  # in these directories, but testClusters has none it can parse. Left out on
-  # purpose:
-  #   - charts/aggregates/migrationAssistantWithArgo: no Chart.yaml dependencies.
-  #     Its values.yaml image pins have to stay in step with the mirror manifest.
-  #     See "Pins Dependabot can't see" above.
-  #   - charts/components/k6LoadTest: the k6-operator chart has to match the
-  #     operator release that TrafficCapture/trafficLoadTest/k6Operator patches
-  #     and builds from a pinned commit.
+  # testClusters is the only chart with Chart.yaml dependencies. k6LoadTest is
+  # left out because its k6-operator chart must match the patched operator build.
   - package-ecosystem: "helm"
     directories:
       - "/deployment/k8s/charts/aggregates/testClusters"
@@ -199,8 +168,7 @@ updates:
         patterns:
           - "*"
     ignore:
-      # The source and target chart majors track the Elasticsearch and
-      # OpenSearch majors that the tests deploy.
+      # Chart majors track the engine majors the tests deploy.
       - dependency-name: "elasticsearch"
         update-types:
           - "version-update:semver-major"
