@@ -155,6 +155,7 @@ class GeneratedDashboardTest(unittest.TestCase):
         self.assertEqual(
             [
                 "Operator overview",
+                "Memory-tier scaling",
                 "Throughput and request shape",
                 "Pipeline performance diagnosis",
                 "Target domain",

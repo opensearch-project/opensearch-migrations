@@ -768,7 +768,7 @@ public class RfsMigrateDocuments {
         targetClient.setBulkTraceMaxBytes(arguments.bulkRequestTraceMaxBytes);
         targetClient.setBulkResponseTimeout(arguments.bulkResponseTimeout);
         // Held for the life of the process: the meter keeps only a weak reference to the callback.
-        workerPhaseGauge = context.makeWorkerPhaseGauge();
+        workerPhaseGauge = context.makeWorkerPhaseGauge(arguments.workerMemoryTier);
         targetClient.setBulkFlowMetrics(BulkFlowMetrics.both(
             context.makeBulkFlowInstruments(targetClient.getBulkRetryBudget(), targetClient.getBulkInFlightLimit()),
             new BulkFlowHeartbeat(targetClient.getBulkRetryBudget(), targetClient.getBulkInFlightLimit())));
@@ -957,7 +957,9 @@ public class RfsMigrateDocuments {
                 arguments.workerMemoryTier,
                 arguments.crashVerdictFile == null || arguments.crashVerdictFile.isBlank()
                     ? null : Paths.get(arguments.crashVerdictFile),
-                Clock.systemUTC());
+                Clock.systemUTC(),
+                DirtyLeaseSweeper.DEFAULT_VERDICT_POLL_BUDGET,
+                context.makeEscalationRecorder());
 
             WorkerPhase.enter(WorkerPhase.Phase.ACQUIRING_WORK);
             var status = sourceFactory.buildAndRun(

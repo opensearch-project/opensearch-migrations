@@ -30,21 +30,35 @@ public class BaseRootRfsContext extends RootOtelContext {
      * may be null). Create once per process and target.
      */
     public static final String WORKER_PHASE = "rfsWorkerPhase";
+    public static final String WORK_ITEMS_ESCALATED = "workItemsEscalated";
     public static final AttributeKey<String> PHASE = AttributeKey.stringKey("phase");
+    public static final AttributeKey<String> MEMORY_TIER = AttributeKey.stringKey("tier");
 
     /**
      * A gauge of this process's {@link WorkerPhase}: one series per phase, 1 for the current phase and 0 for the
-     * others, reported on every export, so a dashboard can count workers in each phase at any moment. Keep the
-     * returned handle for as long as the gauge should report.
+     * others, reported on every export, so a dashboard can count workers in each phase at any moment. The worker's
+     * memory tier is a dimension so dashboards can show fleet composition per tier (0 when memory scaling is off).
+     * Keep the returned handle for as long as the gauge should report.
      */
-    public AutoCloseable makeWorkerPhaseGauge() {
+    public AutoCloseable makeWorkerPhaseGauge(int memoryTier) {
+        var tier = Integer.toString(memoryTier);
         var phases = java.util.Arrays.stream(WorkerPhase.Phase.values())
-            .map(p -> java.util.Map.entry(p, Attributes.of(PHASE, p.label()))).toList();
+            .map(p -> java.util.Map.entry(p, Attributes.of(PHASE, p.label(), MEMORY_TIER, tier))).toList();
         return getMeterProvider().get(scopeName).gaugeBuilder(WORKER_PHASE).setUnit("count").ofLongs()
             .buildWithCallback(m -> {
                 var current = WorkerPhase.current();
                 phases.forEach(e -> m.record(e.getKey() == current ? 1 : 0, e.getValue()));
             });
+    }
+
+    /**
+     * Counts work items this worker escalated to a higher memory tier after an OOM verdict; the {@code tier}
+     * dimension is the tier escalated TO, so dashboards can chart the climb per level.
+     */
+    public java.util.function.IntConsumer makeEscalationRecorder() {
+        var counter = getMeterProvider().get(scopeName).counterBuilder(WORK_ITEMS_ESCALATED)
+            .setUnit("count").build();
+        return newTier -> counter.add(1, Attributes.of(MEMORY_TIER, Integer.toString(newTier)));
     }
 
     public BulkFlowInstruments makeBulkFlowInstruments(RetryBudget budget, AdaptiveLimit limit) {

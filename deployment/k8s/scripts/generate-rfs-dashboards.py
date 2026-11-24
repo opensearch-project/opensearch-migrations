@@ -89,7 +89,8 @@ METRICS = {
     "bulkDocsWaitingOnTarget": ("count", "gauge", RFS, ()),
     "bulkDocsTargetUnavailable": ("count", "counter", RFS, ("reason",)),
     "bulkDocumentsFailed": ("count", "counter", RFS, ("failureClass",)),
-    "rfsWorkerPhase": ("count", "gauge", RFS, ("phase",)),
+    "rfsWorkerPhase": ("count", "gauge", RFS, ("phase", "tier")),
+    "workItemsEscalated": ("count", "counter", RFS, ("tier",)),
     "bulkAttemptGap": ("milliseconds", "histogram", RFS, ()),
     "bulkAttemptsPerBatch": ("count", "histogram", RFS, ()),
     "bulkItemErrors": ("count", "counter", RFS, ("errorType", "retryable")),
@@ -403,14 +404,11 @@ class WorkerPhases:
         ]
 
     def cw(self, w):
-        return [
-            w.e(
-                f"SUM(SEARCH('{{{NS},OTelLib,phase,qualifier}} MetricName=\"rfsWorkerPhase\" OTelLib=\"{RFS}\" "
-                f"qualifier=\"{Q}\" phase=\"{phase}\"', 'Sum', 60)) / 60",
-                label,
-            )
-            for phase, label in self.PHASES
-        ]
+        out = []
+        for phase, label in self.PHASES:
+            search = w.search("rfsWorkerPhase", "Sum", {"phase": phase})
+            out.append(w.e(f"SUM({search}) / 60", label))
+        return out
 
 
 class AttemptOutcomeGroups:
@@ -610,6 +608,43 @@ class Right:
         return ids
 
 
+
+class WorkersByTier:
+    """Live worker processes per memory tier. Every process reports exactly one 1 across its phase
+    series, so the all-phase sum counts processes; subtracting the exited series leaves the live
+    fleet. CloudWatch needs one expression per tier (SEARCH schemas are static), so a fixed small
+    tier range is generated and absent tiers simply plot nothing."""
+
+    TIERS = list(range(6))
+
+    def prom(self):
+        exited = (f'max by (exported_instance, tier) ({prom_name("rfsWorkerPhase")}'
+                  f'{{otel_scope_name="{RFS}",phase="exited"}})')
+        return [(f"sum by (tier) (1 - {exited})", "tier {{tier}}")]
+
+    def cw(self, w):
+        out = []
+        for tier in self.TIERS:
+            total = w.search("rfsWorkerPhase", "Sum", {"tier": tier})
+            exited = w.search("rfsWorkerPhase", "Sum", {"tier": tier, "phase": "exited"})
+            out.append(w.e(f"(SUM({total}) - SUM({exited})) / 60", f"tier {tier}"))
+        return out
+
+
+class TierEscalations:
+    """Work items escalated to a higher memory tier per minute, labeled by the destination tier."""
+
+    def prom(self):
+        return [(
+            f'sum by (tier) (max by (exported_instance, tier) '
+            f'(rate({prom_name("workItemsEscalated")}{{otel_scope_name="{RFS}"}}[{RI}]))) * 60',
+            "to tier {{tier}}",
+        )]
+
+    def cw(self, w):
+        return [w.e(w.search("workItemsEscalated", "Sum"), "escalated/min")]
+
+
 # --- panels --------------------------------------------------------------------------------------------------
 
 class Panel:
@@ -700,6 +735,20 @@ SECTIONS = [
               "take writes. This is not time spent waiting for a normal bulk response. The value falls when retries "
               "succeed; a sustained nonzero value means migration work is being held for target recovery.",
               "docs", [Gauge("bulkDocsWaitingOnTarget", "Paused documents")]),
+    ]),
+    ("Memory-tier scaling", False, [
+        Panel("Workers by memory tier",
+              "Live RFS worker processes per memory tier (memoryScaling feature). Tier 0 is the starting size; "
+              "higher tiers appear only after a shard OOMs and is escalated, and each tier's fleet tracks its "
+              "remaining work, so the stack shows both the escalation ladder and the demand-driven ramp-down. "
+              "With memoryScaling off every worker reports tier 0.",
+              "count", [WorkersByTier()], stacked=True),
+        Panel("Work items escalated per minute",
+              "Shards promoted to a higher memory tier after a witnessed OOM (exit 3 or OOMKilled), labeled by the "
+              "tier escalated to. Quiet during healthy runs; a brief burst is the expected signature of fat shards "
+              "climbing the ladder, while a sustained high rate across most of the workload suggests a leak-like "
+              "transform or an undersized starting tier.",
+              PER_MINUTE_UNIT, [TierEscalations()]),
     ]),
     ("Throughput and request shape", False, [
         Panel("Document and bulk request bytes (MiB/s)",

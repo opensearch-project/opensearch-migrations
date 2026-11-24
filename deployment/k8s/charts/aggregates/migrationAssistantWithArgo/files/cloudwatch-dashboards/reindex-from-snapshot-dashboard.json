@@ -167,7 +167,7 @@
                 "metrics": [
                     [
                         {
-                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,phase,qualifier} MetricName=\"rfsWorkerPhase\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" phase=\"starting\"', 'Sum', 60)) / 60",
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,phase,tier,qualifier} MetricName=\"rfsWorkerPhase\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" phase=\"starting\"', 'Sum', 60)) / 60",
                             "label": "Starting",
                             "id": "e1",
                             "visible": true,
@@ -176,7 +176,7 @@
                     ],
                     [
                         {
-                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,phase,qualifier} MetricName=\"rfsWorkerPhase\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" phase=\"acquiring_work\"', 'Sum', 60)) / 60",
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,phase,tier,qualifier} MetricName=\"rfsWorkerPhase\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" phase=\"acquiring_work\"', 'Sum', 60)) / 60",
                             "label": "Acquiring work",
                             "id": "e2",
                             "visible": true,
@@ -185,7 +185,7 @@
                     ],
                     [
                         {
-                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,phase,qualifier} MetricName=\"rfsWorkerPhase\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" phase=\"downloading_shard\"', 'Sum', 60)) / 60",
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,phase,tier,qualifier} MetricName=\"rfsWorkerPhase\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" phase=\"downloading_shard\"', 'Sum', 60)) / 60",
                             "label": "Downloading shard",
                             "id": "e3",
                             "visible": true,
@@ -194,7 +194,7 @@
                     ],
                     [
                         {
-                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,phase,qualifier} MetricName=\"rfsWorkerPhase\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" phase=\"migrating\"', 'Sum', 60)) / 60",
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,phase,tier,qualifier} MetricName=\"rfsWorkerPhase\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" phase=\"migrating\"', 'Sum', 60)) / 60",
                             "label": "Migrating",
                             "id": "e4",
                             "visible": true,
@@ -203,7 +203,7 @@
                     ],
                     [
                         {
-                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,phase,qualifier} MetricName=\"rfsWorkerPhase\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" phase=\"completing\"', 'Sum', 60)) / 60",
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,phase,tier,qualifier} MetricName=\"rfsWorkerPhase\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" phase=\"completing\"', 'Sum', 60)) / 60",
                             "label": "Completing",
                             "id": "e5",
                             "visible": true,
@@ -723,6 +723,128 @@
             "width": 24,
             "height": 1,
             "properties": {
+                "markdown": "## Memory-tier scaling",
+                "background": "transparent"
+            }
+        },
+        {
+            "type": "metric",
+            "x": 0,
+            "y": 23,
+            "width": 8,
+            "height": 6,
+            "properties": {
+                "title": "Workers by memory tier",
+                "view": "timeSeries",
+                "stacked": true,
+                "region": "REGION",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        {
+                            "expression": "(SUM(SEARCH('{OpenSearchMigrations,OTelLib,phase,tier,qualifier} MetricName=\"rfsWorkerPhase\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" tier=\"0\"', 'Sum', 60)) - SUM(SEARCH('{OpenSearchMigrations,OTelLib,phase,tier,qualifier} MetricName=\"rfsWorkerPhase\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" tier=\"0\" phase=\"exited\"', 'Sum', 60))) / 60",
+                            "label": "tier 0",
+                            "id": "e1",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "(SUM(SEARCH('{OpenSearchMigrations,OTelLib,phase,tier,qualifier} MetricName=\"rfsWorkerPhase\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" tier=\"1\"', 'Sum', 60)) - SUM(SEARCH('{OpenSearchMigrations,OTelLib,phase,tier,qualifier} MetricName=\"rfsWorkerPhase\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" tier=\"1\" phase=\"exited\"', 'Sum', 60))) / 60",
+                            "label": "tier 1",
+                            "id": "e2",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "(SUM(SEARCH('{OpenSearchMigrations,OTelLib,phase,tier,qualifier} MetricName=\"rfsWorkerPhase\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" tier=\"2\"', 'Sum', 60)) - SUM(SEARCH('{OpenSearchMigrations,OTelLib,phase,tier,qualifier} MetricName=\"rfsWorkerPhase\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" tier=\"2\" phase=\"exited\"', 'Sum', 60))) / 60",
+                            "label": "tier 2",
+                            "id": "e3",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "(SUM(SEARCH('{OpenSearchMigrations,OTelLib,phase,tier,qualifier} MetricName=\"rfsWorkerPhase\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" tier=\"3\"', 'Sum', 60)) - SUM(SEARCH('{OpenSearchMigrations,OTelLib,phase,tier,qualifier} MetricName=\"rfsWorkerPhase\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" tier=\"3\" phase=\"exited\"', 'Sum', 60))) / 60",
+                            "label": "tier 3",
+                            "id": "e4",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "(SUM(SEARCH('{OpenSearchMigrations,OTelLib,phase,tier,qualifier} MetricName=\"rfsWorkerPhase\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" tier=\"4\"', 'Sum', 60)) - SUM(SEARCH('{OpenSearchMigrations,OTelLib,phase,tier,qualifier} MetricName=\"rfsWorkerPhase\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" tier=\"4\" phase=\"exited\"', 'Sum', 60))) / 60",
+                            "label": "tier 4",
+                            "id": "e5",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "(SUM(SEARCH('{OpenSearchMigrations,OTelLib,phase,tier,qualifier} MetricName=\"rfsWorkerPhase\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" tier=\"5\"', 'Sum', 60)) - SUM(SEARCH('{OpenSearchMigrations,OTelLib,phase,tier,qualifier} MetricName=\"rfsWorkerPhase\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\" tier=\"5\" phase=\"exited\"', 'Sum', 60))) / 60",
+                            "label": "tier 5",
+                            "id": "e6",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "count",
+                        "showUnits": false,
+                        "min": 0
+                    }
+                }
+            }
+        },
+        {
+            "type": "metric",
+            "x": 8,
+            "y": 23,
+            "width": 8,
+            "height": 6,
+            "properties": {
+                "title": "Work items escalated per minute",
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "REGION",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        {
+                            "expression": "SEARCH('{OpenSearchMigrations,OTelLib,tier,qualifier} MetricName=\"workItemsEscalated\" OTelLib=\"documentMigration\" qualifier=\"MA_QUALIFIER\"', 'Sum', 60)",
+                            "label": "escalated/min",
+                            "id": "e1",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "per min",
+                        "showUnits": false,
+                        "min": 0
+                    }
+                }
+            }
+        },
+        {
+            "type": "text",
+            "x": 0,
+            "y": 29,
+            "width": 24,
+            "height": 1,
+            "properties": {
                 "markdown": "## Throughput and request shape",
                 "background": "transparent"
             }
@@ -730,7 +852,7 @@
         {
             "type": "text",
             "x": 0,
-            "y": 23,
+            "y": 30,
             "width": 8,
             "height": 1,
             "properties": {
@@ -741,7 +863,7 @@
         {
             "type": "text",
             "x": 8,
-            "y": 23,
+            "y": 30,
             "width": 8,
             "height": 1,
             "properties": {
@@ -752,7 +874,7 @@
         {
             "type": "text",
             "x": 16,
-            "y": 23,
+            "y": 30,
             "width": 8,
             "height": 1,
             "properties": {
@@ -763,7 +885,7 @@
         {
             "type": "metric",
             "x": 0,
-            "y": 24,
+            "y": 31,
             "width": 8,
             "height": 6,
             "properties": {
@@ -856,7 +978,7 @@
         {
             "type": "metric",
             "x": 8,
-            "y": 24,
+            "y": 31,
             "width": 8,
             "height": 6,
             "properties": {
@@ -903,7 +1025,7 @@
         {
             "type": "metric",
             "x": 16,
-            "y": 24,
+            "y": 31,
             "width": 8,
             "height": 6,
             "properties": {
@@ -1038,7 +1160,7 @@
         {
             "type": "metric",
             "x": 0,
-            "y": 30,
+            "y": 37,
             "width": 8,
             "height": 6,
             "properties": {
@@ -1085,7 +1207,7 @@
         {
             "type": "metric",
             "x": 8,
-            "y": 30,
+            "y": 37,
             "width": 8,
             "height": 6,
             "properties": {
@@ -1127,7 +1249,7 @@
         {
             "type": "text",
             "x": 0,
-            "y": 36,
+            "y": 43,
             "width": 24,
             "height": 1,
             "properties": {
@@ -1138,7 +1260,7 @@
         {
             "type": "metric",
             "x": 0,
-            "y": 37,
+            "y": 44,
             "width": 8,
             "height": 6,
             "properties": {
@@ -1225,7 +1347,7 @@
         {
             "type": "metric",
             "x": 8,
-            "y": 37,
+            "y": 44,
             "width": 8,
             "height": 6,
             "properties": {
@@ -1318,7 +1440,7 @@
         {
             "type": "metric",
             "x": 16,
-            "y": 37,
+            "y": 44,
             "width": 8,
             "height": 6,
             "properties": {
@@ -1453,7 +1575,7 @@
         {
             "type": "metric",
             "x": 0,
-            "y": 43,
+            "y": 50,
             "width": 8,
             "height": 6,
             "properties": {
@@ -1522,7 +1644,7 @@
         {
             "type": "metric",
             "x": 8,
-            "y": 43,
+            "y": 50,
             "width": 8,
             "height": 6,
             "properties": {
@@ -1615,7 +1737,7 @@
         {
             "type": "metric",
             "x": 16,
-            "y": 43,
+            "y": 50,
             "width": 8,
             "height": 6,
             "properties": {
@@ -1754,7 +1876,7 @@
         {
             "type": "metric",
             "x": 0,
-            "y": 49,
+            "y": 56,
             "width": 8,
             "height": 6,
             "properties": {
@@ -1833,7 +1955,7 @@
         {
             "type": "metric",
             "x": 8,
-            "y": 49,
+            "y": 56,
             "width": 8,
             "height": 6,
             "properties": {
@@ -1949,7 +2071,7 @@
         {
             "type": "metric",
             "x": 16,
-            "y": 49,
+            "y": 56,
             "width": 8,
             "height": 6,
             "properties": {
@@ -2027,7 +2149,7 @@
         {
             "type": "metric",
             "x": 0,
-            "y": 55,
+            "y": 62,
             "width": 8,
             "height": 6,
             "properties": {
@@ -2060,7 +2182,7 @@
         {
             "type": "metric",
             "x": 8,
-            "y": 55,
+            "y": 62,
             "width": 8,
             "height": 6,
             "properties": {
@@ -2199,7 +2321,7 @@
         {
             "type": "text",
             "x": 0,
-            "y": 61,
+            "y": 68,
             "width": 24,
             "height": 1,
             "properties": {
@@ -2210,7 +2332,7 @@
         {
             "type": "metric",
             "x": 0,
-            "y": 62,
+            "y": 69,
             "width": 8,
             "height": 6,
             "properties": {
@@ -2289,7 +2411,7 @@
         {
             "type": "metric",
             "x": 8,
-            "y": 62,
+            "y": 69,
             "width": 8,
             "height": 6,
             "properties": {
@@ -2345,7 +2467,7 @@
         {
             "type": "metric",
             "x": 16,
-            "y": 62,
+            "y": 69,
             "width": 8,
             "height": 6,
             "properties": {
@@ -2424,7 +2546,7 @@
         {
             "type": "metric",
             "x": 0,
-            "y": 68,
+            "y": 75,
             "width": 8,
             "height": 6,
             "properties": {
@@ -2504,7 +2626,7 @@
         {
             "type": "text",
             "x": 0,
-            "y": 74,
+            "y": 81,
             "width": 24,
             "height": 1,
             "properties": {
@@ -2515,7 +2637,7 @@
         {
             "type": "metric",
             "x": 0,
-            "y": 75,
+            "y": 82,
             "width": 8,
             "height": 6,
             "properties": {
@@ -2576,7 +2698,7 @@
         {
             "type": "metric",
             "x": 8,
-            "y": 75,
+            "y": 82,
             "width": 8,
             "height": 6,
             "properties": {
@@ -2609,7 +2731,7 @@
         {
             "type": "metric",
             "x": 16,
-            "y": 75,
+            "y": 82,
             "width": 8,
             "height": 6,
             "properties": {
@@ -2642,7 +2764,7 @@
         {
             "type": "metric",
             "x": 0,
-            "y": 81,
+            "y": 88,
             "width": 8,
             "height": 6,
             "properties": {
@@ -2726,7 +2848,7 @@
         {
             "type": "metric",
             "x": 8,
-            "y": 81,
+            "y": 88,
             "width": 8,
             "height": 6,
             "properties": {
@@ -2825,7 +2947,7 @@
         {
             "type": "text",
             "x": 0,
-            "y": 87,
+            "y": 94,
             "width": 24,
             "height": 1,
             "properties": {
@@ -2836,7 +2958,7 @@
         {
             "type": "metric",
             "x": 0,
-            "y": 88,
+            "y": 95,
             "width": 8,
             "height": 6,
             "properties": {
@@ -2869,7 +2991,7 @@
         {
             "type": "metric",
             "x": 8,
-            "y": 88,
+            "y": 95,
             "width": 8,
             "height": 6,
             "properties": {
@@ -2911,7 +3033,7 @@
         {
             "type": "text",
             "x": 0,
-            "y": 94,
+            "y": 101,
             "width": 24,
             "height": 1,
             "properties": {
@@ -2922,7 +3044,7 @@
         {
             "type": "metric",
             "x": 0,
-            "y": 95,
+            "y": 102,
             "width": 8,
             "height": 6,
             "properties": {
@@ -2955,7 +3077,7 @@
         {
             "type": "metric",
             "x": 8,
-            "y": 95,
+            "y": 102,
             "width": 8,
             "height": 6,
             "properties": {
@@ -3048,7 +3170,7 @@
         {
             "type": "metric",
             "x": 16,
-            "y": 95,
+            "y": 102,
             "width": 8,
             "height": 6,
             "properties": {
@@ -3161,7 +3283,7 @@
         {
             "type": "metric",
             "x": 0,
-            "y": 101,
+            "y": 108,
             "width": 8,
             "height": 6,
             "properties": {
@@ -3268,7 +3390,7 @@
         {
             "type": "metric",
             "x": 8,
-            "y": 101,
+            "y": 108,
             "width": 8,
             "height": 6,
             "properties": {

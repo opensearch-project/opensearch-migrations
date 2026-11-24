@@ -72,6 +72,23 @@ public class DirtyLeaseSweeper {
         Clock clock,
         Duration verdictPollBudget
     ) throws IOException, InterruptedException {
+        runStartupSweep(coordinator, workerId, workerMemoryTier, verdictFileOrNull, clock,
+            verdictPollBudget, null);
+    }
+
+    /**
+     * @param onEscalation invoked with the destination tier for each escalation actually applied
+     *                     (metrics hook); may be null
+     */
+    public static void runStartupSweep(
+        OpenSearchWorkCoordinator coordinator,
+        String workerId,
+        int workerMemoryTier,
+        Path verdictFileOrNull,
+        Clock clock,
+        Duration verdictPollBudget,
+        java.util.function.IntConsumer onEscalation
+    ) throws IOException, InterruptedException {
         List<OpenSearchWorkCoordinator.DirtyLease> dirtyLeases;
         try {
             dirtyLeases = coordinator.findDirtyLeases(podNamePrefixOf(workerId), workerId);
@@ -98,6 +115,9 @@ public class DirtyLeaseSweeper {
                     int newTier = workerMemoryTier + 1;
                     boolean applied = coordinator.escalateWorkItem(
                         lease.getWorkItemId(), lease.getLeaseHolderId(), newTier);
+                    if (applied && onEscalation != null) {
+                        onEscalation.accept(newTier);
+                    }
                     log.atWarn().setMessage(
                             "OOM verdict {} for dirty lease {}; escalate to tier >= {} {}")
                         .addArgument(verdict.orElse(null))
