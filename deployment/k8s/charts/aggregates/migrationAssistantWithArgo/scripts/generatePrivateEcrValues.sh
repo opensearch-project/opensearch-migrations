@@ -107,6 +107,8 @@ charts:
         prometheusConfigReloader:
           image:
             registry: "${M}/quay.io"
+        thanosImage:
+          registry: "${M}/quay.io"
       prometheus:
         prometheusSpec:
           image:
@@ -136,10 +138,6 @@ charts:
         sidecar:
           image:
             registry: "${M}/quay.io"
-        testFramework:
-          image:
-            repository: "${M}/mirror.gcr.io/bats/bats"
-            tag: "v1.4.1"
 
   opentelemetry-operator:
     repository: "oci://${ECR}/charts/opentelemetry-operator"
@@ -168,10 +166,6 @@ charts:
       sidecar:
         image:
           registry: "${M}/quay.io"
-      testFramework:
-        image:
-          repository: "${M}/mirror.gcr.io/bats/bats"
-          tag: "v1.4.1"
 
   jaeger:
     repository: "oci://${ECR}/charts/jaeger"

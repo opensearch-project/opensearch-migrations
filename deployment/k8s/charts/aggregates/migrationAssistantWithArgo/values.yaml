@@ -971,6 +971,8 @@ charts:
         resources:
           requests: { cpu: 100m, memory: 384Mi }
           limits:   { cpu: 500m, memory: 1Gi }
+        testFramework:
+          enabled: false  # never run by the installer; its bats image is not mirrored
         sidecar:
           image:
             # 1.30.11 never loads a dashboard: after loading the in-cluster config, its watches call
@@ -1035,6 +1037,8 @@ charts:
     values:
       image:
         tag: "13.3.2-distroless"
+      testFramework:
+        enabled: false  # never run by the installer; its bats image is not mirrored
       ## Grafana data sources configuration
       datasources:
         datasources.yaml:
