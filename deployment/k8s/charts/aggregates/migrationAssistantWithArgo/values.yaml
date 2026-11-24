@@ -748,9 +748,14 @@ charts:
           name: argo-workflow-executor
 
   fluent-bit:
-    version: "0.51.0"
+    version: "0.58.3"
     repository: "https://fluent.github.io/helm-charts"
     values:
+      # Chart 0.58.3 defaults to Fluent Bit 5.1.3. Pin the newer 5.2.0 image: its Debian 13 packages
+      # (brotli, curl, PostgreSQL client) carry security fixes 5.1.3 lacks. Keep this tag in sync with
+      # infra/mirror/private-ecr-manifest.yaml, and drop it once the chart's appVersion catches up.
+      image:
+        tag: "5.2.0"
       resources:
         requests: { cpu: 50m, memory: 32Mi }
         limits:   { cpu: 200m, memory: 64Mi }
