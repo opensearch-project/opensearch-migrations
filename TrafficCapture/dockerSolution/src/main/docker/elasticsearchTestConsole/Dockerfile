@@ -45,15 +45,10 @@ FROM ${RUNTIME_IMAGE}
 ENV PIP_ROOT_USER_ACTION=ignore
 ENV LANG=C.UTF-8
 
-# Install every OS update published since the base image was built. AL2023 locks dnf to the
-# release the image was built from, so a plain 'dnf upgrade' finds nothing newer;
-# --releasever=latest moves the image (and every later dnf install here and in the migration
-# console images built on top of it) to the newest release. OS_UPGRADE_DATE is unused by the
-# command; changing it only stops a layer cache from replaying an older upgrade.
+# Move to the newest AL2023 release (also for later installs here and in the console images).
+# OS_UPGRADE_DATE (set daily by the build) keeps the layer cache from replaying an old upgrade.
 ARG OS_UPGRADE_DATE=unset
-RUN dnf upgrade -y --releasever=latest && \
-    dnf clean all && \
-    rm -rf /var/cache/dnf
+RUN dnf upgrade -y --releasever=latest && dnf clean all && rm -rf /var/cache/dnf
 
 # Minimal runtime deps (no compilers, no *-devel)
 RUN dnf install -y \

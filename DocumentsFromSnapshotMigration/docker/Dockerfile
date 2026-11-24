@@ -1,5 +1,4 @@
-# Same base as the other Java images in this repo; it already has the latest OS updates.
-# Build it from TrafficCapture/dockerSolution/src/main/docker/javaRuntimeBase.
+# Using same base image as other Java containers in this repo
 ARG BASE_IMAGE=migrations/java_runtime_base:latest
 FROM ${BASE_IMAGE}
 

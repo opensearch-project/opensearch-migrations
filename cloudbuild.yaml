@@ -44,7 +44,7 @@ steps:
         echo "=== Migration resources generated ==="
         ls /workspace/migrationConsole/nodeStaging/migrationResources/
 
-  # Build the Java runtime base (Corretto + latest OS updates) used by reindex-from-snapshot
+  # Build the Java runtime base that reindex-from-snapshot builds on
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'build'
@@ -58,8 +58,6 @@ steps:
     args:
       - 'build'
       - '--no-cache'
-      - '--build-arg'
-      - 'BASE_IMAGE=migrations/java_runtime_base:latest'
       - '-t'
       - 'us-central1-docker.pkg.dev/$PROJECT_ID/migrations/reindex-from-snapshot:latest'
       - 'DocumentsFromSnapshotMigration/docker'

@@ -37,11 +37,10 @@ def getRepoNameIfPublishing = { Map cfg ->
     return publishedRepoByImageName[imageName]
 }
 
-// Images that install OS updates at build time take this as their OS_UPGRADE_DATE build arg. It
-// changes once a day so that a registry layer cache can't keep serving an older upgrade layer.
+// Changes daily so the registry layer cache can't replay an old 'dnf upgrade' layer
 def osUpgradeDate = java.time.LocalDate.now(java.time.ZoneOffset.UTC).toString()
 
-// Jib can't run an OS upgrade, so the Jib images build on java_runtime_base (see buildKitProjects).
+// Jib can't run 'dnf upgrade', so the Jib images build on java_runtime_base
 def javaRuntimeBase = [
         baseImageRegistryEndpoint: intermediateRegistry.hostUrl,
         baseImageGroup           : "migrations",
