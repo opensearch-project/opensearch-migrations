@@ -11,8 +11,8 @@
     "test:nocov": "vitest run"
   },
   "devDependencies": {
-    "@vitest/coverage-v8": "^4.1.12",
+    "@vitest/coverage-v8": "^4.1.9",
     "jsondiffpatch": "^0.7.2",
-    "vitest": "^4.1.12"
+    "vitest": "^4.1.9"
   }
 }

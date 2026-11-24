@@ -23,7 +23,7 @@
     "ajv": "^8.20.0",
     "ci": "^2.3.0",
     "yaml": "^2.9.1",
-    "zod": "^4.6.6"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@testcontainers/k3s": "^12.0.2",
