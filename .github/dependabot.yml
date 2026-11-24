@@ -81,8 +81,12 @@ updates:
           - "*"
     ignore:
       - dependency-name: "com.avast.gradle.docker-compose"
+      # Stay on Netty 4.1, but let 4.1.x patch releases (incl. security fixes) through.
       - dependency-name: "io.netty:*"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      # reactor-netty 1.3+ requires Netty 4.2; allow 1.2.x patch releases.
       - dependency-name: "io.projectreactor.netty:*" # reactor-netty 1.3+ requires Netty 4.2
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
       - dependency-name: "io.projectreactor:reactor-test" # reactor-test 3.8+ requires Netty 4.2
       - dependency-name: "io.opentelemetry.semconv:*"
       - dependency-name: "org.apache.commons:commons-compress"
