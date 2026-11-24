@@ -608,7 +608,6 @@ class Right:
         return ids
 
 
-
 class WorkersByTier:
     """Live worker processes per memory tier. Every process reports exactly one 1 across its phase
     series, so the all-phase sum counts processes; subtracting the exited series leaves the live
@@ -644,8 +643,8 @@ class TierEscalations:
     def cw(self, w):
         return [w.e(w.search("workItemsEscalated", "Sum"), "escalated/min")]
 
-
 # --- panels --------------------------------------------------------------------------------------------------
+
 
 class Panel:
     def __init__(self, title, desc, unit, series, stacked=False, cw_only=False, grafana_only=False,
