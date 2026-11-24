@@ -1,18 +1,18 @@
 """End-to-end tests for RFS crash escalation and memory-tier scaling
 (docs/rfsMemoryTierScaling.md).
 
-The memory pressure is real: a JavaScript document transformer (jsonJSTransformer) allocates and
-RETAINS memory for every document of one designated "heavy" index (pushed into a module-level
-array, so it is held across documents for the life of the worker's transformer instance).
-Allocation inside the JS engine counts against the JVM heap, which runs at
--XX:MaxRAMPercentage=80 of the container limit, so a heavy shard drives a genuine heap OOM
-(ExitOnOutOfMemoryError, exit 3) at the small tiers and completes once the tier's heap can hold
-the retained set.
+The memory pressure is real and deterministic: a JavaScript document transformer
+(jsonJSTransformer) makes exactly ONE typed-array allocation per weighted index per worker
+process (held in a module-level map for the life of the process). Typed arrays materialize
+real JVM heap immediately — the heap runs at -XX:MaxRAMPercentage=80 of the container limit —
+so a worker whose tier cannot hold an index's weight OOMs on that index's first document,
+every time (ExitOnOutOfMemoryError, exit 3), and completes once the tier's heap fits the
+allocation. Cumulative per-document retention was tried first and rejected: engine string/GC
+behavior let shards slip through tiers they were meant to overflow.
 
-Sizing (deterministic by construction; verify empirically on first run):
-  tiers 1400Mi -> 2800Mi -> 5600Mi  =>  heaps ~1120 / 2240 / 4480 MiB
-  heavy index: 2 shards x ~380 docs x ~8MiB retained/doc  => ~3040 MiB retained per shard
-  so each heavy shard overflows tiers 0 and 1 (plus baseline) and fits tier 2.
+Sizing: tiers 1400Mi -> 2800Mi -> 5600Mi  =>  heaps ~1120 / 2240 / 4480 MiB
+  tier-1-weight indices allocate 1300MiB (overflow tier 0, fit tier 1)
+  tier-2-weight / heavy indices allocate 2600MiB (overflow tiers 0 and 1, fit tier 2)
 
 These tests are long (each climbs the ladder on OOM-restart + 1-minute monitor sweeps), so they
 only run when selected explicitly via --test_ids.
@@ -43,28 +43,34 @@ CRASH_WITNESS_CONTAINER = "crash-witness"
 HEAVY_DOCS = 760          # ~380 per shard across 2 shards
 HEAVY_SHARDS = 2
 ORDINARY_DOCS = 50
-RETAINED_MIB_PER_DOC = 8
+HEAVY_RETAINED_MIB = 2600   # one allocation: overflows tier-0 AND tier-1 heaps, fits tier 2
 
 # Worker resources: the smallest limit that still comfortably boots RFS in this suite's
 # environment (the suite's other tests boot at 1Gi); requests == limits as memoryScaling requires.
 TIER0_MEMORY = "1400Mi"
 
 MEMORY_HOG_TRANSFORM_SCRIPT = """
-var retained = [];
+var allocatedByIndex = {};
 function main(context) {
-  // {indexName: MiB retained per document} — memory pressure keyed by SOURCE INDEX NAME, so
-  // different indices drive workers to different memory tiers within one migration.
-  var weights = JSON.parse(context.get("indexRetainedMiBPerDocJson"));
+  // {indexName: MiB retained} — memory pressure keyed by SOURCE INDEX NAME. Exactly ONE
+  // deterministic allocation per index per worker process: typed arrays materialize real heap
+  // immediately (unlike lazy string ropes), so a worker whose tier cannot hold the index's
+  // weight OOMs on the first document, every time. Chunked to stay under Java's max array size.
+  var weights = JSON.parse(context.get("indexRetainedMiBJson"));
   return (documents) => {
     for (const doc of documents) {
       var operation = doc.get("operation");
       var indexName = operation ? operation.get("_index") : null;
       var mib = indexName ? weights[indexName] : null;
-      if (mib) {
-        // Retain ~mib MiB per document, held across documents (and batches) by the
-        // module-level array. Java strings are UTF-16, so chars = bytes / 2. Each repeat()
-        // call allocates a fresh string.
-        retained.push("x".repeat(mib * 1024 * 1024 / 2));
+      if (mib && !(indexName in allocatedByIndex)) {
+        var chunks = [];
+        var remaining = mib;
+        while (remaining > 0) {
+          var size = Math.min(remaining, 650);
+          chunks.push(new Uint8Array(size * 1024 * 1024));
+          remaining -= size;
+        }
+        allocatedByIndex[indexName] = chunks;
       }
     }
     return documents;
@@ -74,12 +80,12 @@ function main(context) {
 """
 
 
-def _memory_hog_transform(index_retained_mib_per_doc: dict) -> dict:
+def _memory_hog_transform(index_retained_mib: dict) -> dict:
     return {
         "JsonJSTransformerProvider": {
             "initializationScript": MEMORY_HOG_TRANSFORM_SCRIPT,
             "bindingsObject": json.dumps({
-                "indexRetainedMiBPerDocJson": json.dumps(index_retained_mib_per_doc),
+                "indexRetainedMiBJson": json.dumps(index_retained_mib),
             }),
         }
     }
@@ -172,7 +178,7 @@ class MemoryTierTestBase(MATestBase):
         }
         if with_transform:
             config["docTransformerConfigBase64"] = convert_to_b64(
-                [_memory_hog_transform({self.heavy_index: RETAINED_MIB_PER_DOC})])
+                [_memory_hog_transform({self.heavy_index: HEAVY_RETAINED_MIB})])
         if memory_scaling:
             config["memoryScaling"] = {
                 "growthFactor": 2,
@@ -474,15 +480,15 @@ class Test0093MemoryScalingOffIsUnchanged(MemoryTierTestBase):
 
 
 LADDER_DOCS = 50          # docs per dummy index; memory comes from the transform, not the data
-TIER1_MIB_PER_DOC = 32    # 50 docs x 32MiB ~ 1600MiB retained/shard: overflows tier 0, fits tier 1
-TIER2_MIB_PER_DOC = 64    # 50 docs x 64MiB ~ 3200MiB retained/shard: overflows tier 1, fits tier 2
+TIER1_RETAINED_MIB = 1300  # one allocation: overflows tier-0 heap (~1120MiB), fits tier 1 (~2240MiB)
+TIER2_RETAINED_MIB = 2600  # one allocation: overflows tier-1 heap, fits tier 2 (~4480MiB)
 
 
 class Test0094MemoryTierLadder(MemoryTierTestBase):
     """(e) Diversity ladder: ten small dummy indices (50 tiny docs each) created on an in-test
     source cluster, blown up by per-index transform weights so different indices land on
-    different memory tiers — six stay at tier 0, two land at tier 1 (~1600MiB retained/shard),
-    two climb to tier 2 (~3200MiB). Everything is created inside the test: no external
+    different memory tiers — six stay at tier 0, two land at tier 1 (1300MiB single allocation),
+    two climb to tier 2 (2600MiB). Everything is created inside the test: no external
     snapshot, no bucket access, runs anywhere the full (with-clusters) tests run."""
 
     def __init__(self, user_args: MATestUserArguments):
@@ -505,8 +511,8 @@ class Test0094MemoryTierLadder(MemoryTierTestBase):
         config = self.backfill_config(max_memory="5600Mi", with_transform=False)
         config["indexAllowlist"] = self.ladder_indices
         config["maxTotalPods"] = 6
-        weights = {index: TIER1_MIB_PER_DOC for index in self.tier1_indices}
-        weights.update({index: TIER2_MIB_PER_DOC for index in self.tier2_indices})
+        weights = {index: TIER1_RETAINED_MIB for index in self.tier1_indices}
+        weights.update({index: TIER2_RETAINED_MIB for index in self.tier2_indices})
         config["docTransformerConfigBase64"] = convert_to_b64([_memory_hog_transform(weights)])
         self.workflow_snapshot_and_migration_config = [{
             "migrations": [{"documentBackfillConfig": config}]
