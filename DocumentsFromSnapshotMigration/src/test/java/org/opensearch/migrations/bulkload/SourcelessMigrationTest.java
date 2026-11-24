@@ -570,7 +570,7 @@ public class SourcelessMigrationTest extends SourceTestBase {
                     target.getUrl(), clockJitter, testContext,
                     sourceVersion, targetVersion
                 );
-                if (workResult == CompletionStatus.NOTHING_DONE) {
+                if (workResult.acquiredNoWork()) {
                     throw new ExpectedMigrationWorkTerminationException(
                         new RfsMigrateDocuments.NoWorkLeftException("Pipeline returned NOTHING_DONE"),
                         runNumber

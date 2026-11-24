@@ -252,7 +252,7 @@ public class SolrSnapshotToOpenSearchTest {
                         .build();
 
                     var status = runner.migrateOneShard(testContext::createReindexContext);
-                    if (status == CompletionStatus.NOTHING_DONE) break;
+                    if (status.acquiredNoWork()) break;
                     shardsProcessed++;
                 }
 
@@ -401,7 +401,7 @@ public class SolrSnapshotToOpenSearchTest {
                         .build();
 
                     var status = runner.migrateOneShard(testContext::createReindexContext);
-                    if (status == CompletionStatus.NOTHING_DONE) break;
+                    if (status.acquiredNoWork()) break;
                     shardsProcessed++;
                 }
 
@@ -626,7 +626,7 @@ public class SolrSnapshotToOpenSearchTest {
                         .build();
 
                     var status = runner.migrateOneShard(testContext::createReindexContext);
-                    if (status == CompletionStatus.NOTHING_DONE) break;
+                    if (status.acquiredNoWork()) break;
                     shardsProcessed++;
                 }
 
@@ -969,7 +969,7 @@ public class SolrSnapshotToOpenSearchTest {
                     .build();
 
                 var status = runner.migrateOneShard(testContext::createReindexContext);
-                if (status == CompletionStatus.NOTHING_DONE) {
+                if (status.acquiredNoWork()) {
                     break;
                 }
                 succeeded++;
