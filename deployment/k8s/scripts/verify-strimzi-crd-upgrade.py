@@ -86,7 +86,7 @@ def render(helm, chart, *extra):
 
 def strimzi_chart_version(chart):
     values = (chart / "values.yaml").read_text()
-    match = re.search(r"(?ms)^  strimzi-kafka-operator:\n.*?^    version:\s*\"?([0-9][^\"\s]*)\"?\s*$", values)
+    match = re.search(r"(?ms)^ {2}strimzi-kafka-operator:\n.*?^ {4}version:\s*\"?(\d[^\"\s]*)\"?\s*$", values)
     if not match:
         fail("values.yaml does not pin charts.strimzi-kafka-operator.version")
     return match.group(1)
