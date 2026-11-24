@@ -34,51 +34,19 @@ a schema baked into the container image.
 helm install migration-assistant ./deployment/k8s/charts/aggregates/migrationAssistantWithArgo
 ```
 
-## Upgrading
+## Upgrading from Strimzi 0.5x releases
 
-### Strimzi CRDs
-
-`helm upgrade` never updates the CRDs in a chart's `crds/` directory, so before
-the dependency installer upgrades the `strimzi-kafka-operator` chart it updates
-the Strimzi CRDs itself
-([`_strimziCrdUpgrade.tpl`](./templates/helpers/_strimziCrdUpgrade.tpl)):
-
-1. If the existing CRDs still store `v1beta2` (Strimzi 0.49-0.51), it makes
-   `v1` the storage version, rewrites every Strimzi resource so that it is
-   stored as `v1`, and sets `status.storedVersions` to `[v1]`. This is what
-   Strimzi's `v1-api-conversion.sh crd-upgrade` does. The Migration Assistant
-   has always created its Strimzi resources through the `v1` API, so they need
-   no field conversion.
-2. It server-side applies the CRD files from the configured chart version, then
-   checks that each CRD serves exactly the chart's versions.
-
-The installer stops with an error, before it changes anything, if the CRDs come
-from Strimzi older than 0.49 (no `v1` API). Upgrade through a release that uses
-Strimzi 0.49-0.51 first. Once the CRDs are `v1`-only, rolling back to a release
-that uses Strimzi 0.5x isn't supported, because those operators need
-`v1beta2`.
-
-### Kafka clusters that are already running
-
-Strimzi 1.3 supports Kafka 4.2.0-4.3.2, and earlier releases created Kafka
-4.0.0 clusters. After the upgrade, such a cluster keeps serving traffic, but
-the operator reports `UnsupportedKafkaVersionException` and stops reconciling
-it. Until the cluster is upgraded, `KafkaTopic` and `KafkaUser` changes aren't
-reconciled reliably: the old entity operator keeps using the removed `v1beta2`
-API, and it may restart. Choose one of these options:
-
-- Finish or reset (`workflow reset`) capture-and-replay migrations before you
-  upgrade. New workflow runs create Kafka 4.2.2 clusters.
-- Submit the workflow again after you upgrade. The `KafkaCluster` version is a
-  gated field, so approve the change when the workflow asks
-  (`workflow approve change <resource>`, see
-  [Reconfiguring workflows](../../../../../docs/reconfiguringWorkflows.md)). The
-  workflow then applies `spec.kafka.version: 4.2.2` and
-  `metadataVersion: 4.2-IV1`. Strimzi rolls the brokers to 4.2.2 one at a time
-  on the current metadata version and then raises the metadata version.
-  Persistent volumes, and the data on them, are kept. To upgrade the Strimzi
-  cluster by hand instead, run
-  `kubectl -n ma patch kafka <name> --type=merge -p '{"spec":{"kafka":{"version":"4.2.2","metadataVersion":"4.2-IV1"}}}'`.
+- `helm upgrade` doesn't update CRDs, so the dependency installer migrates the
+  existing Strimzi CRDs from `v1beta2` to `v1` storage and applies the new
+  chart's CRDs before it upgrades the operator
+  ([`_strimziCrdUpgrade.tpl`](./templates/helpers/_strimziCrdUpgrade.tpl)).
+  CRDs older than Strimzi 0.49 stop the installer. Rolling back to a 0.5x
+  release afterwards isn't supported.
+- Running Kafka 4.0.0 clusters keep serving traffic, but Strimzi 1.3 no longer
+  reconciles them. Reset (`workflow reset`) capture-and-replay migrations
+  before you upgrade. Alternatively, re-submit the workflow and approve the
+  gated `KafkaCluster` version change, which rolls the brokers to 4.2.2 and
+  keeps their data.
 
 ## Configuration
 

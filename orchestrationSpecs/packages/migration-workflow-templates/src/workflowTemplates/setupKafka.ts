@@ -11,11 +11,7 @@ import {
 } from "@opensearch-migrations/argo-workflow-builders";
 import {OwnerReference} from "@opensearch-migrations/k8s-types";
 import {CommonWorkflowParameters, workflowScriptCommand, workflowScriptRootEnvVars} from "./commonUtils/workflowParameters";
-import {
-    DEFAULT_RESOURCES,
-    KAFKA_CLUSTER_CREATION_CONFIG,
-    MANAGED_KAFKA_METADATA_VERSION
-} from "@opensearch-migrations/schemas";
+import {DEFAULT_RESOURCES, KAFKA_CLUSTER_CREATION_CONFIG} from "@opensearch-migrations/schemas";
 import {z} from "zod";
 import {
     KAFKA_CLUSTER_READY_TIMEOUT_SECONDS,
@@ -227,7 +223,7 @@ function makeManagedKafkaSpecNoAuth(args: {
     return expr.mergeDicts(
         expr.makeDict({
             version: args.version,
-            metadataVersion: MANAGED_KAFKA_METADATA_VERSION,
+            metadataVersion: "4.2-IV1",
             listeners: expr.toArray(makePlainListener(), makeTlsListener()),
             metricsConfig: makeManagedKafkaMetricsConfig(),
         }),
@@ -245,7 +241,7 @@ function makeManagedKafkaSpecScram(args: {
     return expr.mergeDicts(
         expr.makeDict({
             version: args.version,
-            metadataVersion: MANAGED_KAFKA_METADATA_VERSION,
+            metadataVersion: "4.2-IV1",
             listeners: expr.toArray(makeScramListener()),
             metricsConfig: makeManagedKafkaMetricsConfig(),
         }),

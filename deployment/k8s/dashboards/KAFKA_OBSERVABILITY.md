@@ -181,13 +181,11 @@ The managed Kafka 4.2 deployment uses G1 garbage collection. The CloudWatch GC
 panel names the three G1 collectors explicitly; a customer-supplied JVM
 collector override requires corresponding dashboard changes.
 
-Since Kafka 4.2 (KIP-1207, [apache/kafka#20481](https://github.com/apache/kafka/pull/20481)),
-`RequestHandlerAvgIdlePercent` on combined-role brokers divides idle time by the
-thread count of both the broker and controller request-handler pools, so it is
-already a 0–1 fraction. The Grafana and CloudWatch utilization panels and the
+Since Kafka 4.2 (KIP-1207), `RequestHandlerAvgIdlePercent` on combined-role
+brokers is already a 0–1 fraction across the broker and controller pools. The
+Grafana and CloudWatch utilization panels and the
 `MigrationAssistantKafkaRequestHandlersSaturated` alert convert it to busy
-percent directly. (Kafka 4.0 reported the sum of the two pools' idle fractions,
-which earlier Migration Assistant releases halved.)
+percent directly.
 
 Collection can be disabled explicitly:
 

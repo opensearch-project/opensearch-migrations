@@ -17,7 +17,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CHART_DIR="$(cd "$SCRIPT_DIR/../aggregates/migrationAssistantWithArgo" && pwd)"
 TEST_CHART_DIR="$(cd "$SCRIPT_DIR/../aggregates/testClusters" && pwd)"
 MANIFEST="$CHART_DIR/infra/mirror/private-ecr-manifest.yaml"
-MANAGED_KAFKA_FILE="$(cd "$SCRIPT_DIR/../../../.." && pwd)/orchestrationSpecs/packages/schemas/src/managedKafka.ts"
+MANAGED_KAFKA_FILE="$(cd "$SCRIPT_DIR/../../../.." && pwd)/orchestrationSpecs/packages/config-processor/src/migrationConfigTransformer.ts"
 ECR_HOST="${ECR_HOST:-123456789012.dkr.ecr.us-east-1.amazonaws.com}"
 DRY_RUN=false
 
@@ -77,12 +77,11 @@ CHARTS_FILE="$TMPDIR/charts.txt"
 # Parse charts from both migrationAssistantWithArgo and testClusters
 for vf in "$CHART_DIR/values.yaml" "$TEST_CHART_DIR/values.yaml"; do
   [ -f "$vf" ] || continue
-  # Extract name|version|repo triples. Copy $2 before stripping quotes: assigning to a field
-  # rebuilds $0 without its indentation, which the last rule would read as the end of charts:.
+  # Extract name|version|repo triples
   awk '
     /^  [a-zA-Z].*:$/ && in_charts { name=$1; gsub(/:$/,"",name) }
-    /version:/ && in_charts && name { ver=$2; gsub(/[" ]/,"",ver) }
-    /repository:/ && in_charts && name && /http|oci/ { repo=$2; gsub(/[" ]/,"",repo); print name"|"ver"|"repo; name="" }
+    /version:/ && in_charts && name { gsub(/[" ]/,"",$2); ver=$2 }
+    /repository:/ && in_charts && name && /http|oci/ { gsub(/[" ]/,"",$2); repo=$2; print name"|"ver"|"repo; name="" }
     /^charts:/ { in_charts=1 }
     /^[^ ]/ && !/^charts:/ { in_charts=0 }
   ' "$vf" >> "$CHARTS_FILE"
@@ -94,7 +93,7 @@ echo "  Found $(wc -l < "$CHARTS_FILE" | tr -d ' ') charts"
 echo "Step 2: Discovering images from helm template..."
 ALL_IMAGES="$TMPDIR/all_images.txt"
 touch "$ALL_IMAGES"
-MANAGED_KAFKA_VERSION=$(sed -n 's/^export const MANAGED_KAFKA_VERSION = "\(.*\)";$/\1/p' "$MANAGED_KAFKA_FILE" 2>/dev/null || true)
+MANAGED_KAFKA_VERSION=$(sed -n 's/^const KAFKA_VERSION = "\(.*\)";$/\1/p' "$MANAGED_KAFKA_FILE" 2>/dev/null || true)
 
 while IFS='|' read -r name version repo; do
   [ -z "$name" ] && continue
@@ -112,16 +111,15 @@ while IFS='|' read -r name version repo; do
   # Try exact dir name first, then glob
   [ -d "$dir" ] || dir=$(ls -d ${name}*/ 2>/dev/null | head -1 | tr -d '/')
   if [ -d "$dir" ]; then
-    helm template test "$dir/" 2>/dev/null > "$TMPDIR/rendered.yaml" || true
-    { grep -E '^\s+image:' "$TMPDIR/rendered.yaml" || true; } | \
+    helm template test "$dir/" 2>/dev/null | grep -E '^\s+image:' | \
       sed 's/.*image:\s*//' | tr -d '"' | tr -d "'" | sed 's/^[[:space:]]*//' >> "$ALL_IMAGES"
     if [ "$name" = "strimzi-kafka-operator" ]; then
       # The operator starts these at runtime, so they appear only in its env, not in image: fields.
       # Of the Kafka images, mirror only the version that workflow-managed clusters run.
-      grep -Eo 'quay\.io/strimzi/(kafka-bridge|maven-builder|buildah):[^[:space:]"]+' "$TMPDIR/rendered.yaml" >> "$ALL_IMAGES" || true
+      grep -Eo 'quay\.io/strimzi/(kafka-bridge|maven-builder|buildah):[^[:space:]"]+' "$RENDERED" >> "$ALL_IMAGES" || true
       if [ -z "$MANAGED_KAFKA_VERSION" ]; then
-        echo "    WARN: MANAGED_KAFKA_VERSION not found in $MANAGED_KAFKA_FILE; skipping the strimzi kafka image"
-      elif ! grep -Eo "^[[:space:]]*${MANAGED_KAFKA_VERSION}=[^[:space:]]+" "$TMPDIR/rendered.yaml" | \
+        echo "    WARN: KAFKA_VERSION not found in $MANAGED_KAFKA_FILE; skipping the strimzi kafka image"
+      elif ! grep -Eo "^[[:space:]]*${MANAGED_KAFKA_VERSION}=[^[:space:]]+" "$RENDERED" | \
           head -1 | sed 's/^[^=]*=//' | grep . >> "$ALL_IMAGES"; then
         echo "    WARN: strimzi-kafka-operator $version does not support managed Kafka $MANAGED_KAFKA_VERSION"
       fi

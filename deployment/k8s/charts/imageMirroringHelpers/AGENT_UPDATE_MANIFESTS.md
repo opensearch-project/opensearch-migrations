@@ -54,7 +54,7 @@ These operators pull images at runtime that don't appear in `helm template`:
 
 | Operator | Runtime images | How to find |
 |----------|---------------|-------------|
-| strimzi | kafka, kafka-bridge, kaniko-executor, maven-builder | `helm template` → grep `STRIMZI_` env vars |
+| strimzi | kafka, kafka-bridge, maven-builder, buildah | `helm template` → grep `STRIMZI_` env vars |
 | prometheus-operator | thanos sidecar | Check `thanosRuler` in kube-prometheus-stack values |
 | kube-prometheus-stack | grafana sidecar (`kiwigrid/k8s-sidecar`) | In grafana sub-chart values |
 

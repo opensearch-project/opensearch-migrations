@@ -27,19 +27,17 @@ The key point is that you should not need to:
 
 ## Baseline Model
 
-The workflow should provide a baseline Kafka model built around Strimzi `1.3`
-(the `kafka.strimzi.io/v1` API) running Kafka `4.2.2`.
+The workflow should provide a baseline Kafka model built around Strimzi `0.50`.
 
 That baseline model exists for two reasons:
 
 - to give users defaults for common Kafka settings
 - to provide a stable implementation contract for the workflow
 
-The project should treat Strimzi `1.3` as:
+The project should treat Strimzi `0.50` as:
 
 - the baseline schema/defaulting model baked into code
-- the minimum supported version (Strimzi 1.x serves only the `v1` API; the
-  Migration Assistant has always written its Strimzi resources through `v1`)
+- the minimum supported version
 
 Later Strimzi versions may still work, but validation should ultimately be
 driven by the live CRDs deployed in the target environment.
@@ -188,7 +186,7 @@ workflow still supplies the baseline defaults for the rest.
 
 The intended validation model is hybrid:
 
-1. Code provides a baseline typed/defaulted model based on Strimzi `1.3`.
+1. Code provides a baseline typed/defaulted model based on Strimzi `0.50`.
 2. User overrides are merged into that baseline.
 3. The merged result is validated against the unified JSON Schema.
 4. The preferred unified schema is built from the live Strimzi CRDs deployed in

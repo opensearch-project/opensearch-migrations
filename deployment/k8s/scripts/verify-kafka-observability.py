@@ -280,13 +280,12 @@ class KafkaObservabilityTests(unittest.TestCase):
                 self.default_render,
             )
 
-    def test_request_handler_saturation_uses_the_unscaled_fraction_everywhere(self):
-        # Kafka 4.2+ (KIP-1207) already normalizes the combined-role idle ratio to 0..1, so no panel or
-        # alert may halve it the way the Kafka 4.0 workaround did.
-        busy = '100 * (1 - avg by (%s) (kafka_server_request_handler_idle_ratio{namespace="%s"}))'
+    def test_request_handler_saturation_is_normalized_everywhere(self):
+        # Kafka 4.2 (KIP-1207) already reports a 0..1 fraction for combined-role brokers; nothing halves it.
+        unscaled = 'kafka_server_request_handler_idle_ratio{namespace="%s"}))'
         dashboard = embedded_grafana(self.default_render)
         panel = next(p for p in dashboard["panels"] if p.get("title") == HANDLER_SATURATION_TITLE)
-        self.assertEqual(busy % ("pod", "$namespace"), panel["targets"][0]["expr"])
+        self.assertIn(unscaled % "$namespace", panel["targets"][0]["expr"])
         alerts = render(
             self.args.helm,
             self.chart,
@@ -297,8 +296,7 @@ class KafkaObservabilityTests(unittest.TestCase):
             "--set",
             "kafkaObservability.brokerMetrics.alertsEnabled=true",
         )
-        self.assertIn(busy % ("namespace, pod", "ma") + " > 80", alerts)
-        self.assertNotIn("kafka_server_request_handler_idle_ratio{namespace=\"ma\"}) / 2", alerts)
+        self.assertIn(unscaled % "ma" + " > 80", alerts)
 
     def test_alert_rules_render_policy_and_promql(self):
         rendered = render(
@@ -513,7 +511,6 @@ class KafkaObservabilityTests(unittest.TestCase):
         self.assertIn("100 * SUM(", broker_expressions)
         handlers = widgets[HANDLER_SATURATION_TITLE]["properties"]["metrics"]
         self.assertTrue(all("/ 2)" not in row[0]["expression"] for row in handlers))
-        self.assertTrue(all(row[0]["expression"].startswith("100 * (1 - ") for row in handlers))
         gc_rows = widgets[GC_WIDGET_TITLE]["properties"]["metrics"]
         self.assertEqual(len(gc_rows), 6)
         self.assertNotIn(

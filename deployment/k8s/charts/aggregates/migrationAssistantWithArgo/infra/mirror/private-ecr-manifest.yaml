@@ -34,7 +34,7 @@ images:
   - "public.ecr.aws/aws-controllers-k8s/acmpca-controller:1.2.2"
   - "public.ecr.aws/aws-controllers-k8s/cloudwatch-controller:1.4.2"
 
-  # strimzi (the kafka tag must match MANAGED_KAFKA_VERSION in orchestrationSpecs; Strimzi 1.3 removed Kaniko)
+  # strimzi
   - "quay.io/strimzi/operator:1.3.1"
   - "quay.io/strimzi/kafka:1.3.1-kafka-4.2.2"
   - "quay.io/strimzi/kafka-bridge:1.2.1"

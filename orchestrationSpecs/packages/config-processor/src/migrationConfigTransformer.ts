@@ -19,7 +19,6 @@ import {
     TRANSFORM_CONTEXT_VALUE,
     DEPLOYMENT_DEFAULTS_CONFIG,
     FAILED_DOCUMENT_STREAM_CONFIG,
-    MANAGED_KAFKA_VERSION,
 } from '@opensearch-migrations/schemas';
 import {StreamSchemaTransformer} from './streamSchemaTransformer';
 import { z } from 'zod';
@@ -71,6 +70,9 @@ export type NormalizedUserConfig = Omit<InputConfig, "kafkaClusterConfiguration"
     kafkaClusterConfiguration: Record<string, z.infer<typeof KAFKA_CLUSTER_CONFIG>>;
     sourceClusters: Record<string, NormalizedSourceCluster>;
 };
+
+/** Kafka version deployed by auto-created clusters. Not user-configurable. */
+const KAFKA_VERSION = "4.2.2";
 
 async function rewriteLocalStackEndpointToIp(s3Endpoint: string): Promise<string> {
     // Determine protocol based on localstack vs localstacks
@@ -1208,7 +1210,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             .filter(([_, config]) => 'autoCreate' in config)
             .map(([name, config]) => ({
                 name,
-                version: MANAGED_KAFKA_VERSION,
+                version: KAFKA_VERSION,
                 config: {
                     ...(config as any).autoCreate,
                     auth: resolveWorkflowManagedKafkaAuth(config as z.infer<typeof KAFKA_CLUSTER_CONFIG> & {autoCreate: z.infer<typeof KAFKA_CLUSTER_CREATION_CONFIG>}),
