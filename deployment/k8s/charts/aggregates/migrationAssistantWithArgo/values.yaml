@@ -902,17 +902,12 @@ charts:
     repository: "https://prometheus-community.github.io/helm-charts"
     values:
       crds:
-        # Helm installs the chart's CRDs only when they are missing and never upgrades them.
-        # They also outlive a Migration Assistant uninstall, so a reinstall or upgrade on the same
-        # cluster would leave a newer Prometheus Operator running against older CRDs. This
-        # pre-install/pre-upgrade hook server-side applies the CRDs shipped with the chart.
+        # Helm never upgrades CRDs, and they outlive an MA uninstall; this hook applies the chart's CRDs.
         upgradeJob:
           enabled: true
           image:
             kubectl:
-              # The chart defaults this tag to the cluster's Kubernetes version. Pin it to a
-              # tag in infra/mirror/private-ecr-manifest.yaml so private-ECR installs can pull it.
-              tag: "v1.35.3"
+              tag: "v1.35.3"  # mirrored tag; the chart default follows the cluster version
       prometheus:
         prometheusSpec:
           serviceMonitorSelector: { }  # Select all ServiceMonitors
@@ -971,22 +966,15 @@ charts:
           limits:   { cpu: 100m, memory: 32Mi }
       grafana:
         image:
-          # The distroless variant is the grafana chart's default since chart 13.0.0. It omits the
-          # Alpine OS packages that the standard image carries.
           tag: "13.3.2-distroless"
-        # Grafana 13 runs many more internal API services than 11.x: its working set is about 290Mi
-        # once the dashboards load, so the old 256Mi limit OOM-killed it. The chart sets GOMEMLIMIT
-        # to 90% of the memory limit.
+        # Grafana 13 uses ~290Mi; a 256Mi limit OOM-kills it at startup.
         resources:
           requests: { cpu: 100m, memory: 384Mi }
           limits:   { cpu: 500m, memory: 1Gi }
-        # The installer never runs `helm test`, so don't render the bats test pod or mirror its image.
-        testFramework:
-          enabled: false
         sidecar:
           image:
             # 1.30.11 never loads a dashboard: after loading the in-cluster config, its watches call
-            # localhost:80. 2.14.x loads them (checked on kind and EKS).
+            # localhost:80. 2.14.1 loads them (checked on kind and EKS).
             tag: 2.14.3
           dashboards:
             resources:
@@ -1042,14 +1030,11 @@ charts:
         tag: "4.3.0"
 
   grafana:
-    # The grafana chart moved from grafana/helm-charts to grafana-community/helm-charts.
     version: "14.5.0"
     repository: "https://grafana-community.github.io/helm-charts"
     values:
       image:
         tag: "13.3.2-distroless"
-      testFramework:
-        enabled: false
       ## Grafana data sources configuration
       datasources:
         datasources.yaml:

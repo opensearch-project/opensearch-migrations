@@ -52,7 +52,6 @@ images:
   - "mirror.gcr.io/library/busybox:latest"
 
   # kube-prometheus-stack
-  # (its CRD upgrade job also uses busybox:latest and kubectl:v1.35.3, listed above and below)
   - "quay.io/prometheus/prometheus:v3.16.0-distroless"
   - "quay.io/prometheus-operator/prometheus-operator:v0.95.2"
   - "quay.io/prometheus-operator/prometheus-config-reloader:v0.95.2"
@@ -61,6 +60,7 @@ images:
   - "quay.io/kiwigrid/k8s-sidecar:2.14.3"
   - "registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.20.0"
   - "ghcr.io/jkroepke/kube-webhook-certgen:1.11.1"
+  - "mirror.gcr.io/bats/bats:v1.4.1"
   - "quay.io/thanos/thanos:v0.42.5"
 
   # observability
