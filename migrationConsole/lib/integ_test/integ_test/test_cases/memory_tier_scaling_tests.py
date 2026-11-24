@@ -200,10 +200,13 @@ class MemoryTierTestBase(MATestBase):
         return deployments
 
     def snapshot_migration_status(self) -> dict:
+        """Empty dict until the workflow's initializer has created the CR — pollers treat
+        a missing resource as not-yet-started, never as a failure."""
         items = self.custom.list_namespaced_custom_object(
             group=CRD_GROUP, version=CRD_VERSION, namespace=self.namespace,
             plural=SNAPSHOT_MIGRATION_PLURAL).get("items", []) or []
-        assert items, "no SnapshotMigration resources found"
+        if not items:
+            return {}
         return items[0].get("status", {}) or {}
 
     def wait_observing_tiers(self, timeout_seconds: int, poll_seconds: int = 15,
