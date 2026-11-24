@@ -8,7 +8,8 @@ on:
       - 'schema-viewer/**'
       - '.github/workflows/deploy-schema-viewer.yml'
   release:
-    types: [published]
+    # "released" covers promotion from a pre-release to a full release.
+    types: [published, released]
   workflow_dispatch:
 
 permissions:
