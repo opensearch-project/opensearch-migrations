@@ -52,17 +52,19 @@ TIER0_MEMORY = "1400Mi"
 MEMORY_HOG_TRANSFORM_SCRIPT = """
 var retained = [];
 function main(context) {
-  var heavyIndex = context.get("heavyIndex");
-  var retainedMiBPerDoc = context.get("retainedMiBPerDoc");
+  // {indexName: MiB retained per document} — memory pressure keyed by SOURCE INDEX NAME, so
+  // different indices drive workers to different memory tiers within one migration.
+  var weights = JSON.parse(context.get("indexRetainedMiBPerDocJson"));
   return (documents) => {
     for (const doc of documents) {
       var operation = doc.get("operation");
       var indexName = operation ? operation.get("_index") : null;
-      if (indexName === heavyIndex) {
-        // Retain ~retainedMiBPerDoc MiB per document, held across documents (and batches) by
-        // the module-level array. Java strings are UTF-16, so chars = bytes / 2. Each repeat()
+      var mib = indexName ? weights[indexName] : null;
+      if (mib) {
+        // Retain ~mib MiB per document, held across documents (and batches) by the
+        // module-level array. Java strings are UTF-16, so chars = bytes / 2. Each repeat()
         // call allocates a fresh string.
-        retained.push("x".repeat(retainedMiBPerDoc * 1024 * 1024 / 2));
+        retained.push("x".repeat(mib * 1024 * 1024 / 2));
       }
     }
     return documents;
@@ -72,13 +74,12 @@ function main(context) {
 """
 
 
-def _memory_hog_transform(heavy_index: str) -> dict:
+def _memory_hog_transform(index_retained_mib_per_doc: dict) -> dict:
     return {
         "JsonJSTransformerProvider": {
             "initializationScript": MEMORY_HOG_TRANSFORM_SCRIPT,
             "bindingsObject": json.dumps({
-                "heavyIndex": heavy_index,
-                "retainedMiBPerDoc": RETAINED_MIB_PER_DOC,
+                "indexRetainedMiBPerDocJson": json.dumps(index_retained_mib_per_doc),
             }),
         }
     }
@@ -171,7 +172,7 @@ class MemoryTierTestBase(MATestBase):
         }
         if with_transform:
             config["docTransformerConfigBase64"] = convert_to_b64(
-                [_memory_hog_transform(self.heavy_index)])
+                [_memory_hog_transform({self.heavy_index: RETAINED_MIB_PER_DOC})])
         if memory_scaling:
             config["memoryScaling"] = {
                 "growthFactor": 2,
@@ -467,3 +468,67 @@ class Test0093MemoryScalingOffIsUnchanged(MemoryTierTestBase):
 
     def verify_clusters(self):
         self.verify_ordinary_indices_on_target()
+
+MEDIUM_DOCS = 200  # 1 shard x 200 docs x 8MiB retained ~ 1600MiB: overflows tier 0, fits tier 1
+
+
+class Test0094MemoryTierLadder(MemoryTierTestBase):
+    """(e) Diversity ladder: per-index memory weights drive DIFFERENT indices to DIFFERENT tiers
+    in one migration. Light indices retain nothing and finish at tier 0; a medium index
+    (~1600MiB retained per shard) overflows tier 0 and completes at tier 1; the heavy index
+    (~3040MiB per shard) climbs to tier 2. All three tier fleets are observed, with tier 0 still
+    running while escalated fleets work (greedy, not lockstep)."""
+
+    def __init__(self, user_args: MATestUserArguments):
+        super().__init__(user_args, "Memory-tier scaling: per-index weights populate three tiers at once.")
+        self.medium_index = self.heavy_index.replace("memtier-heavy-", "memtier-medium-")
+
+    def prepare_clusters(self):
+        super().prepare_clusters()
+        self.source_operations.create_index(
+            index_name=self.medium_index, cluster=self.source_cluster,
+            data=json.dumps({"settings": {"number_of_shards": 1, "number_of_replicas": 0}}))
+        self._bulk_seed(self.medium_index, MEDIUM_DOCS)
+        self.source_operations.refresh_index(
+            cluster=self.source_cluster, index_name=self.medium_index)
+
+    def prepare_workflow_snapshot_and_migration_config(self):
+        config = self.backfill_config(max_memory="5600Mi", with_transform=False)
+        config["indexAllowlist"] = [self.heavy_index, self.medium_index] + self.ordinary_indices
+        config["maxTotalPods"] = 6
+        config["docTransformerConfigBase64"] = convert_to_b64([_memory_hog_transform({
+            self.heavy_index: RETAINED_MIB_PER_DOC,
+            self.medium_index: RETAINED_MIB_PER_DOC,
+        })])
+        self.workflow_snapshot_and_migration_config = [{
+            "migrations": [{"documentBackfillConfig": config}]
+        }]
+
+    def workflow_perform_migrations(self, timeout_seconds: int = 3600):
+        if not self.workflow_name:
+            raise ValueError("Workflow name is not available")
+        if not self.imported_clusters:
+            self.argo_service.resume_workflow(workflow_name=self.workflow_name)
+        phase = self.wait_observing_tiers(timeout_seconds=timeout_seconds)
+        assert phase == "Completed", f"expected Completed, got {phase}"
+        if not self.imported_clusters:
+            self.argo_service.wait_for_suspend(workflow_name=self.workflow_name,
+                                               timeout_seconds=600)
+
+    def verify_clusters(self):
+        self.verify_ordinary_indices_on_target()
+        self.target_operations.check_doc_counts_match(
+            cluster=self.target_cluster,
+            expected_index_details={
+                self.heavy_index: {"count": HEAVY_DOCS},
+                self.medium_index: {"count": MEDIUM_DOCS},
+            },
+            max_attempts=20, delay=6.0)
+
+        observed_tiers = {tier for active in self.tier_observations for tier in active}
+        assert {0, 1, 2} <= observed_tiers, \
+            f"expected all of tiers 0, 1, 2 to activate; observed {self.tier_observations}"
+        # Greedy, not lockstep: tier 0 kept running while at least one escalated fleet worked.
+        assert any(0 in active and any(t > 0 for t in active)
+                   for active in self.tier_observations), \
+            f"tiers never ran in parallel: {self.tier_observations}"
