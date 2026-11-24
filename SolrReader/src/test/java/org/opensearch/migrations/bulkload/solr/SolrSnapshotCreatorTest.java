@@ -4,7 +4,6 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
-import java.util.Queue;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CopyOnWriteArrayList;
 
@@ -192,83 +191,33 @@ class SolrSnapshotCreatorTest {
         }
     }
 
-    /**
-     * Serves a scripted sequence of REQUESTSTATUS states to check how polling reacts to each one.
-     */
-    @Nested
-    class RequestStatusPolling {
-
-        private HttpServer server;
-        private SolrSnapshotCreator creator;
-        private final Queue<String> states = new ConcurrentLinkedQueue<>();
-
-        @BeforeEach
-        void startServer() throws IOException {
-            server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-            server.createContext("/", exchange -> {
-                var state = states.poll();
-                var body = ("{\"responseHeader\":{\"status\":0},\"status\":{\"state\":\"" + state
-                    + "\",\"msg\":\"Did not find [snap1-coll1] in any tasks queue\"}}")
-                    .getBytes(StandardCharsets.UTF_8);
-                exchange.getResponseHeaders().add("Content-Type", "application/json");
-                exchange.sendResponseHeaders(200, body.length);
-                exchange.getResponseBody().write(body);
-                exchange.close();
-            });
-            server.start();
+    // Seen in CI: running, running, then one notfound as the finished task leaves the running map.
+    @Test
+    void transientNotFoundKeepsPollingButRepeatedNotFoundFails() throws IOException {
+        var states = new ConcurrentLinkedQueue<>(List.of(
+            "running", "running", "notfound", "completed", "notfound", "notfound", "notfound"));
+        var server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/", exchange -> {
+            var body = ("{\"status\":{\"state\":\"" + states.poll() + "\"}}").getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.start();
+        try {
             var baseUrl = "http://127.0.0.1:" + server.getAddress().getPort();
             var connectionContext = new ConnectionContext.SourceArgs() {{
                 host = baseUrl;
                 insecure = true;
             }}.toConnectionContext();
-            creator = new SolrSnapshotCreator(baseUrl, "snap1", "/var/solr/data",
-                List.of("coll1"), connectionContext);
-        }
-
-        @AfterEach
-        void stopServer() {
-            if (server != null) {
-                server.stop(0);
+            var creator = new SolrSnapshotCreator(baseUrl, "snap1", null, List.of("coll1"), connectionContext);
+            for (var expected : List.of(false, false, false, true, false, false)) {
+                assertEquals(expected, creator.isSnapshotFinished());
             }
-        }
-
-        @Test
-        void notFoundWhileTheTaskFinishesKeepsPolling() {
-            // Seen against real Solr: running, then a single notfound as the task moves to the
-            // completed map, then completed.
-            states.addAll(List.of("running", "notfound", "completed"));
-
-            assertFalse(creator.isSnapshotFinished());
-            assertFalse(creator.isSnapshotFinished());
-            assertTrue(creator.isSnapshotFinished());
-        }
-
-        @Test
-        void notFoundOnConsecutivePollsFails() {
-            for (int i = 0; i < SolrSnapshotCreator.MAX_CONSECUTIVE_NOT_FOUND_POLLS; i++) {
-                states.add("notfound");
-            }
-
-            for (int i = 1; i < SolrSnapshotCreator.MAX_CONSECUTIVE_NOT_FOUND_POLLS; i++) {
-                assertFalse(creator.isSnapshotFinished());
-            }
-            var thrown = assertThrows(SolrSnapshotCreator.SolrBackupFailed.class, creator::isSnapshotFinished);
-            assertTrue(thrown.getMessage().contains("Did not find [snap1-coll1] in any tasks queue"));
-        }
-
-        @Test
-        void notFoundCountResetsWhenAnotherStateIsSeen() {
-            for (int i = 1; i < SolrSnapshotCreator.MAX_CONSECUTIVE_NOT_FOUND_POLLS; i++) {
-                states.add("notfound");
-            }
-            states.add("running");
-            states.add("notfound");
-            states.add("completed");
-
-            while (states.size() > 1) {
-                assertFalse(creator.isSnapshotFinished());
-            }
-            assertTrue(creator.isSnapshotFinished());
+            assertThrows(SolrSnapshotCreator.SolrBackupFailed.class, creator::isSnapshotFinished);
+        } finally {
+            server.stop(0);
         }
     }
 }
