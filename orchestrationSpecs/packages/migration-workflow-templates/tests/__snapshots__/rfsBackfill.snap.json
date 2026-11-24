@@ -52,9 +52,6 @@
               "name": "maxTotalPods"
             },
             {
-              "name": "escalationApproval"
-            },
-            {
               "name": "imageMigrationConsoleLocation"
             },
             {
@@ -83,10 +80,6 @@
             {
               "name": "MAX_TOTAL_PODS",
               "value": "{{inputs.parameters.maxTotalPods}}"
-            },
-            {
-              "name": "ESCALATION_APPROVAL",
-              "value": "{{inputs.parameters.escalationApproval}}"
             },
             {
               "name": "TIER_POLICY_CONFIGMAP",
@@ -223,7 +216,7 @@
                   },
                   {
                     "name": "backfillSession",
-                    "value": "{{=(('memoryScalingTierTable' in fromJSON(inputs.parameters.documentBackfillConfig)) ? (toJSON(sprig.dict(\"sessionName\", inputs.parameters.sessionName, \"deploymentName\", inputs.parameters.sessionName+'-rfs', \"memoryScaling\", sprig.dict(\"tiers\", fromJSON(inputs.parameters.documentBackfillConfig)['memoryScalingTierTable'], \"max_total_pods\", sprig.dig('maxTotalPods', fromJSON(inputs.parameters.documentBackfillConfig)['podReplicas'], fromJSON(inputs.parameters.documentBackfillConfig)), \"escalation_approval\", sprig.dig('memoryScalingEscalationApproval', 'auto', fromJSON(inputs.parameters.documentBackfillConfig)))))) : (toJSON(sprig.dict(\"sessionName\", inputs.parameters.sessionName, \"deploymentName\", inputs.parameters.sessionName+'-rfs'))))}}"
+                    "value": "{{=(('memoryScalingTierTable' in fromJSON(inputs.parameters.documentBackfillConfig)) ? (toJSON(sprig.dict(\"sessionName\", inputs.parameters.sessionName, \"deploymentName\", inputs.parameters.sessionName+'-rfs', \"memoryScaling\", sprig.dict(\"tiers\", fromJSON(inputs.parameters.documentBackfillConfig)['memoryScalingTierTable'], \"max_total_pods\", sprig.dig('maxTotalPods', fromJSON(inputs.parameters.documentBackfillConfig)['podReplicas'], fromJSON(inputs.parameters.documentBackfillConfig)))))) : (toJSON(sprig.dict(\"sessionName\", inputs.parameters.sessionName, \"deploymentName\", inputs.parameters.sessionName+'-rfs'))))}}"
                   }
                 ]
               },
@@ -506,10 +499,6 @@
                   {
                     "name": "maxTotalPods",
                     "value": "{{=sprig.dig('maxTotalPods', fromJSON(inputs.parameters.documentBackfillConfig)['podReplicas'], fromJSON(inputs.parameters.documentBackfillConfig))}}"
-                  },
-                  {
-                    "name": "escalationApproval",
-                    "value": "{{=sprig.dig('memoryScalingEscalationApproval', 'auto', fromJSON(inputs.parameters.documentBackfillConfig))}}"
                   }
                 ]
               },

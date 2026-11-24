@@ -11,7 +11,7 @@ describe("documentBackfillConfig.memoryScaling", () => {
         failedDocumentStream: {type: "disabled"},
     };
 
-    it("defaults growthFactor to 2 and escalationApproval to auto", () => {
+    it("defaults growthFactor to 2", () => {
         const parsed = USER_RFS_OPTIONS.parse({
             ...base,
             memoryScaling: {maxMemory: "56000Mi"},
@@ -19,18 +19,16 @@ describe("documentBackfillConfig.memoryScaling", () => {
         expect(parsed.memoryScaling).toEqual({
             growthFactor: 2,
             maxMemory: "56000Mi",
-            escalationApproval: "auto",
         });
     });
 
-    it("accepts manual escalation approval and a custom growth factor", () => {
+    it("accepts a custom growth factor and maxTotalPods", () => {
         const parsed = USER_RFS_OPTIONS.parse({
             ...base,
             maxTotalPods: 24,
-            memoryScaling: {maxMemory: "56Gi", growthFactor: 1.5, escalationApproval: "manual"},
+            memoryScaling: {maxMemory: "56Gi", growthFactor: 1.5},
         });
         expect(parsed.memoryScaling?.growthFactor).toBe(1.5);
-        expect(parsed.memoryScaling?.escalationApproval).toBe("manual");
         expect(parsed.maxTotalPods).toBe(24);
     });
 
@@ -108,7 +106,6 @@ describe("documentBackfillConfig.memoryScaling", () => {
         const argoShape = (ARGO_RFS_OPTIONS as z.ZodObject<z.ZodRawShape>).shape;
         expect(argoShape).not.toHaveProperty("memoryScaling");
         expect(argoShape).toHaveProperty("memoryScalingTierTable");
-        expect(argoShape).toHaveProperty("memoryScalingEscalationApproval");
         expect(argoShape).toHaveProperty("maxTotalPods");
     });
 });

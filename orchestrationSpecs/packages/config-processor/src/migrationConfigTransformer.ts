@@ -520,7 +520,7 @@ export function resolveFailedDocumentStreamS3(
  * memoryScaling is absent so the feature-off ARGO config is unchanged byte for byte.
  */
 export function resolveMemoryScalingTierTable(
-    memoryScaling: { growthFactor?: number; maxMemory: string; escalationApproval?: "auto" | "manual" } | undefined,
+    memoryScaling: { growthFactor?: number; maxMemory: string } | undefined,
     resources: { requests?: { memory?: string }; limits?: { memory?: string } } | undefined
 ): Record<string, unknown> {
     if (memoryScaling === undefined) {
@@ -556,7 +556,6 @@ export function resolveMemoryScalingTierTable(
     }
     return {
         memoryScalingTierTable: tierTable,
-        memoryScalingEscalationApproval: memoryScaling.escalationApproval ?? "auto",
     };
 }
 

@@ -272,8 +272,6 @@ export const ARGO_RFS_OPTIONS = makeOptionalDefaultedFieldsRequired(
         memoryScalingTierTable: z.array(z.string()).optional()
             .describe("Resolved per-tier memory quantities [start, start×growthFactor, …], last entry " +
                 "clamped to exactly memoryScaling.maxMemory. Index == tier number."),
-        memoryScalingEscalationApproval: z.enum(["auto", "manual"]).optional()
-            .describe("Resolved memoryScaling.escalationApproval."),
         // The user-facing failedDocumentStream union is lowered to the flat arguments consumed by RFS.
         failedDocumentStreamS3Prefix: z.string().default("rfs-failed-document-stream/").optional()
             .describe("Resolved S3 key prefix passed to RFS."),
@@ -316,7 +314,6 @@ export const ARGO_RFS_WORKFLOW_OPTION_KEYS = [
     // only ever receives its single opaque tier via RFS_WORKER_MEMORY_TIER.
     "maxTotalPods",
     "memoryScalingTierTable",
-    "memoryScalingEscalationApproval",
 ] as const satisfies readonly (keyof z.infer<typeof ARGO_RFS_OPTIONS>)[];
 
 // Fields config lowering adds on top of the user-facing proxy schema, named as a

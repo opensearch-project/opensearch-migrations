@@ -48,8 +48,6 @@ MEMORY_SCALING_SCHEMA = {
     "schema": {
         "tiers": {"type": "list", "required": True, "schema": {"type": "string"}},
         "max_total_pods": {"type": "integer", "required": True, "min": 1},
-        "escalation_approval": {"type": "string", "required": False,
-                                "allowed": ["auto", "manual"]},
     }
 }
 
@@ -775,7 +773,6 @@ def build_memory_scaling_status(base: BackfillOverallStatus,
         memory_scaling={
             "tiers": tiers,
             "max_total_pods": memory_scaling_config.get("max_total_pods"),
-            "escalation_approval": memory_scaling_config.get("escalation_approval", "auto"),
             "active": active,
         },
         indices=rollup,

@@ -17,7 +17,7 @@ Usage:
   rfsTierSweep.py --compute-only   # pure: sweep-input JSON on stdin -> allocation JSON on stdout
   rfsTierSweep.py                  # gather (kubectl + coordinator) -> compute -> apply
 
-Env (apply mode): TIER_POLICY_CONFIGMAP, SNAPSHOT_MIGRATION_NAME, PARENT_WORKFLOW_NAME,
+Env (apply mode): TIER_POLICY_CONFIGMAP, SNAPSHOT_MIGRATION_NAME,
 MIGRATION_SERVICES_CONFIG (default /config/migration_services.yaml), POD_NAMESPACE optional.
 """
 
@@ -56,9 +56,8 @@ def compute_allocation(sweep_input):
 
     sweep_input:
       maxTotalPods: int
-      escalationApproval: "auto" | "manual"
       tiers: [ {tier, eligible, waiting, neverAttempted, busyPods, deploymentExists,
-                currentReplicas, approval: "approved"|"pending"|"none"} ]
+                currentReplicas} ]
         - eligible: incomplete items at this tier (leased + waiting)
         - waiting: the unclaimed subset (expiration < now)
         - busyPods: number of DISTINCT pods currently holding live leases at this tier
@@ -66,25 +65,15 @@ def compute_allocation(sweep_input):
       caps: {tier: maxLeases}           # Σ caps ≤ maxTotalPods (above the inviolable busy floor)
       replicas: {tier: n}               # desired replicas for existing/created deployments
       create: [tier]                    # tiers to (re)create from the rendered ConfigMap
-      requestApproval: [tier]           # manual-mode tiers whose first activation needs a gate
     """
     budget = int(sweep_input["maxTotalPods"])
-    manual = sweep_input.get("escalationApproval") == "manual"
     tiers = sorted(sweep_input["tiers"], key=lambda t: int(t["tier"]))
 
     alloc = {}
-    blocked = {}
-    request_approval = []
     for state in tiers:
         tier = int(state["tier"])
         # Busy floor: inviolable, even if it exceeds the budget (never delete a busy pod).
         alloc[tier] = int(state.get("busyPods", 0))
-        activated = bool(state.get("deploymentExists")) or int(state.get("busyPods", 0)) > 0
-        blocked[tier] = (manual and tier > 0 and not activated
-                         and state.get("approval") != "approved")
-        if blocked[tier] and int(state.get("waiting", 0)) > 0 \
-                and state.get("approval") != "pending":
-            request_approval.append(tier)
 
     remaining = max(0, budget - sum(alloc.values()))
 
@@ -92,8 +81,6 @@ def compute_allocation(sweep_input):
     # length is irreducible wall-clock, so budget funds them before lower-tier breadth.
     for state in sorted(tiers, key=lambda t: -int(t["tier"])):
         tier = int(state["tier"])
-        if blocked[tier]:
-            continue  # unapproved tier's cap stays at its (zero) busy floor
         eligible = int(state.get("eligible", 0))
         want = min(eligible, alloc[tier] + remaining)
         extra = max(0, want - alloc[tier])
@@ -104,7 +91,7 @@ def compute_allocation(sweep_input):
     # but only from budget left over (greedy wins over discovery).
     for state in tiers:
         tier = int(state["tier"])
-        if int(state.get("neverAttempted", 0)) > 0 and not blocked[tier]:
+        if int(state.get("neverAttempted", 0)) > 0:
             if alloc[tier] == 0 and remaining > 0:
                 alloc[tier] = 1
                 remaining -= 1
@@ -122,7 +109,6 @@ def compute_allocation(sweep_input):
         "caps": {str(t): alloc[t] for t in alloc},
         "replicas": {str(t): replicas[t] for t in replicas},
         "create": create,
-        "requestApproval": request_approval,
     }
 
 
@@ -225,49 +211,6 @@ def gather_coordinator_state(cluster, index, tier_count):
     return sorted(tiers.values(), key=lambda t: t["tier"]), int(total_incomplete), busy_pod_names
 
 
-def approval_gate_name(sm_name, tier):
-    return f"memorytier.{sm_name}.t{tier}"
-
-
-def read_approval(custom, namespace, sm_name, tier):
-    from kubernetes.client.rest import ApiException
-    try:
-        gate = custom.get_namespaced_custom_object(
-            group=CRD_GROUP, version=CRD_VERSION, namespace=namespace,
-            plural="approvalgates", name=approval_gate_name(sm_name, tier))
-        phase = (gate.get("status") or {}).get("phase", "")
-        return "approved" if phase == "Approved" else "pending"
-    except ApiException as e:
-        if e.status == 404:
-            return "none"
-        raise
-
-
-def create_approval_gate(custom, namespace, sm_name, parent_workflow_name, tier):
-    from kubernetes.client.rest import ApiException
-    body = {
-        "apiVersion": f"{CRD_GROUP}/{CRD_VERSION}",
-        "kind": "ApprovalGate",
-        "metadata": {
-            "name": approval_gate_name(sm_name, tier),
-            "labels": {
-                f"{CRD_GROUP}/workflow": parent_workflow_name,
-                f"{CRD_GROUP}/approval-category": "change",
-            },
-        },
-        "spec": {},
-    }
-    try:
-        custom.create_namespaced_custom_object(
-            group=CRD_GROUP, version=CRD_VERSION, namespace=namespace,
-            plural="approvalgates", body=body)
-        logger.info("Requested approval for memory tier %s via gate %s", tier,
-                    approval_gate_name(sm_name, tier))
-    except ApiException as e:
-        if e.status != 409:
-            raise
-
-
 def publish_lease_caps(cluster, index, caps):
     """Partial-update maxLeases on the shard_setup sentinel. Update-if-exists only: upserting
     could fabricate a sentinel without the fields the coordination scripts expect. The sentinel
@@ -328,7 +271,6 @@ def main():
 
     configmap_name = os.environ["TIER_POLICY_CONFIGMAP"]
     sm_name = os.environ["SNAPSHOT_MIGRATION_NAME"]
-    parent_workflow_name = os.environ.get("PARENT_WORKFLOW_NAME", "")
     services_config = os.environ.get("MIGRATION_SERVICES_CONFIG", "/config/migration_services.yaml")
 
     try:
@@ -343,7 +285,6 @@ def main():
     index = working_state_index(policy.get("sessionName", ""))
     tier_table = policy["tierTable"]
     tier_label = policy["tierLabel"]
-    manual = policy.get("escalationApproval") == "manual"
 
     try:
         tiers, total_incomplete, busy_pod_names = gather_coordinator_state(
@@ -377,21 +318,14 @@ def main():
         state["deploymentExists"] = tier in deployment_by_tier
         state["currentReplicas"] = (deployment_by_tier[tier].spec.replicas or 0) \
             if tier in deployment_by_tier else 0
-        state["approval"] = read_approval(custom, namespace, sm_name, tier) if manual and tier > 0 \
-            else "approved"
 
     sweep_input = {
         "maxTotalPods": policy["maxTotalPods"],
-        "escalationApproval": policy.get("escalationApproval", "auto"),
         "tiers": tiers,
     }
     result = compute_allocation(sweep_input)
     logger.info("Sweep input: %s", json.dumps(sweep_input, sort_keys=True))
     logger.info("Allocation: %s", json.dumps(result, sort_keys=True))
-
-    # Approval requests come first so a pending gate never blocks publishing lower-tier caps.
-    for tier in result["requestApproval"]:
-        create_approval_gate(custom, namespace, sm_name, parent_workflow_name, tier)
 
     # Publish the caps: the declarative allocation workers consume at every acquire boundary.
     publish_lease_caps(cluster, index, result["caps"])

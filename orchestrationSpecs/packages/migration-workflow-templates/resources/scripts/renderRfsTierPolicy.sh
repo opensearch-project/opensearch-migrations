@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Render the memory-tier fleet policy: per-tier Deployment + PDB manifests (derived from the LIVE
-# tier-0 objects) and the tier table / pod budget / approval policy, stored in one ConfigMap that
+# tier-0 objects) and the tier table / pod budget, stored in one ConfigMap that
 # the monitor CronJob reads on every sweep. The workflow runs this once at setup — all later
 # fleet reconciliation belongs to the monitor.
 set -eu
@@ -10,7 +10,6 @@ set -eu
 : "${SM_UID:?}"
 : "${TIER_TABLE_JSON:?}"
 : "${MAX_TOTAL_PODS:?}"
-: "${ESCALATION_APPROVAL:?}"
 : "${TIER_POLICY_CONFIGMAP:?}"
 : "${TIER0_WORKLOAD_NAME:?}"
 : "${RFS_MEMORY_TIER_LABEL:?}"
@@ -30,7 +29,6 @@ fi
 
 data="$(jq -nc \
     --arg sessionName "$SESSION_NAME" \
-    --arg approval "$ESCALATION_APPROVAL" \
     --arg maxTotalPods "$MAX_TOTAL_PODS" \
     --arg tierLabel "$RFS_MEMORY_TIER_LABEL" \
     --arg container "$BULK_LOADER_CONTAINER" \
@@ -38,7 +36,6 @@ data="$(jq -nc \
     '{"policy.json": ({
         sessionName: $sessionName,
         maxTotalPods: ($maxTotalPods | tonumber),
-        escalationApproval: $approval,
         tierTable: $tierTable,
         tierLabel: $tierLabel,
         bulkLoaderContainer: $container

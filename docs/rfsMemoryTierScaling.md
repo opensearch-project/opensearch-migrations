@@ -238,8 +238,6 @@ each acquire attempt:
     rest of the fleet.
   - **Preemption-free reclamation.** Lowering `cap[0]` from 24 to 21 drains exactly the excess
     as workers hit item boundaries (the only preemption-free moment), never mid-shard.
-  - **Manual approval blocks only its own tier.** A pending tier's cap stays 0 while lower
-    caps keep the full budget — nothing idles waiting on a human.
   - **Stale-safe without TTLs.** Caps are read-only for workers and are not orders that must
     expire: a dead monitor leaves at worst a tier running slightly under capacity until the
     next sweep rewrites them.
@@ -398,7 +396,7 @@ at sweep granularity; the in-java acquire loop removes it later.
 ## Orchestration
 
 - **Workflow = policy author.** At setup it publishes the complete per-tier Deployment manifests
-  into a ConfigMap, alongside `maxTotalPods` and the approval policy. The manifests are
+  into a ConfigMap, alongside `maxTotalPods`. The manifests are
   **derived, not re-rendered**: `renderRfsTierPolicy.sh` reads the LIVE tier-0 Deployment + PDB
   and transforms them per tier (`deriveRfsTierManifest.jq`: name, tier label in
   selector/labels, the precomputed memory quantity, tier env, replicas 0), so the stored
@@ -422,41 +420,17 @@ at sweep granularity; the in-java acquire loop removes it later.
     commit-and-teardown path, and `waitIndefinitelyForSnapshotMigration`
     (`resourceManagement.ts`) recognizes it and fails the waiting workflow step so the failure
     propagates instead of waiting forever.
-- **Approval knob.** `memoryScaling.escalationApproval: auto | manual` (default `auto`). On
-  `manual`, the monitor requests approval through the existing gate mechanism before *first*
-  activating a new tier — and holds the unapproved tier's **lease cap at 0** while leaving the
-  lower tiers' caps at full budget, so the lower fleets keep working while the request pends.
-
-  The knob exists for **capacity-class authorization, not cost control**. First activation of a
-  tier is the first time the cluster is asked to schedule a pod of that size — possibly a new
-  node class (Karpenter/EKS Auto Mode will provision one), an instance quota, or an
-  instance-type policy question. That is a one-time per-tier yes/no, which is why the gate fires
-  once per tier. Cost is the wrong rationale for a first-instance gate: one big pod and a whole
-  fleet of them look identical at gate time, worst-case spend is already bounded by
-  `maxTotalPods × maxMemory` regardless of approvals, and spend *rate* tracks fleet composition —
-  a continuous quantity better watched by alarms on the per-tier fleet panels ("Metrics and
-  dashboards") than gated at first instance. The distribution-shaped concern (most of the
-  workload escalating, a leak rather than fat shards) is the escalation-storm guard below.
-
-  The gate is an ordinary `ApprovalGate` CR named `memorytier.<snapshotMigration>.t<n>`, created
-  by the monitor the first time a manual-mode tier has waiting work and labeled with the parent
-  workflow, so the console's standard **`workflow approve`** command handles it. Two wrinkles
-  versus a workflow-step gate, because the *monitor* polls this gate — no Argo node ever blocks
-  on it:
-  - It surfaces under the **`step`** subcommand (the CLI buckets gates by name;
-    only `.vapretry`-suffixed gates are change/retry), and since the workflow is never "waiting"
-    on it, listing shows it as pending and approving it needs `--pre-approve`:
-    `workflow approve step --list`, then
-    `workflow approve step --pre-approve memorytier.<sm>.t<n>`.
-  - Approval is just `status.phase: Approved` on the CR — exactly what the monitor's next sweep
-    reads before raising the tier's cap above 0. There is no "deny": leaving the gate pending
-    parks the escalated shards (`shard_awaiting_memory` in status) indefinitely while every
-    other tier keeps working; it never becomes `Failed`, because the tier exists and is merely
-    unapproved.
-
-  An optional future
-  guard: force approval when more than N% of remaining shards get escalated within one tier
-  (that pattern smells like a leak, not fat shards).
+- **No manual approvals, by design.** Escalation never waits on a human: once the user has
+  stated the acceptable range (`maxMemory`, `maxTotalPods`), asking again per tier is a wasted
+  interaction, and worst-case spend is already bounded by `maxTotalPods × maxMemory`. Aggregate
+  cost control belongs to **nodepool constraints** (Karpenter/EKS Auto Mode instance-type and
+  capacity limits): they throttle how much actually schedules, can be changed out from under a
+  running migration, and are therefore easily reversible — escalated pods just sit `Pending`
+  (visible as `workers.pending` in status) until capacity is allowed. Spend *rate* tracks fleet
+  composition, a continuous quantity watched by alarms on the per-tier fleet panels ("Metrics
+  and dashboards"), not gated at first instance. The distribution-shaped concern (most of the
+  workload escalating — a leak rather than fat shards) is the escalation-storm guard in Future
+  work.
 
 ### How the workflow, the CronJob, and the tier Deployments relate
 
@@ -562,7 +536,6 @@ resources: { requests: { memory: 7000Mi, ... } }   # starting size (existing fie
 memoryScaling:                                     # NEW; absent ⇒ feature entirely off
   growthFactor: 2            # expert, default 2
   maxMemory: "56000Mi"       # required; caps the tier table
-  escalationApproval: auto   # auto | manual
 maxTotalPods: 24             # replaces podReplicas semantics when memoryScaling is set:
                              # a TOTAL across all tiers, and a maximum, not a constant
 ```
@@ -706,8 +679,8 @@ Grafana and CloudWatch stay in lockstep.
   override through the monitor (so `backfill scale` could work again) is future work.
 - **In-java acquire loop** (end of "Acquire protocol"): removes the shell restart wrapper and
   turns yield into an in-process capped sleep; also removes the yielded-pod resumption lag.
-- **Escalation-storm guard** ("Approval knob"): force approval when > N% of remaining shards
-  escalate within one tier.
+- **Escalation-storm guard**: alert (or pause further tier activation) when > N% of remaining
+  shards escalate within one tier — that pattern smells like a leak, not fat shards.
 - **Explicit `busyCulled` sweep log line and per-tier OTel counters** ("Metrics and
   dashboards"): today derivable from existing sources; add only if operating experience wants
   them first-class.

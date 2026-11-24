@@ -12,7 +12,6 @@ describe("resolveMemoryScalingTierTable", () => {
             {maxMemory: "56000Mi", growthFactor: 2}, resources);
         // 7000 -> 14000 -> 28000 -> (56000 == max, so the clamp IS the user's literal quantity)
         expect(out.memoryScalingTierTable).toEqual(["7000Mi", "14000Mi", "28000Mi", "56000Mi"]);
-        expect(out.memoryScalingEscalationApproval).toBe("auto");
     });
 
     it("clamps a non-aligned maximum to the user's exact quantity", () => {
@@ -32,12 +31,6 @@ describe("resolveMemoryScalingTierTable", () => {
     it("start == maxMemory yields a single-tier table", () => {
         const out = resolveMemoryScalingTierTable({maxMemory: "7000Mi"}, resources);
         expect(out.memoryScalingTierTable).toEqual(["7000Mi"]);
-    });
-
-    it("defaults escalationApproval to auto and passes manual through", () => {
-        const manual = resolveMemoryScalingTierTable(
-            {maxMemory: "14000Mi", escalationApproval: "manual"}, resources);
-        expect(manual.memoryScalingEscalationApproval).toBe("manual");
     });
 
     it("rejects maxMemory below the starting size", () => {

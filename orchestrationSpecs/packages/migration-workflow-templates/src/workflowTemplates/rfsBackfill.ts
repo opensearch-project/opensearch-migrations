@@ -61,7 +61,6 @@ export const RfsBackfill = WorkflowBuilder.create({
         .addRequiredInput("crdUid", typeToken<string>())
         .addRequiredInput("tierTableJson", typeToken<string>())
         .addRequiredInput("maxTotalPods", typeToken<string>())
-        .addRequiredInput("escalationApproval", typeToken<string>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
         .addContainer(c => c
             .addImageInfo(c.inputs.imageMigrationConsoleLocation, c.inputs.imageMigrationConsolePullPolicy)
@@ -73,7 +72,6 @@ export const RfsBackfill = WorkflowBuilder.create({
                 SM_UID: c.inputs.crdUid,
                 TIER_TABLE_JSON: c.inputs.tierTableJson,
                 MAX_TOTAL_PODS: c.inputs.maxTotalPods,
-                ESCALATION_APPROVAL: c.inputs.escalationApproval,
                 TIER_POLICY_CONFIGMAP: getRfsTierPolicyConfigMapName(c.inputs.sessionName),
                 TIER0_WORKLOAD_NAME: expr.concat(
                     getRfsDeploymentName(c.inputs.sessionName), expr.literal("-t0")),
@@ -118,8 +116,6 @@ export const RfsBackfill = WorkflowBuilder.create({
             // meaning as the total (a maximum, not a constant, once scaling is on).
             const effectiveMaxTotalPods = expr.dig(backfillConfig, ["maxTotalPods"],
                 expr.cast(expr.get(backfillConfig, "podReplicas")).to<number>());
-            const escalationApproval = expr.dig(
-                backfillConfig, ["memoryScalingEscalationApproval"], "auto");
             const backfillSession = expr.ternary(
                 scalingEnabled,
                 expr.serialize(expr.makeDict({
@@ -128,7 +124,6 @@ export const RfsBackfill = WorkflowBuilder.create({
                     memoryScaling: expr.makeDict({
                         tiers: expr.cast(tierTable).to<string[]>(),
                         max_total_pods: expr.cast(effectiveMaxTotalPods).to<number>(),
-                        escalation_approval: expr.asString(escalationApproval),
                     }),
                 })),
                 expr.serialize(expr.makeDict({
@@ -203,7 +198,6 @@ export const RfsBackfill = WorkflowBuilder.create({
                         crdUid: b.inputs.crdUid,
                         tierTableJson: expr.asString(expr.serialize(expr.cast(tierTable).to<string[]>())),
                         maxTotalPods: expr.asString(effectiveMaxTotalPods),
-                        escalationApproval: expr.asString(escalationApproval),
                     }),
                     {when: {templateExp: scalingEnabled}}
                 )

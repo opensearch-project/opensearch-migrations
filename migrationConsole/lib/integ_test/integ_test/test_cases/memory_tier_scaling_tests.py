@@ -176,7 +176,6 @@ class MemoryTierTestBase(MATestBase):
             config["memoryScaling"] = {
                 "growthFactor": 2,
                 "maxMemory": max_memory,
-                "escalationApproval": "auto",
             }
             config["maxTotalPods"] = 4
         else:

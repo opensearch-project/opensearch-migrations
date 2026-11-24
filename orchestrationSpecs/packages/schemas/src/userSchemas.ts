@@ -1166,10 +1166,6 @@ export const USER_RFS_WORKFLOW_OPTIONS = withScalableServiceValidation(z.object(
             .describe("Upper bound on per-worker memory. Shards that OOM are retried on fleets with " +
                 "geometrically more memory up to this value; if a shard still cannot fit here, the " +
                 "migration ends Failed with a per-index report. Must be at least resources.requests.memory."),
-        escalationApproval: z.enum(["auto", "manual"]).default("auto").optional()
-            .describe("Whether activating each new (higher-memory, costlier) tier requires a manual " +
-                "approval. While an approval is pending the new tier's lease cap stays 0 and the " +
-                "lower tiers keep the full pod budget."),
     }).optional()
         .describe("Memory-tier scaling for shards that out-size the worker fleet: a worker killed by " +
             "an out-of-memory condition has its shard escalated and re-run on a fleet with more memory, " +

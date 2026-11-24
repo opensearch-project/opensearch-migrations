@@ -35,7 +35,6 @@ def mock_kube_config(monkeypatch):
 MEMORY_SCALING = {
     "tiers": ["7000Mi", "14000Mi", "28000Mi"],
     "max_total_pods": 24,
-    "escalation_approval": "auto",
 }
 
 

@@ -2558,14 +2558,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       },
                       "description": "Resolved per-tier memory quantities [start, start×growthFactor, …], last entry clamped to exactly memoryScaling.maxMemory. Index == tier number."
                     },
-                    "memoryScalingEscalationApproval": {
-                      "type": "string",
-                      "enum": [
-                        "auto",
-                        "manual"
-                      ],
-                      "description": "Resolved memoryScaling.escalationApproval."
-                    },
                     "failedDocumentStreamS3Prefix": {
                       "type": "string",
                       "default": "rfs-failed-document-stream/"
@@ -5234,15 +5226,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                             "type": "string",
                             "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
                             "description": "Upper bound on per-worker memory. Shards that OOM are retried on fleets with geometrically more memory up to this value; if a shard still cannot fit here, the migration ends Failed with a per-index report. Must be at least resources.requests.memory."
-                          },
-                          "escalationApproval": {
-                            "type": "string",
-                            "enum": [
-                              "auto",
-                              "manual"
-                            ],
-                            "default": "auto",
-                            "description": "Whether activating each new (higher-memory, costlier) tier requires a manual approval. While an approval is pending the new tier's lease cap stays 0 and the lower tiers keep the full pod budget."
                           }
                         },
                         "required": [

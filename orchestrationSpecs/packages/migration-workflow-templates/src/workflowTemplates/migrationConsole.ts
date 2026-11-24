@@ -37,7 +37,6 @@ export const CONSOLE_BACKFILL_INFO = z.object({
     memoryScaling: z.object({
         tiers: z.array(z.string()),
         max_total_pods: z.number(),
-        escalation_approval: z.string(),
     }).optional(),
 });
 
