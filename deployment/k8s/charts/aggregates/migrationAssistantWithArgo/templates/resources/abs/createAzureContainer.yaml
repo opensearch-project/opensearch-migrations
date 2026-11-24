@@ -1,0 +1,73 @@
+{{- if and (eq .Values.cloudProvider "azure") .Values.azureStorageConfiguration.create (not .Values.azureStorageConfiguration.useLocalAzurite) }}
+{{- $creds := .Values.azureStorageConfiguration.artifactCredentials }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: create-azure-container-{{ .Release.Name }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "1"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  # No ttlSecondsAfterFinished, so a failed hook pod stays for kubectl logs (as in createS3Bucket.yaml).
+  backoffLimit: 2
+  activeDeadlineSeconds: 600
+  podFailurePolicy:
+    rules:
+      - action: Ignore
+        onPodConditions:
+          - type: DisruptionTarget
+      - action: FailJob
+        onExitCodes:
+          containerName: azure-cli
+          operator: NotIn
+          values: [0]
+  template:
+    metadata:
+      labels:
+        app: azure-container-create
+        {{- if include "migration.azureWorkloadIdentityEnabled" . }}
+        azure.workload.identity/use: "true"
+        {{- end }}
+      annotations:
+        karpenter.sh/do-not-disrupt: "true"
+    spec:
+      serviceAccountName: {{ .Values.azureStorageConfiguration.serviceAccountName }}
+      restartPolicy: Never
+      containers:
+        - name: azure-cli
+          image: {{ .Values.azureStorageConfiguration.containerOperationImage }}
+          imagePullPolicy: {{ .Values.azureStorageConfiguration.containerOperationImagePullPolicy }}
+          env:
+            - name: AZURE_STORAGE_ACCOUNT
+              value: {{ include "migration.azureAccountName" . | quote }}
+            - name: CONTAINER_NAME
+              value: {{ include "migration.azureContainerName" . | quote }}
+            {{- if $creds.secretName }}
+            - name: {{ ternary "AZURE_STORAGE_KEY" "AZURE_STORAGE_SAS_TOKEN" (eq (include "migration.azureArtifactCredentialsKey" .) "accountKey") }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $creds.secretName }}
+                  key: {{ $creds.key }}
+            {{- end }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              {{- include "migration.azureContainerFunctions" . | nindent 12 }}
+
+              azure_login
+              echo "Target container for creation: $AZURE_STORAGE_ACCOUNT/$CONTAINER_NAME"
+              if container_exists; then
+                echo "Container $CONTAINER_NAME already exists."
+              else
+                az storage container create --name "$CONTAINER_NAME" -o none
+                if container_exists 5; then
+                  echo "Successfully created container $CONTAINER_NAME."
+                else
+                  echo "Failed to create container $CONTAINER_NAME."
+                  exit 1
+                fi
+              fi
+{{- end }}

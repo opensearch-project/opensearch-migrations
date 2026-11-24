@@ -12,6 +12,7 @@
 #   0021       Combined AOSS collection test (search, time-series, vector)
 #   0024       AOSS per-account endpoint routing to NextGen collections (0022-0023 are retired)
 #   0025       AOSS NextGen vector collection through its own endpoint (no collection routing)
+#   0029       Azure snapshot migration tests
 #   0031-0039  CDC tests (capture proxy + replayer + live traffic)
 #   0040-0049  CDC full E2E tests (capture proxy + replayer + backfill + generate-data)
 #   0050-0059  Observability tests (metrics/tracing backends)
@@ -51,6 +52,7 @@ from .test_cases.solr_tests import *
 from .test_cases.observability_tests import *
 from .test_cases.byoc_captured_traffic_tests import *
 from .test_cases.gcs_snapshot_tests import *
+from .test_cases.azure_snapshot_tests import *
 from .test_cases.k6_load_test_tests import *
 
 logger = logging.getLogger(__name__)

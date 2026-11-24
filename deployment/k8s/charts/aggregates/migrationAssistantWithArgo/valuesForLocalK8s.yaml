@@ -11,6 +11,7 @@ otelCollectorImage: "docker.io/amazon/aws-otel-collector:v0.49.0"
 conditionalPackageInstalls:
   kyverno: true
   fake-gcs-server: true  # deploy fake-gcs-server; used when cloudProvider=gcp for local GCS testing
+  azurite: true          # deploy Azurite; used by azure:// snapshot tests
 
 # Kyverno policy toggles (requires kyverno to be installed)
 kyvernoPolicies:
@@ -23,6 +24,11 @@ gcsBucketConfiguration:
   create: false
   bucketName: "migration-test-bucket"
   useLocalGcs: true
+
+azureStorageConfiguration:
+  useLocalAzurite: true
+  accountName: "devstoreaccount1"
+  containerName: "migration-test-bucket"
 
 # Override image pull policy for dev - always pull latest
 images:

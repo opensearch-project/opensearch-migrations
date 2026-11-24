@@ -45,13 +45,13 @@ jobs:
           - name: elasticsearch7x
             source: ES_7.10
             target: OS_3.1
-            test-ids: '0001,0002,0003,0006,0008,0020'
+            test-ids: '0001,0002,0003,0006,0008,0020,0029'
             # The one entry that saves the shared registry cache.
             save-registry-cache: true
           - name: elasticsearch8x
             source: ES_8.19
             target: OS_3.1
-            test-ids: '0001,0002,0003,0020,0035,0040'
+            test-ids: '0001,0002,0003,0020,0029,0035,0040'
           - name: opensearch1x
             source: OS_1.3
             target: OS_3.1

@@ -7,6 +7,10 @@ metadata:
   annotations:
     iam.gke.io/gcp-service-account: {{ .Values.gcp.serviceAccountEmail | quote }}
   {{- end }}
+  {{- if include "migration.azureWorkloadIdentityEnabled" . }}
+  annotations:
+    azure.workload.identity/client-id: {{ .Values.azure.workloadIdentityClientId | quote }}
+  {{- end }}
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -183,6 +187,9 @@ spec:
       labels:
         app: migration-console
         env: v1
+        {{- if include "migration.azureWorkloadIdentityEnabled" . }}
+        azure.workload.identity/use: "true"
+        {{- end }}
     spec:
       serviceAccountName: migration-console-access-role
       terminationGracePeriodSeconds: 65
@@ -300,6 +307,21 @@ spec:
               value: {{ printf "gs://%s" $gcsBucket | quote }}
             - name: REPO_ARTIFACTS_ENDPOINT_URL
               value: {{ $gcsEndpoint | quote }}
+            {{- end }}
+            {{- else if eq .Values.cloudProvider "azure" }}
+            - name: REPO_ARTIFACTS_BUCKET
+              value: {{ printf "azure://%s/%s" (include "migration.azureAccountName" .) (include "migration.azureContainerName" .) | quote }}
+            {{- with include "migration.azureBaseEndpoint" . }}
+            - name: REPO_ARTIFACTS_ENDPOINT_URL
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.azureStorageConfiguration.artifactCredentials.secretName }}
+            - name: {{ ternary "AZURE_STORAGE_ACCOUNT_KEY" "AZURE_STORAGE_SAS_TOKEN" (eq (include "migration.azureArtifactCredentialsKey" $) "accountKey") }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . }}
+                  key: {{ $.Values.azureStorageConfiguration.artifactCredentials.key }}
+                  optional: true
             {{- end }}
             {{- end }}
             {{- if and (or (eq .Values.cloudProvider "aws") (eq .Values.cloudProvider "")) (index .Values.conditionalPackageInstalls "cert-manager") }}

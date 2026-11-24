@@ -267,7 +267,16 @@ public abstract class OpenSearchClient {
         ObjectNode settings,
         IRfsContexts.ICreateSnapshotContext context
     ) {
-        adminClient.registerSnapshotRepo(repoName, settings, context);
+        adminClient.registerSnapshotRepo(repoName, settings, context, true);
+    }
+
+    public void registerSnapshotRepo(
+        String repoName,
+        ObjectNode settings,
+        IRfsContexts.ICreateSnapshotContext context,
+        boolean verify
+    ) {
+        adminClient.registerSnapshotRepo(repoName, settings, context, verify);
     }
 
     public void createSnapshot(

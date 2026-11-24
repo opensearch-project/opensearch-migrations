@@ -337,11 +337,12 @@ class SecretStore:
                 return list(secret.data.keys())
             return []
         except ApiException as e:
+            # No name here: CodeQL treats Secret names from the workflow config as sensitive; callers report them
             if e.status == 404:
-                logger.info(f"No secret found: {resource_name}")
+                logger.info("No secret found")
                 return None
             else:
-                logger.error(f"Kubernetes API error reading secret {resource_name}: {e}")
+                logger.error(f"Kubernetes API error reading secret keys: {e}")
                 raise
 
     def close(self):

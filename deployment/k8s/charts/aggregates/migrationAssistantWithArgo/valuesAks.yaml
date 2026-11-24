@@ -1,0 +1,33 @@
+conditionalPackageInstalls:
+  localstack: false
+
+cloudProvider: azure
+
+azure:
+  # Client ID of the user-assigned managed identity federated to the release's service accounts.
+  workloadIdentityClientId: ""
+
+logs:
+  sharedLogsVolume:
+    # Fluent Bit runs on every node, so the shared logs volume must be mountable from all of them.
+    storageClass: azurefile-csi
+    accessMode: ReadWriteMany
+
+defaultBucketConfiguration:
+  useLocalStack: false
+  create: false
+
+azureStorageConfiguration:
+  accountName: ""
+  containerName: ""  # empty: migration-snapshots
+  create: true
+  # The container may hold snapshots that predate this release; delete it only on request.
+  deleteOnUninstall: false
+
+charts:
+  argo-workflows:
+    values:
+      artifactRepository:
+        s3: null
+        azure:
+          blobNameFormat: 'argo-artifacts/{{ "{{workflow.name}}" }}/{{ "{{pod.name}}" }}'

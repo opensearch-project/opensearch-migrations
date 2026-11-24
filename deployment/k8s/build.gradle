@@ -215,8 +215,21 @@ tasks.register('verifyWorkloadZoneSpread', Exec) {
     dependsOn 'installHelmClient'
 }
 
+tasks.register('verifyAzureMonitorLogs', Exec) {
+    description = 'Validates the AKS Azure Monitor log shipping overlay'
+    group = 'verification'
+    commandLine(
+            'python3',
+            layout.projectDirectory.file('scripts/verify-azure-monitor-logs.py').asFile,
+            chartSourceDir.asFile,
+            '--helm',
+            helmExecutable.get().asFile
+    )
+    dependsOn 'installHelmClient'
+}
+
 tasks.named('check') {
     dependsOn 'test', 'testCaptureReplayGamedayScript', 'verifyCaptureReplayObservability',
             'verifyKafkaObservability',
-            'verifyHelmUninstallTeardown', 'verifyWorkloadZoneSpread'
+            'verifyHelmUninstallTeardown', 'verifyWorkloadZoneSpread', 'verifyAzureMonitorLogs'
 }
