@@ -131,8 +131,7 @@ updates:
         patterns:
           - "*"
 
-  # Dependabot reads only literal `FROM image:tag` lines, not `ARG` defaults or
-  # buildImages/build.gradle, so this is the one Dockerfile it can update.
+  # The only Dockerfile with literal FROM tags (Dependabot can't read ARG defaults).
   - package-ecosystem: "docker"
     directories:
       # When grafana/k6 is bumped, bump the `xk6 build v<version>` line to match.
@@ -150,8 +149,7 @@ updates:
         patterns:
           - "*"
 
-  # testClusters is the only chart with Chart.yaml dependencies. k6LoadTest is
-  # left out because its k6-operator chart must match the patched operator build.
+  # The only chart with Chart.yaml dependencies Dependabot should bump.
   - package-ecosystem: "helm"
     directories:
       - "/deployment/k8s/charts/aggregates/testClusters"
