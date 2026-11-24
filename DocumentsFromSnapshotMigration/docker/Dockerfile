@@ -2,7 +2,7 @@
 ARG BASE_IMAGE=migrations/java_runtime_base:latest
 FROM ${BASE_IMAGE}
 
-# Install procps-ng to use pgrep in entrypoint.sh (the minimal base only has microdnf)
+# Install procps to use pgrep in entrypoint.sh
 RUN microdnf install -y --setopt=install_weak_deps=0 --nodocs procps-ng && \
     microdnf clean all && \
     rm -rf /var/cache/dnf
