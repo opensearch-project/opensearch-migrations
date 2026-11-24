@@ -49,7 +49,8 @@ the Strimzi CRDs itself
    Strimzi's `v1-api-conversion.sh crd-upgrade` does. The Migration Assistant
    has always created its Strimzi resources through the `v1` API, so they need
    no field conversion.
-2. It applies the CRDs of the configured chart version with server-side apply.
+2. It server-side applies the CRD files from the configured chart version, then
+   checks that each CRD serves exactly the chart's versions.
 
 The installer stops with an error, before it changes anything, if the CRDs come
 from Strimzi older than 0.49 (no `v1` API). Upgrade through a release that uses
@@ -62,9 +63,9 @@ that uses Strimzi 0.5x isn't supported, because those operators need
 Strimzi 1.3 supports Kafka 4.2.0-4.3.2, and earlier releases created Kafka
 4.0.0 clusters. After the upgrade, such a cluster keeps serving traffic, but
 the operator reports `UnsupportedKafkaVersionException` and stops reconciling
-it. The entity operator also restarts repeatedly until the cluster is
-upgraded, so `KafkaTopic` and `KafkaUser` changes aren't applied. Choose one of
-these options:
+it. Until the cluster is upgraded, `KafkaTopic` and `KafkaUser` changes aren't
+reconciled reliably: the old entity operator keeps using the removed `v1beta2`
+API, and it may restart. Choose one of these options:
 
 - Finish or reset (`workflow reset`) capture-and-replay migrations before you
   upgrade. New workflow runs create Kafka 4.2.2 clusters.
