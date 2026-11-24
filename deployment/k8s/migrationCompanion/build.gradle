@@ -78,7 +78,6 @@ def companionBuildKitConfig = [
         buildArgs           : [
                 BASE_IMAGE       : baseImageProvider.get(),
                 MIGRATION_ASSISTANT_VERSION: migrationAssistantVersionProvider.get(),
-                // Changes daily so a layer cache can't replay an older 'dnf upgrade' (see Dockerfile)
                 OS_UPGRADE_DATE  : java.time.LocalDate.now(java.time.ZoneOffset.UTC).toString()
         ],
         requiredDependencies: [

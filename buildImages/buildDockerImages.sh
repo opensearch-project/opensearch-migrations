@@ -64,7 +64,7 @@ run_with_retries "$DOCKER_BUILD_RETRIES" ./gradlew ":buildImages:buildImagesToRe
   -PlocalContainerRegistryEndpoint="${EXTERNAL_REGISTRY_NAME}:5000" \
   -x test --no-daemon
 
-for image in capture_proxy migration_console traffic_replayer elasticsearch_searchguard reindex_from_snapshot java_runtime_base elasticsearch_test_console migration_console_base; do
+for image in capture_proxy migration_console traffic_replayer elasticsearch_searchguard reindex_from_snapshot elasticsearch_test_console migration_console_base; do
   docker pull "localhost:${EXTERNAL_REGISTRY_PORT}/migrations/${image}:latest" || true
   docker tag "localhost:${EXTERNAL_REGISTRY_PORT}/migrations/${image}:latest" "migrations/${image}:latest" || true
 done
