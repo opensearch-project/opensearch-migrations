@@ -898,9 +898,21 @@ charts:
   # Will likely be required for auto-scaling.
   # Notice that we don't install otel-collector yet, so we can't take advantage of this anyway.
   kube-prometheus-stack:
-    version: "72.0.0"
+    version: "93.10.0"
     repository: "https://prometheus-community.github.io/helm-charts"
     values:
+      crds:
+        # Helm installs the chart's CRDs only when they are missing and never upgrades them.
+        # They also outlive a Migration Assistant uninstall, so a reinstall or upgrade on the same
+        # cluster would leave a newer Prometheus Operator running against older CRDs. This
+        # pre-install/pre-upgrade hook server-side applies the CRDs shipped with the chart.
+        upgradeJob:
+          enabled: true
+          image:
+            kubectl:
+              # The chart defaults this tag to the cluster's Kubernetes version. Pin it to a
+              # tag in infra/mirror/private-ecr-manifest.yaml so private-ECR installs can pull it.
+              tag: "v1.35.3"
       prometheus:
         prometheusSpec:
           serviceMonitorSelector: { }  # Select all ServiceMonitors
@@ -959,15 +971,17 @@ charts:
           limits:   { cpu: 100m, memory: 32Mi }
       grafana:
         image:
-          tag: "11.6.13"
+          # The distroless variant is the grafana chart's default since chart 13.0.0. It omits the
+          # Alpine OS packages that the standard image carries.
+          tag: "13.3.2-distroless"
         resources:
           requests: { cpu: 100m, memory: 128Mi }
           limits:   { cpu: 500m, memory: 256Mi }
         sidecar:
           image:
             # 1.30.11 never loads a dashboard: after loading the in-cluster config, its watches call
-            # localhost:80. 2.14.1 loads them (checked on kind and EKS).
-            tag: 2.14.1
+            # localhost:80. 2.14.x loads them (checked on kind and EKS).
+            tag: 2.14.3
           dashboards:
             resources:
               requests: { cpu: 50m, memory: 100Mi }
@@ -1022,9 +1036,12 @@ charts:
         tag: "4.3.0"
 
   grafana:
-    version: "8.15.0"
-    repository: "https://grafana.github.io/helm-charts"
+    # The grafana chart moved from grafana/helm-charts to grafana-community/helm-charts.
+    version: "14.5.0"
+    repository: "https://grafana-community.github.io/helm-charts"
     values:
+      image:
+        tag: "13.3.2-distroless"
       ## Grafana data sources configuration
       datasources:
         datasources.yaml:

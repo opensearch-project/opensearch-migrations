@@ -8,11 +8,11 @@ charts:
   - "strimzi-kafka-operator|0.50.1|https://strimzi.io/charts/"
   - "argo-workflows|1.0.5|https://argoproj.github.io/argo-helm"
   - "fluent-bit|0.51.0|https://fluent.github.io/helm-charts"
-  - "kube-prometheus-stack|72.0.0|https://prometheus-community.github.io/helm-charts"
+  - "kube-prometheus-stack|93.10.0|https://prometheus-community.github.io/helm-charts"
   - "etcd-operator|0.4.2|oci://ghcr.io/aenix-io/charts"
   - "opentelemetry-operator|0.86.4|https://open-telemetry.github.io/opentelemetry-helm-charts"
   - "localstack|0.6.23|https://localstack.github.io/helm-charts"
-  - "grafana|8.15.0|https://grafana.github.io/helm-charts"
+  - "grafana|14.5.0|https://grafana-community.github.io/helm-charts"
   - "jaeger|3.2.0|https://jaegertracing.github.io/helm-charts"
   - "kyverno|3.7.1|https://kyverno.github.io/kyverno/"
   - "aws-privateca-issuer|v1.4.0|https://cert-manager.github.io/aws-privateca-issuer"
@@ -52,22 +52,23 @@ images:
   - "mirror.gcr.io/library/busybox:latest"
 
   # kube-prometheus-stack
-  - "quay.io/prometheus/prometheus:v3.3.1"
-  - "quay.io/prometheus-operator/prometheus-operator:v0.82.0"
-  - "quay.io/prometheus-operator/prometheus-config-reloader:v0.82.0"
-  - "quay.io/prometheus/node-exporter:v1.9.1"
-  - "quay.io/prometheus/alertmanager:v0.28.1"
-  - "quay.io/kiwigrid/k8s-sidecar:2.14.1"
-  - "registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.15.0"
-  - "registry.k8s.io/ingress-nginx/kube-webhook-certgen:v1.5.3"
-  - "mirror.gcr.io/bats/bats:v1.4.1"
-  - "quay.io/thanos/thanos:v0.38.0"
+  # (its CRD upgrade job also uses busybox:latest and kubectl:v1.35.3, listed above and below)
+  - "quay.io/prometheus/prometheus:v3.16.0-distroless"
+  - "quay.io/prometheus-operator/prometheus-operator:v0.95.2"
+  - "quay.io/prometheus-operator/prometheus-config-reloader:v0.95.2"
+  - "quay.io/prometheus/node-exporter:v1.13.1-distroless"
+  - "quay.io/prometheus/alertmanager:v0.35.0"
+  - "quay.io/kiwigrid/k8s-sidecar:2.14.3"
+  - "registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.20.0"
+  - "ghcr.io/jkroepke/kube-webhook-certgen:1.11.1"
+  - "mirror.gcr.io/bats/bats:1.14.0"
+  - "quay.io/thanos/thanos:v0.42.5"
 
   # observability
   - "public.ecr.aws/aws-observability/aws-otel-collector:v0.49.0"
   - "ghcr.io/open-telemetry/opentelemetry-operator/opentelemetry-operator:0.122.0"
   - "quay.io/brancz/kube-rbac-proxy:v0.18.1"
-  - "mirror.gcr.io/grafana/grafana:11.6.13"
+  - "mirror.gcr.io/grafana/grafana:13.3.2-distroless"
 
   # jaeger
   - "mirror.gcr.io/jaegertracing/jaeger-agent:1.53.0"
