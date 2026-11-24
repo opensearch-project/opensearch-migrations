@@ -20,6 +20,7 @@ only run when selected explicitly via --test_ids.
 
 import json
 import logging
+import os
 import time
 import uuid
 
@@ -533,6 +534,107 @@ class Test0094MemoryTierLadder(MemoryTierTestBase):
         assert {0, 1, 2} <= observed_tiers, \
             f"expected all of tiers 0, 1, 2 to activate; observed {self.tier_observations}"
         # Greedy, not lockstep: tier 0 kept running while at least one escalated fleet worked.
+        assert any(0 in active and any(t > 0 for t in active)
+                   for active in self.tier_observations), \
+            f"tiers never ran in parallel: {self.tier_observations}"
+
+
+class Test0095MemoryTierByosLadder(MemoryTierTestBase):
+    """BYOS variant for EKS (pattern of Test0010 / eksBYOSIntegPipeline): no source cluster —
+    RFS reads the memtier-* indices from an existing S3 snapshot, and the target is an
+    already-deployed cluster imported from its configmap (requires --reuse_clusters).
+    Per-index transform weights drive the heavy index to tier 2, the medium index to tier 1,
+    and the plain indices stay at tier 0 — all three fleets concurrently.
+
+    Required environment variables (same contract as Test0010):
+      BYOS_SNAPSHOT_NAME, BYOS_S3_REPO_URI, BYOS_S3_REGION (default us-east-2 here)
+    """
+
+    def __init__(self, user_args: MATestUserArguments):
+        super().__init__(user_args, "Memory-tier scaling (BYOS): per-index weights populate three tiers.")
+        self.migrations_required = [MigrationType.METADATA, MigrationType.BACKFILL]
+        # Fixed names: they must match the indices captured in the external snapshot.
+        self.heavy_index = "memtier-heavy"
+        self.medium_index = "memtier-medium"
+        self.ordinary_indices = ["memtier-plain-a", "memtier-plain-b"]
+
+    def _load_snapshot_config(self):
+        missing = [name for name in ("BYOS_SNAPSHOT_NAME", "BYOS_S3_REPO_URI")
+                   if not os.environ.get(name)]
+        if missing:
+            raise ValueError(f"{type(self).__name__} requires environment variable(s): {missing}")
+        self.snapshot_name = os.environ["BYOS_SNAPSHOT_NAME"]
+        self.s3_repo_uri = os.environ["BYOS_S3_REPO_URI"]
+        self.s3_region = os.environ.get("BYOS_S3_REGION", "us-east-2")
+
+    def import_existing_clusters(self):
+        self._load_snapshot_config()
+        configmap_prefix = (f"target-{self.target_version.full_cluster_type}-"
+                            f"{self.target_version.major_version}-{self.target_version.minor_version}")
+        target_cluster = self.argo_service.get_cluster_from_configmap(configmap_prefix)
+        if not target_cluster:
+            raise ValueError(f"BYOS test requires an existing target cluster; no configmap "
+                             f"with prefix '{configmap_prefix}' (run with --reuse_clusters "
+                             f"after creating the target).")
+        self.imported_clusters = True
+        self.target_cluster = target_cluster
+        self.source_cluster = None
+
+    def prepare_clusters(self):
+        pass  # no source cluster; the snapshot IS the source
+
+    def prepare_workflow_snapshot_and_migration_config(self):
+        backfill = self.backfill_config(max_memory="5600Mi", with_transform=False)
+        backfill["indexAllowlist"] = ([self.heavy_index, self.medium_index] +
+                                      self.ordinary_indices)
+        backfill["maxTotalPods"] = 6
+        backfill["docTransformerConfigBase64"] = convert_to_b64([_memory_hog_transform({
+            self.heavy_index: RETAINED_MIB_PER_DOC,
+            self.medium_index: RETAINED_MIB_PER_DOC,
+        })])
+        self.workflow_snapshot_and_migration_config = [{
+            "snapshotConfig": {
+                "snapshotNameConfig": {"externallyManagedSnapshotName": self.snapshot_name}
+            },
+            "migrations": [{
+                "metadataMigrationConfig": {},
+                "documentBackfillConfig": backfill,
+            }]
+        }]
+
+    def prepare_workflow_parameters(self, keep_workflows: bool = False):
+        source_config = {
+            "endpoint": "",
+            "version": f"{self.source_version.cluster_type} "
+                       f"{self.source_version.major_version}.{self.source_version.minor_version}",
+            "snapshotRepo": {"awsRegion": self.s3_region, "repoPathUri": self.s3_repo_uri},
+        }
+        self.workflow_template = "full-migration-imported-clusters"
+        self.imported_clusters = True
+        self.parameters["source-configs"] = [{
+            "source": source_config,
+            "snapshot-and-migration-configs": self.workflow_snapshot_and_migration_config,
+        }]
+        self.parameters["target-config"] = self.target_cluster.config
+        self.parameters["keepMigrationWorkflow"] = "true" if keep_workflows else "false"
+
+    def workflow_perform_migrations(self, timeout_seconds: int = 3600):
+        phase = self.wait_observing_tiers(timeout_seconds=timeout_seconds)
+        assert phase == "Completed", f"expected Completed, got {phase}"
+
+    def verify_clusters(self):
+        self.target_operations.check_doc_counts_match(
+            cluster=self.target_cluster,
+            expected_index_details={
+                self.heavy_index: {"count": HEAVY_DOCS},
+                self.medium_index: {"count": MEDIUM_DOCS},
+                **{index: {"count": ORDINARY_DOCS} for index in self.ordinary_indices},
+            },
+            max_attempts=20, delay=6.0)
+
+        observed_tiers = {tier for active in self.tier_observations for tier in active}
+        assert {0, 1, 2} <= observed_tiers, \
+            f"expected all of tiers 0, 1, 2 to activate; observed {self.tier_observations}"
         assert any(0 in active and any(t > 0 for t in active)
                    for active in self.tier_observations), \
             f"tiers never ran in parallel: {self.tier_observations}"
