@@ -108,8 +108,8 @@ def test_feature_on_appends_the_new_fields(mocker):
     assert payload["shard_waiting"] == 2
     assert payload["shard_total"] == 10
     # total = complete + in_progress + waiting + awaiting_memory
-    assert (payload["shard_complete"] + payload["shard_in_progress"]
-            + payload["shard_waiting"] + payload["shard_awaiting_memory"]) == payload["shard_total"]
+    assert (payload["shard_complete"] + payload["shard_in_progress"] +
+            payload["shard_waiting"] + payload["shard_awaiting_memory"]) == payload["shard_total"]
     assert payload["workers"] == {"desired": 7, "running": 6, "pending": 1}
     assert payload["memory_scaling"]["tiers"] == MEMORY_SCALING["tiers"]
     assert payload["memory_scaling"]["active"] == [

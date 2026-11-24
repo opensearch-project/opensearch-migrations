@@ -22,6 +22,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 WORKING_STATE_INDEX = ".migrations_working_state"
+JSON_HEADERS = {"Content-Type": "application/json"}
 
 DOCKER_RFS_SCHEMA = {
     "type": "dict",
@@ -319,7 +320,7 @@ def _get_max_completed_epoch(cluster, index_name: str) -> Optional[int]:
         resp = cluster.call_api(
             f"/{index_name}/_search",
             data=json.dumps(body),
-            headers={"Content-Type": "application/json"},
+            headers=JSON_HEADERS,
         )
         aggs = resp.json().get("aggregations", {})
         val = aggs.get("max_completed", {}).get("value")
@@ -636,7 +637,7 @@ def _fetch_hits(target_cluster: Cluster, index_name: str, body: dict) -> list:
     try:
         response = target_cluster.call_api(f"/{index_name}/_search", method=HttpMethod.POST,
                                            data=json.dumps(body),
-                                           headers={"Content-Type": "application/json"})
+                                           headers=JSON_HEADERS)
         return response.json().get("hits", {}).get("hits", [])
     except Exception as e:  # noqa: BLE001
         logger.error(f"Failed to fetch hits for rollup: {e}")
@@ -662,7 +663,7 @@ def _completed_shard_counts(target_cluster: Cluster, index_name: str) -> Dict[st
     try:
         response = target_cluster.call_api(f"/{index_name}/_search", method=HttpMethod.POST,
                                            data=json.dumps(body),
-                                           headers={"Content-Type": "application/json"})
+                                           headers=JSON_HEADERS)
         for bucket in response.json().get("aggregations", {}).get("byIndex", {}).get("buckets", []):
             if bucket["key"] == "__missing__":
                 missing_present = True
@@ -711,6 +712,36 @@ def count_busy_pods_by_tier(target_cluster: Cluster, index_name: str) -> Dict[in
     return {tier: len(pods) for tier, pods in pods_by_tier.items()}
 
 
+def _aggregate_worker_counts(tier_statuses: Dict[int, Optional[DeploymentStatus]]) -> dict:
+    workers = {"desired": 0, "running": 0, "pending": 0}
+    for status in tier_statuses.values():
+        if status is None:
+            continue
+        workers["desired"] += status.desired or 0
+        workers["running"] += status.running or 0
+        workers["pending"] += status.pending or 0
+    return workers
+
+
+def _active_tier_list(tier_statuses: Dict[int, Optional[DeploymentStatus]],
+                      busy_by_tier: Dict[int, int]) -> list:
+    return [{"tier": tier, "replicas": status.desired or 0, "busy": busy_by_tier.get(tier, 0)}
+            for tier, status in sorted(tier_statuses.items()) if status is not None]
+
+
+def _failed_overlay(base: BackfillOverallStatus, target_cluster: Cluster, index_name: str,
+                    tiers: list, max_tier: int):
+    """(status, message, rollup) override when shards exceed maxMemory; base values otherwise."""
+    if base.status in (StepStateWithPause.COMPLETED, StepStateWithPause.COMPLETED_WITH_ERRORS):
+        return base.status, None, None
+    rollup = compute_failed_rollup(target_cluster, index_name, max_tier)
+    if rollup is None:
+        return base.status, None, None
+    exceeding = sum(len(entry["shards_exceeding_max_memory"]) for entry in rollup["incomplete"])
+    message = f"{exceeding} shards still exceed maxMemory ({tiers[-1]}) at tier {max_tier}"
+    return StepStateWithPause.FAILED, message, rollup
+
+
 def build_memory_scaling_status(base: BackfillOverallStatus,
                                 target_cluster: Cluster,
                                 session_name: str,
@@ -730,33 +761,10 @@ def build_memory_scaling_status(base: BackfillOverallStatus,
     if shard_waiting is not None:
         shard_waiting = max(0, shard_waiting - awaiting)
 
-    workers = {"desired": 0, "running": 0, "pending": 0}
-    for status in tier_statuses.values():
-        if status is None:
-            continue
-        workers["desired"] += status.desired or 0
-        workers["running"] += status.running or 0
-        workers["pending"] += status.pending or 0
-
-    busy_by_tier = count_busy_pods_by_tier(target_cluster, index_name)
-    active = []
-    for tier, status in sorted(tier_statuses.items()):
-        if status is None:
-            continue
-        active.append({"tier": tier, "replicas": status.desired or 0,
-                       "busy": busy_by_tier.get(tier, 0)})
-
-    status_value = base.status
-    message = None
-    rollup = None
-    if base.status not in (StepStateWithPause.COMPLETED, StepStateWithPause.COMPLETED_WITH_ERRORS):
-        rollup = compute_failed_rollup(target_cluster, index_name, max_tier)
-        if rollup is not None:
-            status_value = StepStateWithPause.FAILED
-            exceeding = sum(len(entry["shards_exceeding_max_memory"])
-                            for entry in rollup["incomplete"])
-            message = (f"{exceeding} shards still exceed maxMemory ({tiers[-1]}) "
-                       f"at tier {max_tier}")
+    workers = _aggregate_worker_counts(tier_statuses)
+    active = _active_tier_list(tier_statuses, count_busy_pods_by_tier(target_cluster, index_name))
+    status_value, message, rollup = _failed_overlay(base, target_cluster, index_name,
+                                                    tiers, max_tier)
 
     return MemoryScalingBackfillStatus(
         status=status_value,
@@ -851,7 +859,7 @@ def parse_query_response(query: dict, cluster: Cluster, index_name: str, label: 
     try:
         logger.debug(f"Creating request: /{index_name}/_search; {query}")
         response = cluster.call_api(f"/{index_name}/_search", method=HttpMethod.POST, data=json.dumps(query),
-                                    headers={'Content-Type': 'application/json'})
+                                    headers=JSON_HEADERS)
     except Exception as e:
         logger.error(f"Failed to execute query: {e}")
         return None
@@ -870,7 +878,7 @@ def parse_shard_setup_response(query: dict, cluster: Cluster, index_name: str) -
     """Check if shard_setup document has completedAt field set"""
     try:
         response = cluster.call_api(f"/{index_name}/_search", method=HttpMethod.POST, data=json.dumps(query),
-                                    headers={'Content-Type': 'application/json'})
+                                    headers=JSON_HEADERS)
         body = response.json()
         hits = body.get('hits', {}).get('hits', [])
         if hits:

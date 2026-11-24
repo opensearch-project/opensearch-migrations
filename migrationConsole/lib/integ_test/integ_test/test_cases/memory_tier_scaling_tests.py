@@ -443,7 +443,7 @@ class Test0093MemoryScalingOffIsUnchanged(MemoryTierTestBase):
                 assert len(deployments) == 1, f"expected one RFS deployment, saw {deployments}"
                 name, (tier, _) = next(iter(deployments.items()))
                 assert name.endswith("-rfs"), f"unexpected deployment name {name}"
-                assert tier is None, f"feature-off deployment must not carry the tier label"
+                assert tier is None, "feature-off deployment must not carry the tier label"
                 pods = self.core.list_namespaced_pod(
                     self.namespace, label_selector=COMPONENT_SELECTOR).items
                 for pod in pods:
@@ -468,6 +468,7 @@ class Test0093MemoryScalingOffIsUnchanged(MemoryTierTestBase):
 
     def verify_clusters(self):
         self.verify_ordinary_indices_on_target()
+
 
 MEDIUM_DOCS = 200  # 1 shard x 200 docs x 8MiB retained ~ 1600MiB: overflows tier 0, fits tier 1
 
