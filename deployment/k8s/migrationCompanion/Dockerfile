@@ -2,6 +2,15 @@ ARG BASE_IMAGE=docker.io/library/amazonlinux:2023
 
 FROM ${BASE_IMAGE}
 
+# Install every OS update published since the base image was built. AL2023 locks dnf to the
+# release the image was built from, so a plain 'dnf upgrade' finds nothing newer;
+# --releasever=latest moves the image to the newest release. OS_UPGRADE_DATE is unused by the
+# command; changing it only stops a layer cache from replaying an older upgrade.
+ARG OS_UPGRADE_DATE=unset
+RUN dnf upgrade -y --releasever=latest && \
+    dnf clean all && \
+    rm -rf /var/cache/dnf
+
 ARG MIGRATION_ASSISTANT_VERSION=0.0.0-dev
 
 LABEL org.opencontainers.image.title="OpenSearch Migrations Migration Companion" \

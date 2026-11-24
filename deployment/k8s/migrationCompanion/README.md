@@ -31,7 +31,8 @@ Registry build:
 ```
 
 The final image base defaults to `docker.io/library/amazonlinux:2023`. Override
-it with `-PmigrationCompanionBaseImage=...`.
+it with `-PmigrationCompanionBaseImage=...`. The build installs the latest OS
+updates with `dnf`, so an override must also be an Amazon Linux 2023 image.
 
 ## Build contract
 
