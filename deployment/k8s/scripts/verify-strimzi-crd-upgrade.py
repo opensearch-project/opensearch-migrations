@@ -7,7 +7,8 @@ version that Strimzi 0.49-0.51 stored. This check renders the installer Job and 
 upgrade runs before `helm upgrade --install strimzi-kafka-operator`, reads the CRDs of the configured
 chart version from the same chart reference the install uses (Helm repository or private-ECR OCI), and
 is left out when Strimzi is disabled. It then runs the rendered shell against a fake kubectl/helm to
-check the fresh-install, v1beta2-stored, already-migrated and pre-0.49 paths.
+check the fresh-install, v1beta2-stored, already-migrated and pre-0.49 paths, and that an apply which
+leaves a CRD on its old versions fails the install.
 """
 
 import json
@@ -28,15 +29,27 @@ BLOCK_END = "strimzi_upgrade_crds || exit 1"
 STRIMZI_INSTALL = re.compile(r"helm upgrade --install \\\s*\n\s*strimzi-kafka-operator \\")
 
 # Stands in for kubectl and helm. FAKE_STATE selects what the cluster holds; every call is logged.
+# `helm pull --untar` writes two CRD files; `kubectl apply` makes the CRDs serve v1 only, except in
+# the partial-apply state, which leaves KafkaNodePool on its old versions (as when kubectl reads
+# several CRDs joined without document separators and applies only the last one).
 FAKE_CLI = r"""#!/bin/sh
 echo "$(basename "$0") $*" >> "$FAKE_LOG"
 cmd="$(basename "$0") $*"
+applied="$(dirname "$FAKE_LOG")/applied"
 case "$cmd" in
-  "helm show crds "*) echo "kind: CustomResourceDefinition"; exit 0 ;;
+  "helm pull "*" --untar --untardir "*)
+    dir="$(echo "$cmd" | sed 's/.* --untardir //')/strimzi-kafka-operator/crds"
+    mkdir -p "$dir" && touch "$dir/040-Crd-kafka.yaml" "$dir/045-Crd-kafkanodepool.yaml"; exit 0 ;;
+  "kubectl create --dry-run=client --validate=false -f "*"/crds -o jsonpath="*)
+    printf 'kafkas.kafka.strimzi.io v1\nkafkanodepools.kafka.strimzi.io v1\n'; exit 0 ;;
   "kubectl get crd "*" -o jsonpath={.status.storedVersions[*]}")
     [ "$FAKE_STATE" = migrated ] && echo v1 || echo v1beta2; exit 0 ;;
   "kubectl get crd "*" -o jsonpath={.spec.versions[*].name}")
-    [ "$FAKE_STATE" = legacy ] && echo "v1beta2 v1beta1" || echo "v1 v1beta2"; exit 0 ;;
+    if [ -f "$applied" ] && { [ "$FAKE_STATE" != partial-apply ] || [ "$3" != kafkanodepools.kafka.strimzi.io ]; }; then
+      echo v1
+    elif [ "$FAKE_STATE" = legacy ]; then echo "v1beta2 v1beta1"
+    else echo "v1 v1beta2"; fi
+    exit 0 ;;
   "kubectl get crd "*" -o json")
     echo '{"spec":{"versions":[{"name":"v1","storage":false},{"name":"v1beta2","storage":true}]}}'; exit 0 ;;
   "kubectl get crd "*) [ "$FAKE_STATE" = fresh ] && exit 1 || exit 0 ;;
@@ -46,7 +59,8 @@ case "$cmd" in
   "kubectl get kafkas.v1.kafka.strimzi.io -n ma default -o json --ignore-not-found")
     echo '{"kind":"Kafka"}'; exit 0 ;;
   "kubectl replace -f -") cat > /dev/null; exit 0 ;;
-  "kubectl patch "*|"kubectl apply "*|"kubectl wait "*) exit 0 ;;
+  "kubectl apply "*"/crds") touch "$applied"; exit 0 ;;
+  "kubectl patch "*|"kubectl wait "*) exit 0 ;;
 esac
 echo "unexpected call: $cmd" >&2
 exit 1
@@ -96,9 +110,12 @@ def validate_rendered_job(job, chart_ref, version, variant):
         fail(f"{variant}: the installer lacks the Strimzi CRD upgrade or the Strimzi chart install")
     if block_offset > install.start():
         fail(f"{variant}: the Strimzi CRD upgrade runs after the operator chart is upgraded")
-    show = f"helm show crds {chart_ref} --version {version}"
-    if show not in job:
-        fail(f"{variant}: the CRD upgrade does not read the CRDs with `{show}`")
+    pull = f"helm pull {chart_ref} --version {version} --untar"
+    if pull not in job:
+        fail(f"{variant}: the CRD upgrade does not read the chart's CRD files with `{pull}`")
+    # Helm 3 joins the files without document separators, so kubectl would apply only the last CRD.
+    if "helm show crds" in job:
+        fail(f"{variant}: the CRD upgrade must not feed `helm show crds` output to kubectl")
 
 
 def run_block(block, state):
@@ -111,7 +128,8 @@ def run_block(block, state):
         log = bin_dir / "calls.log"
         log.touch()
         # The installer defines retry(); a single attempt keeps failures fast and visible here.
-        script = 'retry() { shift 3; [ "$1" = "--" ] && shift; "$@"; }\n' + block
+        # Keep the block's scratch files (chart, resource lists) inside this temporary directory.
+        script = 'retry() { shift 3; [ "$1" = "--" ] && shift; "$@"; }\n' + block.replace("/tmp/", f"{directory}/")
         result = subprocess.run(
             ["sh", "-c", script],
             env={**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "FAKE_STATE": state,
@@ -156,6 +174,10 @@ def validate_behaviour(block):
     code, output, calls = run_block(block, "migrated")
     if code or calls_matching(calls, r"^kubectl (patch|replace)") or not calls_matching(calls, r"^kubectl apply "):
         fail(f"An already-migrated install must only re-apply the CRDs:\n{output}\n{calls}")
+
+    code, output, calls = run_block(block, "partial-apply")
+    if not code or "kafkanodepools.kafka.strimzi.io serves [v1 v1beta2]" not in output:
+        fail(f"An apply that leaves a CRD on its old versions must fail the install:\n{output}\n{calls}")
 
     code, output, calls = run_block(block, "legacy")
     if not code or "older than 0.49" not in output or calls_matching(calls, r"^kubectl (patch|apply)"):

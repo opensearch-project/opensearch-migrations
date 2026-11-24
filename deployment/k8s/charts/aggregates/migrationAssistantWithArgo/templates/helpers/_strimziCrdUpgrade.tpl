@@ -12,8 +12,11 @@
     2. rewrite every existing resource so that the API server stores it as v1;
     3. set status.storedVersions to [v1].
 
-  Then the CRDs shipped with the target chart version are applied. A fresh install (no
-  Strimzi CRDs yet) skips all of this and lets helm create the CRDs.
+  Then the CRD files shipped in the target chart's crds/ directory are applied, and every
+  CRD is checked to serve exactly the chart's versions. The files are taken from `helm pull`,
+  not `helm show crds`: Helm 3 joins the files without `---` separators, and kubectl then
+  silently applies only the last CRD. A fresh install (no Strimzi CRDs yet) skips all of
+  this and lets helm create the CRDs.
 
   Every step is idempotent, so a failed or repeated installer run can be retried. The
   Migration Assistant always created its Strimzi resources through the v1 API, so they need
@@ -28,7 +31,8 @@
 {{- $chartRef = .chart.repository }}
 {{- end }}
 STRIMZI_CRDS="kafkas.kafka.strimzi.io kafkanodepools.kafka.strimzi.io kafkatopics.kafka.strimzi.io kafkausers.kafka.strimzi.io kafkaconnects.kafka.strimzi.io kafkaconnectors.kafka.strimzi.io kafkamirrormaker2s.kafka.strimzi.io kafkabridges.kafka.strimzi.io kafkarebalances.kafka.strimzi.io strimzipodsets.core.strimzi.io"
-STRIMZI_CRDS_FILE=/tmp/strimzi-crds-{{ .chart.version }}.yaml
+STRIMZI_CHART_DIR=/tmp/strimzi-chart-{{ .chart.version }}
+STRIMZI_CRDS_DIR="$STRIMZI_CHART_DIR/{{ .name }}/crds"
 
 strimzi_rewrite_resource() {
   # get + replace carries the resourceVersion, so a concurrent operator write makes this fail
@@ -81,12 +85,31 @@ strimzi_store_crd_as_v1() {
 }
 
 strimzi_fetch_crds() {
-  helm show crds {{ $chartRef }} --version {{ .chart.version }} > "$STRIMZI_CRDS_FILE" && [ -s "$STRIMZI_CRDS_FILE" ]
+  rm -rf "$STRIMZI_CHART_DIR" && mkdir -p "$STRIMZI_CHART_DIR" || return 1
+  helm pull {{ $chartRef }} --version {{ .chart.version }} --untar --untardir "$STRIMZI_CHART_DIR" || return 1
+  ls "$STRIMZI_CRDS_DIR"/*.yaml >/dev/null 2>&1
 }
 
 strimzi_apply_crds() {
   kubectl apply --server-side --force-conflicts --field-manager=migration-assistant-installer \
-    -f "$STRIMZI_CRDS_FILE" >/dev/null
+    -f "$STRIMZI_CRDS_DIR" >/dev/null
+}
+
+strimzi_verify_crds() {
+  # Every CRD in the chart must now serve exactly the chart's versions; anything else means the
+  # apply did not reach it.
+  kubectl create --dry-run=client --validate=false -f "$STRIMZI_CRDS_DIR" \
+    -o jsonpath='{.metadata.name} {.spec.versions[*].name}{"\n"}' > "$STRIMZI_CHART_DIR/expected.txt" || return 1
+  [ -s "$STRIMZI_CHART_DIR/expected.txt" ] || return 1
+  while read -r _strimzi_name _strimzi_expected; do
+    [ -n "$_strimzi_name" ] || continue
+    _strimzi_actual=$(kubectl get crd "$_strimzi_name" -o jsonpath='{.spec.versions[*].name}') || return 1
+    if [ "$_strimzi_actual" != "$_strimzi_expected" ]; then
+      echo "ERROR: CRD $_strimzi_name serves [$_strimzi_actual]; the chart defines [$_strimzi_expected]" >&2
+      return 1
+    fi
+  done < "$STRIMZI_CHART_DIR/expected.txt"
+  echo "  $(grep -c . "$STRIMZI_CHART_DIR/expected.txt") CRDs match the chart"
 }
 
 strimzi_upgrade_crds() {
@@ -101,11 +124,12 @@ strimzi_upgrade_crds() {
     fi
   done
   echo "Applying the strimzi-kafka-operator {{ .chart.version }} CRDs (helm upgrade does not update CRDs)..."
-  retry 3 10 "helm show crds strimzi-kafka-operator {{ .chart.version }}" -- strimzi_fetch_crds || return 1
+  retry 3 10 "helm pull strimzi-kafka-operator {{ .chart.version }}" -- strimzi_fetch_crds || return 1
   retry 3 10 "apply strimzi-kafka-operator {{ .chart.version }} CRDs" -- strimzi_apply_crds || return 1
   for _strimzi_crd_name in $STRIMZI_CRDS; do
     kubectl wait --for=condition=Established "crd/$_strimzi_crd_name" --timeout=120s || return 1
   done
+  strimzi_verify_crds || return 1
   # The new operator rejects Kafka versions it no longer supports; those clusters keep running
   # but are not reconciled until spec.kafka.version moves to a supported release.
   echo "Existing Kafka clusters (namespace/name spec.kafka.version):"
