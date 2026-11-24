@@ -2332,7 +2332,7 @@ if [[ "$build" == "true" && -z "$ma_images_source" ]]; then
   # EKS/bootstrap builds are always Kubernetes-hosted; they cannot assume
   # direct access to a local Docker daemon from the target environment.
   source "${base_dir}/buildImages/backends/eksKubernetesBuildkit.sh"
-  BUILDER_NAME="builder-${KUBE_CONTEXT//[^a-zA-Z0-9_-]/-}"
+  BUILDER_NAME="builder-${KUBE_CONTEXT//[^a-zA-Z0-9_-]/-}-pinned"  # must match ensure_eks_buildx_builder
   if [[ "$push_images_to_ecr" == "true" ]]; then
     # Use the ECR-mirrored buildkit image so the kubernetes driver doesn't pull
     # from Docker Hub. mirror_images_to_ecr already copied this image above.
@@ -2346,13 +2346,14 @@ if [[ "$build" == "true" && -z "$ma_images_source" ]]; then
   set_buildkit_node_class_helm_arg
   ensure_eks_buildkit_release
 
-  # Reuse a builder only when it is pinned to ${KUBE_CONTEXT} and healthy. Any other builder (e.g.
-  # orphaned by an interrupted run, or created before builders were pinned to a context) is removed
-  # and recreated by ensure_eks_buildx_builder, which never acts on a cluster other than ${KUBE_CONTEXT}.
-  if eks_buildx_builder_is_ready "$BUILDER_NAME"; then
+  if builder_status=$(docker buildx inspect "$BUILDER_NAME" 2>/dev/null) \
+      && buildx_nodes_are_ready <<< "$builder_status"; then
     echo "Buildkit release reconciled and existing builder is healthy"
   else
     echo "Setting up the buildx builder for local builds..."
+    # Remove stale builder if it exists but failed health check above (e.g. orphaned
+    # from a previous interrupted run). This is safe — the builder is recreated below.
+    docker buildx rm "$BUILDER_NAME" 2>/dev/null || true
     ensure_eks_buildx_builder
   fi
 
@@ -2373,7 +2374,7 @@ if [[ "$build" == "true" && -z "$ma_images_source" ]]; then
     || { echo "Image build failed on retry, giving up."; exit 1; }
 
   echo "Cleaning up docker buildx builder to free buildkit pods..."
-  remove_eks_buildx_builder "$BUILDER_NAME"
+  docker buildx rm "$BUILDER_NAME" 2>/dev/null || true
   echo "Builder removed. Buildkit pods will be terminated by kubernetes driver."
 fi
 
