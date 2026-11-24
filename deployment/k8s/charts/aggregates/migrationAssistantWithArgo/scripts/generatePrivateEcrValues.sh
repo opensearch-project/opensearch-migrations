@@ -138,11 +138,6 @@ charts:
         sidecar:
           image:
             registry: "${M}/quay.io"
-        testFramework:
-          image:
-            registry: "${M}/mirror.gcr.io"
-            repository: bats/bats
-            tag: "1.14.0"
 
   opentelemetry-operator:
     repository: "oci://${ECR}/charts/opentelemetry-operator"
@@ -171,11 +166,6 @@ charts:
       sidecar:
         image:
           registry: "${M}/quay.io"
-      testFramework:
-        image:
-          registry: "${M}/mirror.gcr.io"
-          repository: bats/bats
-          tag: "1.14.0"
 
   jaeger:
     repository: "oci://${ECR}/charts/jaeger"

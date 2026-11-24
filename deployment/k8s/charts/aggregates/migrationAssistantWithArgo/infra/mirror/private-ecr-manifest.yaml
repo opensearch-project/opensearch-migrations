@@ -61,7 +61,6 @@ images:
   - "quay.io/kiwigrid/k8s-sidecar:2.14.3"
   - "registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.20.0"
   - "ghcr.io/jkroepke/kube-webhook-certgen:1.11.1"
-  - "mirror.gcr.io/bats/bats:1.14.0"
   - "quay.io/thanos/thanos:v0.42.5"
 
   # observability

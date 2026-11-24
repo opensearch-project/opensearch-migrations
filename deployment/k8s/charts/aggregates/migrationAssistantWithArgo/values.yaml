@@ -980,6 +980,9 @@ charts:
         resources:
           requests: { cpu: 100m, memory: 384Mi }
           limits:   { cpu: 500m, memory: 1Gi }
+        # The installer never runs `helm test`, so don't render the bats test pod or mirror its image.
+        testFramework:
+          enabled: false
         sidecar:
           image:
             # 1.30.11 never loads a dashboard: after loading the in-cluster config, its watches call
@@ -1045,6 +1048,8 @@ charts:
     values:
       image:
         tag: "13.3.2-distroless"
+      testFramework:
+        enabled: false
       ## Grafana data sources configuration
       datasources:
         datasources.yaml:
