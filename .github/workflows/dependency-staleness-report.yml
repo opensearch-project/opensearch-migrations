@@ -1,0 +1,56 @@
+name: Dependency Staleness Report
+
+# Weekly report of third-party Helm charts and images pinned in files Dependabot can't read: the
+# migration-assistant chart's `charts:` values, its ECR mirror manifest, and the base images in
+# buildImages/build.gradle. The report is published as the job summary and an artifact. It never
+# opens PRs or changes files.
+#
+# To also keep the report in one tracking issue, create the issue and set the repository variable
+# STALENESS_REPORT_ISSUE to its number. Each scheduled or manual run replaces the issue body.
+on:
+  schedule:
+    - cron: '41 6 * * 1'
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/dependency-staleness-report.yml'
+      - '.github/scripts/report-stale-pins.sh'
+
+permissions:
+  contents: read
+
+jobs:
+  report:
+    name: Check pins against upstream
+    # Scheduled runs only in the upstream repository, not in forks.
+    if: github.event_name != 'schedule' || github.repository == 'opensearch-project/opensearch-migrations'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Look up upstream versions
+        run: .github/scripts/report-stale-pins.sh staleness-report.md
+      - name: Publish job summary
+        run: cat staleness-report.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload report
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: dependency-staleness-report
+          path: staleness-report.md
+
+  update-tracking-issue:
+    name: Update tracking issue
+    needs: report
+    if: github.event_name != 'pull_request' && vars.STALENESS_REPORT_ISSUE != ''
+    runs-on: ubuntu-24.04
+    permissions:
+      issues: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dependency-staleness-report
+      - name: Replace the issue body with the report
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ vars.STALENESS_REPORT_ISSUE }}
+        run: gh issue edit "${ISSUE}" --repo "${GITHUB_REPOSITORY}" --body-file staleness-report.md
