@@ -139,7 +139,7 @@ variable "deploy_helm" {
 }
 
 variable "migration_assistant_version" {
-  description = "Public ECR image tag used when deploy_helm is true, for example 3.4.2. The tag must exist for all Migration Assistant images in public.ecr.aws/opensearchproject/*."
+  description = "Public ECR image tag used when deploy_helm is true: a release later than 3.4.2, which cannot backfill on AKS. The tag must exist for all Migration Assistant images in public.ecr.aws/opensearchproject/*."
   type        = string
   default     = null
 }

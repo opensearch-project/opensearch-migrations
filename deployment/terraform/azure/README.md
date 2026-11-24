@@ -63,10 +63,12 @@ terraform apply \
   -var="location=eastus" \
   -var="stage=dev" \
   -var="deploy_helm=true" \
-  -var="migration_assistant_version=3.4.2"
+  -var="migration_assistant_version=<release>"
 ```
 
-Use an actual published Migration Assistant release tag. Terraform applies
+Use a published Migration Assistant release later than 3.4.2. In 3.4.2 and earlier, the
+migration workflow does not give document backfill pods Workload ID, so the backfill
+cannot read the snapshot from Blob Storage. Terraform applies
 `valuesAks.yaml`, passes the workload identity client ID and the storage account and
 container to the chart, and waits `helm_timeout_seconds` (1500, or 25 minutes) for
 the release. Terraform owns the container it creates, so the chart's container job
