@@ -624,7 +624,12 @@ charts:
 
 
   strimzi-kafka-operator:
-    version: 0.50.1
+    # Strimzi 1.x serves only the kafka.strimzi.io/v1 API and supports Kafka 4.2.x-4.3.x. Keep the
+    # managed Kafka version in orchestrationSpecs (MANAGED_KAFKA_VERSION) and the Strimzi images in
+    # infra/mirror/private-ecr-manifest.yaml in step with this version. Helm never upgrades CRDs, so
+    # the dependency installer migrates and applies this chart's CRDs before upgrading the operator
+    # (see templates/helpers/_strimziCrdUpgrade.tpl).
+    version: 1.3.1
     repository: "https://strimzi.io/charts/"
     values:
       storageType: ephemeral # strimzi is stateless
