@@ -21,7 +21,7 @@
   "dependencies": {
     "@opensearch-migrations/argo-types": "*",
     "@opensearch-migrations/k8s-types": "*",
-    "zod": "^4.4.3"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@kubernetes/client-node": "^2.0.0",
