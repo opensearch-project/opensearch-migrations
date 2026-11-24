@@ -1,0 +1,27 @@
+name: Dependency Staleness Report
+
+# Weekly job summary of the third-party chart and image pins that Dependabot can't read (see
+# .github/scripts/report-stale-pins.sh). Reports only; never opens PRs or changes files.
+on:
+  schedule:
+    - cron: '41 6 * * 1'
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/dependency-staleness-report.yml'
+      - '.github/scripts/report-stale-pins.sh'
+
+permissions:
+  contents: read
+
+jobs:
+  report:
+    name: Check pins against upstream
+    # Scheduled runs only in the upstream repository, not in forks.
+    if: github.event_name != 'schedule' || github.repository == 'opensearch-project/opensearch-migrations'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Look up upstream versions
+        run: .github/scripts/report-stale-pins.sh "$GITHUB_STEP_SUMMARY"
