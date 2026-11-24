@@ -128,6 +128,16 @@ public class DocumentMigrationBootstrap {
                     public CompletionStatus onNoAvailableWorkToBeDone() {
                         return CompletionStatus.NOTHING_DONE;
                     }
+
+                    @Override
+                    public CompletionStatus onNoWorkLeftToAcquire() {
+                        return CompletionStatus.ALL_WORK_DRAINED;
+                    }
+
+                    @Override
+                    public CompletionStatus onLeaseCapReached() {
+                        return CompletionStatus.LEASE_CAP_REACHED;
+                    }
                 }, context::createCloseContext, wi -> metricsReporter.apply(wi, latestProgress.get()));
             }
         } finally {

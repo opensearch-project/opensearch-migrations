@@ -149,8 +149,11 @@ function specPropertiesFor(resource: ResourceProjection): Record<string, YamlVal
 }
 
 function statusSchemaFor(resource: ResourceProjection): Record<string, YamlValue> {
+    // "Failed" is a terminal outcome distinct from "Error" (infrastructure fault): the RFS
+    // monitor commits it when incomplete shards exceed memoryScaling.maxMemory with nothing in
+    // progress, and workflow waiters treat it as a failure instead of waiting forever.
     const readyPhases = resource.lifecycle === "terminal"
-        ? ["Created", "Pending", "Completed", "Deleting", "Error"]
+        ? ["Created", "Pending", "Completed", "Failed", "Deleting", "Error"]
         : resource.lifecycle === "approvalGate"
             ? ["Created", "Pending", "Approved", "Error"]
             : ["Created", "Pending", "Ready", "Deleting", "Error"];

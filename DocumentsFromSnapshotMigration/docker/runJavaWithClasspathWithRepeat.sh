@@ -11,8 +11,12 @@ cleanup() {
     if [ -n "$JAVA_PID" ]; then
         echo "Sending SIGTERM to Java process $JAVA_PID"
         kill -TERM "$JAVA_PID"
-        # Wait for Java process to terminate gracefully (up to 30 seconds)
-        TIMEOUT=30
+        # Wait for the Java process to terminate gracefully. Kept just under the pod's
+        # terminationGracePeriodSeconds (390s when memory-tier scaling raises it) so the clean
+        # shutdown path — whose worst case is the 5-minute failed-document-stream flush — can
+        # finish before anything force-kills it; a bare-137 SIGKILL from this fallback is
+        # deliberately NOT OOM evidence for the crash witness.
+        TIMEOUT=360
         while kill -0 "$JAVA_PID" 2>/dev/null && [ $TIMEOUT -gt 0 ]; do
             sleep 1
             TIMEOUT=$((TIMEOUT-1))

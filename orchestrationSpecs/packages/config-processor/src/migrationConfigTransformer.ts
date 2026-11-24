@@ -19,6 +19,7 @@ import {
     TRANSFORM_CONTEXT_VALUE,
     DEPLOYMENT_DEFAULTS_CONFIG,
     FAILED_DOCUMENT_STREAM_CONFIG,
+    parseK8sQuantity,
 } from '@opensearch-migrations/schemas';
 import {StreamSchemaTransformer} from './streamSchemaTransformer';
 import { z } from 'zod';
@@ -511,6 +512,54 @@ export function resolveFailedDocumentStreamS3(
     };
 }
 
+/**
+ * Precompute the memory-tier table for memory-tier scaling: [start, start×f, start×f², …] with the
+ * last entry clamped to exactly maxMemory, where start is the (already defaulted) RFS container
+ * memory. Computed here so neither Argo expressions nor bash ever do quantity arithmetic; workers
+ * and the fleet monitor only ever see the resolved per-tier quantities. Returns {} when
+ * memoryScaling is absent so the feature-off ARGO config is unchanged byte for byte.
+ */
+export function resolveMemoryScalingTierTable(
+    memoryScaling: { growthFactor?: number; maxMemory: string; escalationApproval?: "auto" | "manual" } | undefined,
+    resources: { requests?: { memory?: string }; limits?: { memory?: string } } | undefined
+): Record<string, unknown> {
+    if (memoryScaling === undefined) {
+        return {};
+    }
+    const startQuantity = resources?.requests?.memory;
+    const limitQuantity = resources?.limits?.memory;
+    if (!startQuantity) {
+        throw new Error("memoryScaling requires resources.requests.memory as the tier-0 starting size.");
+    }
+    const startBytes = parseK8sQuantity(startQuantity);
+    if (limitQuantity !== undefined && parseK8sQuantity(limitQuantity) !== startBytes) {
+        throw new Error(
+            `memoryScaling requires resources requests.memory (${startQuantity}) == limits.memory `
+            + `(${limitQuantity}); each tier sets both to the same tier value.`);
+    }
+    const maxBytes = parseK8sQuantity(memoryScaling.maxMemory);
+    if (maxBytes < startBytes) {
+        throw new Error(
+            `memoryScaling.maxMemory (${memoryScaling.maxMemory}) must be at least the starting size `
+            + `resources.requests.memory (${startQuantity}).`);
+    }
+    const growthFactor = memoryScaling.growthFactor ?? 2;
+    const MEBI = 1024 * 1024;
+    // Tier 0 keeps the user's quantity verbatim so the tier-0 fleet matches the plain (feature-off)
+    // rendering exactly; intermediate tiers round up to whole Mi; the last entry is EXACTLY maxMemory.
+    const tierTable: string[] = [startQuantity];
+    for (let bytes = startBytes * growthFactor; bytes < maxBytes; bytes *= growthFactor) {
+        tierTable.push(`${Math.ceil(bytes / MEBI)}Mi`);
+    }
+    if (maxBytes > startBytes) {
+        tierTable.push(memoryScaling.maxMemory);
+    }
+    return {
+        memoryScalingTierTable: tierTable,
+        memoryScalingEscalationApproval: memoryScaling.escalationApproval ?? "auto",
+    };
+}
+
 function prepareDocumentBackfillConfig(
     config: z.infer<typeof USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG>["documentBackfillConfig"],
     repoConfig: { awsRegion?: string; endpoint?: string } | undefined,
@@ -522,7 +571,7 @@ function prepareDocumentBackfillConfig(
         return undefined;
     }
 
-    const {documentTransforms, failedDocumentStream, ...rest} = config;
+    const {documentTransforms, failedDocumentStream, memoryScaling, ...rest} = config;
     const fileSourceRegistry = new FileSourceRegistry();
     const generatedConfig = lowerTransformPipeline(documentTransforms, fileSourceRegistry);
     return ARGO_RFS_OPTIONS.parse({
@@ -533,6 +582,7 @@ function prepareDocumentBackfillConfig(
             failedRequests: rest.logLevels?.failedRequests ?? "warn",
         },
         ...resolveFailedDocumentStreamS3(failedDocumentStream, repoConfig, deploymentDefaults),
+        ...resolveMemoryScalingTierTable(memoryScaling, rest.resources),
         skipApproval: rest.skipApproval ?? skipApprovals,
         ...fileSourceRegistry.resolvedFields,
         ...collectionRoutingFields(collectionRouting),

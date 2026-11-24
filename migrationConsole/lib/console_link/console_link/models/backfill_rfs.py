@@ -40,6 +40,19 @@ K8S_RFS_SCHEMA = {
     }
 }
 
+# Present only when documentBackfillConfig.memoryScaling is configured on the workflow side.
+# tiers[n] is tier n's memory quantity; the deployment for tier n is <deployment_name>-t<n>.
+MEMORY_SCALING_SCHEMA = {
+    "type": "dict",
+    "required": False,
+    "schema": {
+        "tiers": {"type": "list", "required": True, "schema": {"type": "string"}},
+        "max_total_pods": {"type": "integer", "required": True, "min": 1},
+        "escalation_approval": {"type": "string", "required": False,
+                                "allowed": ["auto", "manual"]},
+    }
+}
+
 RFS_BACKFILL_SCHEMA = {
     "reindex_from_snapshot": {
         "type": "dict",
@@ -50,7 +63,8 @@ RFS_BACKFILL_SCHEMA = {
             "snapshot_repo": {"type": "string", "required": False},
             "session_name": {"type": "string", "required": False},
             "backfill_session_name": {"type": "string", "required": False},
-            "scale": {"type": "integer", "required": False, "min": 1}
+            "scale": {"type": "integer", "required": False, "min": 1},
+            "memory_scaling": MEMORY_SCALING_SCHEMA
         },
         "check_with": contains_one_of({'docker', 'k8s'}),
     }
@@ -103,6 +117,23 @@ class DockerRFSBackfill(RFSBackfill):
         raise NotImplementedError()
 
 
+class MemoryScalingBackfillStatus(BackfillOverallStatus):
+    """BackfillOverallStatus plus the memory-tier-scaling fields.
+
+    Returned ONLY when `memory_scaling` is configured, so the feature-off JSON output of
+    `console --json backfill status --deep-check` stays byte-identical (the base model emits
+    no new keys). total = shard_complete + shard_in_progress + shard_waiting +
+    shard_awaiting_memory; shard_waiting keeps its exact pre-feature meaning
+    (eligible-and-unclaimed) for existing consumers.
+    """
+    shard_awaiting_memory: Optional[int] = None
+    workers: Optional[Dict] = None
+    memory_scaling: Optional[Dict] = None
+    # Terminal-Failed per-index rollup: {"succeeded": [...], "incomplete": [...]}; null otherwise.
+    indices: Optional[Dict] = None
+    message: Optional[str] = None
+
+
 class RfsWorkersInProgress(Exception):
     def __init__(self):
         super().__init__("RFS Workers are still in progress")
@@ -124,6 +155,17 @@ class K8sRFSBackfill(RFSBackfill):
         self.namespace = self.k8s_config["namespace"]
         self.deployment_name = self.k8s_config["deployment_name"]
         self.kubectl_runner = KubectlRunner(namespace=self.namespace, deployment_name=self.deployment_name)
+        # Present only when memory-tier scaling is configured; see MEMORY_SCALING_SCHEMA.
+        self.memory_scaling = self.config["reindex_from_snapshot"].get("memory_scaling")
+
+    def _retrieve_tier_deployment_statuses(self) -> Dict[int, Optional[DeploymentStatus]]:
+        """Per-tier DeploymentStatus for <deployment_name>-t<n>; None where the tier has no fleet."""
+        statuses: Dict[int, Optional[DeploymentStatus]] = {}
+        for tier in range(len(self.memory_scaling["tiers"])):
+            runner = KubectlRunner(namespace=self.namespace,
+                                   deployment_name=f"{self.deployment_name}-t{tier}")
+            statuses[tier] = runner.retrieve_deployment_status()
+        return statuses
 
     def start(self, *args, **kwargs) -> CommandResult:
         logger.info(f"Starting RFS backfill by setting desired count to {self.default_scale} instances")
@@ -183,16 +225,32 @@ class K8sRFSBackfill(RFSBackfill):
         return CommandResult(True, (BackfillStatus.STOPPED, status_str))
 
     def build_backfill_status(self, has_failed_documents: Optional[bool] = None) -> BackfillOverallStatus:
-        deployment_status = self.kubectl_runner.retrieve_deployment_status()
-        active_workers = True  # Assume there are active workers if we cannot lookup the deployment status
-        if deployment_status is not None:
-            active_workers = deployment_status.desired != 0
         # Get backfill_session_name from config
         session_name = self.config["reindex_from_snapshot"].get("backfill_session_name", "")
-        return get_detailed_status_obj(target_cluster=self.target_cluster,
+        if not self.memory_scaling:
+            deployment_status = self.kubectl_runner.retrieve_deployment_status()
+            active_workers = True  # Assume there are active workers if we cannot lookup the deployment status
+            if deployment_status is not None:
+                active_workers = deployment_status.desired != 0
+            return get_detailed_status_obj(target_cluster=self.target_cluster,
+                                           session_name=session_name,
+                                           active_workers=active_workers,
+                                           has_failed_documents=has_failed_documents)
+
+        # Memory-tier scaling: the runtime is a SET of per-tier deployments selected by name
+        # suffix -t<n>; "active" means any tier has desired pods.
+        tier_statuses = self._retrieve_tier_deployment_statuses()
+        active_workers = any(s is not None and s.desired != 0 for s in tier_statuses.values())
+        base = get_detailed_status_obj(target_cluster=self.target_cluster,
                                        session_name=session_name,
                                        active_workers=active_workers,
                                        has_failed_documents=has_failed_documents)
+        return build_memory_scaling_status(
+            base=base,
+            target_cluster=self.target_cluster,
+            session_name=session_name,
+            memory_scaling_config=self.memory_scaling,
+            tier_statuses=tier_statuses)
 
 
 def get_detailed_status(target_cluster: Cluster, session_name: str,
@@ -456,6 +514,273 @@ def generate_progress_queries():
 
 def generate_shard_setup_query():
     return {"query": {"match": {"_id": "shard_setup"}}}
+
+
+# ── Memory-tier scaling (all of this is reached only when memory_scaling is configured) ──────────
+
+EXTRACT_SHARD_NUMBER_SCRIPT = (
+    "def id = doc['_id'].value;"
+    "int a = id.indexOf('__');"
+    "int b = id.indexOf('__', a + 2);"
+    "if (a > -1 && b > -1) { return id.substring(a + 2, b); }"
+    "return id;"
+)
+
+
+def generate_awaiting_memory_query(max_active_tier: int):
+    """Incomplete, unclaimed items whose requiredMemoryTier exceeds every active fleet's tier.
+
+    A missing requiredMemoryTier IS tier 0, so when any fleet is active (max_active_tier >= 0)
+    the plain range query is correct: missing-field docs never match a range. With no active
+    fleet at all, every unclaimed item is awaiting a fleet.
+    """
+    current_epoch_seconds = int(datetime.now(timezone.utc).timestamp())
+    must = [{"range": {"expiration": {"lt": current_epoch_seconds}}}]
+    if max_active_tier >= 0:
+        must.append({"range": {"requiredMemoryTier": {"gt": max_active_tier}}})
+    return with_uniques({"bool": {
+        "must": must,
+        "must_not": [{"exists": {"field": "completedAt"}},
+                     {"match": {"_id": "shard_setup"}}],
+    }})
+
+
+def generate_runnable_incomplete_query(max_tier: int):
+    """Incomplete items acquirable by SOME tier of the configured ladder (tier <= max_tier or
+    the field missing). Zero of these, with incomplete work remaining and nothing in progress,
+    is the terminal-Failed condition: the leftover shards exceed maxMemory."""
+    return with_uniques({"bool": {
+        "must_not": [{"exists": {"field": "completedAt"}},
+                     {"match": {"_id": "shard_setup"}}],
+        "should": [
+            {"range": {"requiredMemoryTier": {"lte": max_tier}}},
+            {"bool": {"must_not": [{"exists": {"field": "requiredMemoryTier"}}]}},
+        ],
+        "minimum_should_match": 1,
+    }})
+
+
+def _index_name_of_hit(hit: dict) -> str:
+    source = hit.get("_source") or {}
+    if source.get("indexName"):
+        return source["indexName"]
+    # Successors created before the plaintext indexName field decode from the base64url _id.
+    import base64
+    encoded = hit.get("_id", "").split("__")[0]
+    try:
+        padded = encoded + "=" * (-len(encoded) % 4)
+        return base64.urlsafe_b64decode(padded).decode("utf-8")
+    except Exception:  # noqa: BLE001 - fall back to the raw id segment
+        return encoded
+
+
+def _shard_number_of_hit(hit: dict) -> Optional[int]:
+    parts = hit.get("_id", "").split("__")
+    try:
+        return int(parts[1])
+    except (IndexError, ValueError):
+        return None
+
+
+def compute_failed_rollup(target_cluster: Cluster, index_name: str, max_tier: int) -> Optional[dict]:
+    """The per-index rollup for a terminally-Failed migration, or None if not terminal.
+
+    Terminal means: incomplete work remains, none of it is acquirable at any configured tier
+    (every leftover item's requiredMemoryTier exceeds the ladder), and nothing is in progress
+    (no live lease could still complete or re-tier an item).
+    """
+    current_epoch_seconds = int(datetime.now(timezone.utc).timestamp())
+    runnable = parse_query_response(generate_runnable_incomplete_query(max_tier),
+                                    target_cluster, index_name, "runnable incomplete")
+    if runnable is None:
+        # Can't tell — never declare Failed on a failed query.
+        return None
+    incomplete_hits = _fetch_hits(target_cluster, index_name, {
+        "size": 1000,
+        "_source": ["indexName", "requiredMemoryTier", "expiration"],
+        "query": {"bool": {
+            "must_not": [{"exists": {"field": "completedAt"}},
+                         {"match": {"_id": "shard_setup"}}],
+        }},
+    })
+    in_progress_hits = [h for h in incomplete_hits
+                        if (h.get("_source") or {}).get("expiration", 0) >= current_epoch_seconds]
+    if not incomplete_hits or in_progress_hits or runnable > 0:
+        return None
+
+    incomplete_by_index: Dict[str, dict] = {}
+    for hit in incomplete_hits:
+        index = _index_name_of_hit(hit)
+        shard = _shard_number_of_hit(hit)
+        entry = incomplete_by_index.setdefault(index, {"shards": set(), "exceeding": set()})
+        if shard is not None:
+            entry["shards"].add(shard)
+            tier = (hit.get("_source") or {}).get("requiredMemoryTier", 0) or 0
+            if tier > max_tier:
+                entry["exceeding"].add(shard)
+
+    completed_shards = _completed_shard_counts(target_cluster, index_name)
+    succeeded = sorted(set(completed_shards) - set(incomplete_by_index))
+    incomplete = []
+    for index in sorted(incomplete_by_index):
+        entry = incomplete_by_index[index]
+        shards_complete = completed_shards.get(index, 0)
+        incomplete.append({
+            "index": index,
+            "shards_complete": shards_complete,
+            "shards_total": shards_complete + len(entry["shards"]),
+            "shards_exceeding_max_memory": sorted(entry["exceeding"]),
+        })
+    return {"succeeded": succeeded, "incomplete": incomplete}
+
+
+def _fetch_hits(target_cluster: Cluster, index_name: str, body: dict) -> list:
+    try:
+        response = target_cluster.call_api(f"/{index_name}/_search", method=HttpMethod.POST,
+                                           data=json.dumps(body),
+                                           headers={"Content-Type": "application/json"})
+        return response.json().get("hits", {}).get("hits", [])
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"Failed to fetch hits for rollup: {e}")
+        return []
+
+
+def _completed_shard_counts(target_cluster: Cluster, index_name: str) -> Dict[str, int]:
+    """Distinct completed shards per index. Groups on the dynamic indexName.keyword mapping;
+    completed docs predating the plaintext field (pre-3.2 sessions) fall into the missing
+    bucket and are resolved by decoding their ids."""
+    body = {
+        "size": 0,
+        "query": {"bool": {"must": [{"exists": {"field": "completedAt"}}],
+                           "must_not": [{"match": {"_id": "shard_setup"}}]}},
+        "aggs": {"byIndex": {
+            "terms": {"field": "indexName.keyword", "size": 10000, "missing": "__missing__"},
+            "aggs": {"shards": {"cardinality": {"script": {
+                "lang": "painless", "source": EXTRACT_SHARD_NUMBER_SCRIPT}}}},
+        }},
+    }
+    counts: Dict[str, int] = {}
+    missing_present = False
+    try:
+        response = target_cluster.call_api(f"/{index_name}/_search", method=HttpMethod.POST,
+                                           data=json.dumps(body),
+                                           headers={"Content-Type": "application/json"})
+        for bucket in response.json().get("aggregations", {}).get("byIndex", {}).get("buckets", []):
+            if bucket["key"] == "__missing__":
+                missing_present = True
+                continue
+            counts[bucket["key"]] = bucket["shards"]["value"]
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"Completed-shard aggregation failed: {e}")
+        return counts
+    if missing_present:
+        hits = _fetch_hits(target_cluster, index_name, {
+            "size": 1000,
+            "_source": False,
+            "query": {"bool": {"must": [{"exists": {"field": "completedAt"}}],
+                               "must_not": [{"exists": {"field": "indexName"}},
+                                            {"match": {"_id": "shard_setup"}}]}},
+        })
+        decoded: Dict[str, set] = {}
+        for hit in hits:
+            shard = _shard_number_of_hit(hit)
+            if shard is not None:
+                decoded.setdefault(_index_name_of_hit(hit), set()).add(shard)
+        for index, shards in decoded.items():
+            counts[index] = max(counts.get(index, 0), len(shards))
+    return counts
+
+
+def count_busy_pods_by_tier(target_cluster: Cluster, index_name: str) -> Dict[int, int]:
+    """Distinct pods named in live leases, grouped by requiredMemoryTier (missing == 0)."""
+    current_epoch_seconds = int(datetime.now(timezone.utc).timestamp())
+    hits = _fetch_hits(target_cluster, index_name, {
+        "size": 1000,
+        "_source": ["leaseHolderId", "requiredMemoryTier"],
+        "query": {"bool": {
+            "must": [{"range": {"expiration": {"gte": current_epoch_seconds}}}],
+            "must_not": [{"exists": {"field": "completedAt"}}],
+        }},
+    })
+    pods_by_tier: Dict[int, set] = {}
+    for hit in hits:
+        source = hit.get("_source") or {}
+        holder = source.get("leaseHolderId")
+        if not holder:
+            continue
+        tier = int(source.get("requiredMemoryTier", 0) or 0)
+        pods_by_tier.setdefault(tier, set()).add(holder.rsplit("_", 1)[0])
+    return {tier: len(pods) for tier, pods in pods_by_tier.items()}
+
+
+def build_memory_scaling_status(base: BackfillOverallStatus,
+                                target_cluster: Cluster,
+                                session_name: str,
+                                memory_scaling_config: dict,
+                                tier_statuses: Dict[int, Optional[DeploymentStatus]]
+                                ) -> "MemoryScalingBackfillStatus":
+    """Overlay the memory-tier fields onto the base status (feature-on only)."""
+    index_name = WORKING_STATE_INDEX + (("_" + session_name) if session_name else "")
+    tiers = memory_scaling_config["tiers"]
+    max_tier = len(tiers) - 1
+    active_tiers = [t for t, s in tier_statuses.items() if s is not None and s.desired > 0]
+    max_active_tier = max(active_tiers) if active_tiers else -1
+
+    awaiting = parse_query_response(generate_awaiting_memory_query(max_active_tier),
+                                    target_cluster, index_name, "awaiting memory") or 0
+    shard_waiting = base.shard_waiting
+    if shard_waiting is not None:
+        shard_waiting = max(0, shard_waiting - awaiting)
+
+    workers = {"desired": 0, "running": 0, "pending": 0}
+    for status in tier_statuses.values():
+        if status is None:
+            continue
+        workers["desired"] += status.desired or 0
+        workers["running"] += status.running or 0
+        workers["pending"] += status.pending or 0
+
+    busy_by_tier = count_busy_pods_by_tier(target_cluster, index_name)
+    active = []
+    for tier, status in sorted(tier_statuses.items()):
+        if status is None:
+            continue
+        active.append({"tier": tier, "replicas": status.desired or 0,
+                       "busy": busy_by_tier.get(tier, 0)})
+
+    status_value = base.status
+    message = None
+    rollup = None
+    if base.status not in (StepStateWithPause.COMPLETED, StepStateWithPause.COMPLETED_WITH_ERRORS):
+        rollup = compute_failed_rollup(target_cluster, index_name, max_tier)
+        if rollup is not None:
+            status_value = StepStateWithPause.FAILED
+            exceeding = sum(len(entry["shards_exceeding_max_memory"])
+                            for entry in rollup["incomplete"])
+            message = (f"{exceeding} shards still exceed maxMemory ({tiers[-1]}) "
+                       f"at tier {max_tier}")
+
+    return MemoryScalingBackfillStatus(
+        status=status_value,
+        percentage_completed=base.percentage_completed,
+        eta_ms=base.eta_ms,
+        started=base.started,
+        finished=base.finished,
+        shard_total=base.shard_total,
+        shard_complete=base.shard_complete,
+        shard_in_progress=base.shard_in_progress,
+        shard_waiting=shard_waiting,
+        shard_awaiting_memory=awaiting,
+        workers=workers,
+        memory_scaling={
+            "tiers": tiers,
+            "max_total_pods": memory_scaling_config.get("max_total_pods"),
+            "escalation_approval": memory_scaling_config.get("escalation_approval", "auto"),
+            "active": active,
+        },
+        indices=rollup,
+        message=message,
+    )
 
 
 def perform_archive(target_cluster: Cluster,

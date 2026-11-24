@@ -2413,6 +2413,11 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       ],
                       "description": "Kubernetes resource limits and requests for the RFS container. Partial overrides are deep-merged with the built-in defaults. By default, limits equal requests, giving the pod 'Guaranteed' QoS (least likely to be evicted). Setting requests lower than limits results in 'Burstable' QoS. Ephemeral storage is auto-calculated from maxShardSizeBytes if not specified."
                     },
+                    "maxTotalPods": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "description": "Fleet-wide cap on RFS worker pods ACROSS ALL memory tiers (a maximum, not a constant). Pod count is the throughput budget: per-pod load on the target is memory-independent. Only meaningful with memoryScaling; defaults to podReplicas when unset."
+                    },
                     "indexAllowlist": {
                       "type": "array",
                       "items": {
@@ -2545,6 +2550,21 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "positionGapStopword": {
                       "type": "string",
                       "default": "a"
+                    },
+                    "memoryScalingTierTable": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Resolved per-tier memory quantities [start, start×growthFactor, …], last entry clamped to exactly memoryScaling.maxMemory. Index == tier number."
+                    },
+                    "memoryScalingEscalationApproval": {
+                      "type": "string",
+                      "enum": [
+                        "auto",
+                        "manual"
+                      ],
+                      "description": "Resolved memoryScaling.escalationApproval."
                     },
                     "failedDocumentStreamS3Prefix": {
                       "type": "string",
@@ -5200,6 +5220,40 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "requests"
                         ],
                         "description": "Kubernetes resource limits and requests for the RFS container. Partial overrides are deep-merged with the built-in defaults. By default, limits equal requests, giving the pod 'Guaranteed' QoS (least likely to be evicted). Setting requests lower than limits results in 'Burstable' QoS. Ephemeral storage is auto-calculated from maxShardSizeBytes if not specified."
+                      },
+                      "memoryScaling": {
+                        "type": "object",
+                        "properties": {
+                          "growthFactor": {
+                            "type": "number",
+                            "minimum": 1.1,
+                            "default": 2,
+                            "description": "[Expert] Multiplier between consecutive memory tiers (at least 1.1). Tier n's memory is resources.requests.memory × growthFactor^n, with the last tier clamped to exactly maxMemory."
+                          },
+                          "maxMemory": {
+                            "type": "string",
+                            "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
+                            "description": "Upper bound on per-worker memory. Shards that OOM are retried on fleets with geometrically more memory up to this value; if a shard still cannot fit here, the migration ends Failed with a per-index report. Must be at least resources.requests.memory."
+                          },
+                          "escalationApproval": {
+                            "type": "string",
+                            "enum": [
+                              "auto",
+                              "manual"
+                            ],
+                            "default": "auto",
+                            "description": "Whether activating each new (higher-memory, costlier) tier requires a manual approval. While an approval is pending the new tier's lease cap stays 0 and the lower tiers keep the full pod budget."
+                          }
+                        },
+                        "required": [
+                          "maxMemory"
+                        ],
+                        "description": "Memory-tier scaling for shards that out-size the worker fleet: a worker killed by an out-of-memory condition has its shard escalated and re-run on a fleet with more memory, growing geometrically from resources.requests.memory by growthFactor up to maxMemory. Absent means the feature is entirely off and nothing about the backfill changes. Requires resources requests.memory == limits.memory (the default)."
+                      },
+                      "maxTotalPods": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "Fleet-wide cap on RFS worker pods ACROSS ALL memory tiers (a maximum, not a constant). Pod count is the throughput budget: per-pod load on the target is memory-independent. Only meaningful with memoryScaling; defaults to podReplicas when unset."
                       },
                       "indexAllowlist": {
                         "type": "array",

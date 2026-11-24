@@ -69,11 +69,12 @@ public class ProcessLifecycleTest extends SourceTestBase {
         String coordinatorUrl;
     }
 
-    // The following test expects to get an exit code of 0 (TBD_GOES_HERE) at least two times, and then an
-    // exit code of 3 (NO_WORK_LEFT) within a maximum of 21 iterations.
+    // The following test expects to get an exit code of 0 (TBD_GOES_HERE) at least two times, and then
+    // the NO_WORK_LEFT exit code (6 — renumbered from 3, which is now reserved for the JVM's
+    // ExitOnOutOfMemoryError) within a maximum of 21 iterations.
     @Test
-    public void testExitsZeroThenThreeForSimpleSetup() throws Exception {
-        testProcess(3,
+    public void testExitsZeroThenNoWorkLeftForSimpleSetup() throws Exception {
+        testProcess(RfsMigrateDocuments.NO_WORK_LEFT_EXIT_CODE,
             d -> {
                 var firstExitCode =
                     runProcessAgainstToxicTarget(d.tempDirSnapshot, d.tempDirLucene, d.proxyContainer, FailHow.NEVER);

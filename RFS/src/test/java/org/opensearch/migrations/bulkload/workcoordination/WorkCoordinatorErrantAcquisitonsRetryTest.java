@@ -205,11 +205,22 @@ public class WorkCoordinatorErrantAcquisitonsRetryTest {
         int searches;
         int refreshes;
         int unknowns;
+        int censusChecks;
+        int controlReads;
 
         void reset() {
-            updates = searches = refreshes = unknowns = 0;
+            updates = searches = refreshes = unknowns = censusChecks = controlReads = 0;
         }
     }
+
+    // The acquisition precheck's census response: incomplete work exists and tier 0 has waiting
+    // items, so the precheck proceeds to the update_by_query under test.
+    private static final String CENSUS_RESPONSE_BODY = "{\n"
+        + "  \"hits\": { \"total\": { \"value\": 3, \"relation\": \"eq\" } },\n"
+        + "  \"aggregations\": { \"byTier\": { \"buckets\": [\n"
+        + "    { \"key\": 0, \"doc_count\": 3, \"waiting\": { \"doc_count\": 3 } }\n"
+        + "  ] } }\n"
+        + "}";
 
     @NonNull
     private static Function<PathCounts, Function<HttpRequest, SimpleHttpResponse>>
@@ -237,7 +248,20 @@ public class WorkCoordinatorErrantAcquisitonsRetryTest {
                 ++pathToCountMap.updates;
                 return makeResponse(200, "OK",
                     UPDATE_BY_QUERY_RESPONSE_BODY.getBytes(StandardCharsets.UTF_8));
+            } else if (uriPath.startsWith(
+                    "/" + DUMMY_INDEX_NAME + "/_doc/" + OpenSearchWorkCoordinator.SHARD_SETUP_DOC_ID)) {
+                // The precheck's per-tier lease-cap read (maxLeases on the shard_setup
+                // sentinel); an absent sentinel means no cap.
+                ++pathToCountMap.controlReads;
+                return makeResponse(404, "Not Found", "{}".getBytes(StandardCharsets.UTF_8));
             } else if (uriPath.startsWith("/" + DUMMY_INDEX_NAME + "/_search")) {
+                // The acquisition precheck runs one census search before the update_by_query;
+                // answer it with waiting tier-0 work so the code under test is reached.  Searches
+                // after the update are the assigned-work lookups the tests count.
+                if (pathToCountMap.updates == 0) {
+                    ++pathToCountMap.censusChecks;
+                    return makeResponse(200, "OK", CENSUS_RESPONSE_BODY.getBytes(StandardCharsets.UTF_8));
+                }
                 ++pathToCountMap.searches;
                 return searchResponse;
             } else {

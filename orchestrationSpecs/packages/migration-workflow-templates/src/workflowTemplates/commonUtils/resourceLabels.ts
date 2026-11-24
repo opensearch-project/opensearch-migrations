@@ -23,6 +23,14 @@ export type Component = typeof COMPONENTS[keyof typeof COMPONENTS];
 // zone-spread constraint uses them as matchLabelKeys. Selectors can't be changed in place.
 export const WORKLOAD_SELECTOR_LABEL_KEYS = [COMPONENT_LABEL, MIGRATION_RESOURCE_UID_LABEL];
 
+// The RFS memory tier a fleet runs at. When memory-tier scaling is enabled, each tier gets its
+// own Deployment and this label joins the IMMUTABLE spec.selector (plus the pod-template labels
+// and each tier PDB's selector): component + UID without the tier selects the whole RFS set,
+// adding the tier selects one fleet. Copying the two-label selector across tier Deployments
+// would give multiple controllers overlapping selectors, which Kubernetes warns fight over
+// each other's pods.
+export const RFS_MEMORY_TIER_LABEL = "migrations.opensearch.org/rfs-memory-tier";
+
 export function workloadSelectorLabels(
     component: Component,
     ownerUid: AllowLiteralOrExpression<string>,

@@ -38,6 +38,7 @@ import {
     WorkflowBuilder
 } from '@opensearch-migrations/argo-workflow-builders';
 import {DocumentBulkLoad} from "./documentBulkLoad";
+import {RfsBackfill} from "./rfsBackfill";
 import {MetadataMigration} from "./metadataMigration";
 import {CreateOrGetSnapshot} from "./createOrGetSnapshot";
 import {ResourceManagement} from "./resourceManagement";
@@ -490,7 +491,7 @@ export const FullMigration = WorkflowBuilder.create({
                     }),
                 {when: {templateExp: expr.and(hasBackfill, expr.isEmpty(b.inputs.recordedRfsSessionName))}}
             )
-            .addStep("bulkLoadDocuments", DocumentBulkLoad, "setupAndRunBulkLoad", c =>
+            .addStep("bulkLoadDocuments", RfsBackfill, "setupAndRunRfsBackfill", c =>
                     c.register({
                         ...(selectInputsForRegister(b, c)),
                         sessionName,

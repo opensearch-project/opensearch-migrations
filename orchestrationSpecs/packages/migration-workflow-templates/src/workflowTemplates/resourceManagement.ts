@@ -1576,7 +1576,10 @@ export const ResourceManagement = WorkflowBuilder.create({
                         expr.literal(" == "),
                         b.inputs.configChecksum
                     ),
-                    failureCondition: "status.phase == Error"
+                    // Failed is terminal everywhere: when the monitor commits Failed (shards
+                    // exceed memoryScaling.maxMemory), the waiting workflow step must fail and
+                    // propagate rather than wait forever.
+                    failureCondition: "status.phase in (Error, Failed)"
                 }
             })
             .addRetryParameters(K8S_INDEFINITE_RESOURCE_WAIT_RETRY_STRATEGY)

@@ -75,7 +75,14 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
 
     public static final String SCRIPT_VERSION_TEMPLATE = "{SCRIPT_VERSION}";
     // 3.1 checkpoints identify the next source position, avoiding overlapping work-item metrics.
-    public static final String SCRIPT_VERSION = "3.1";
+    // 3.2 adds memory-tier escalation fields (requiredMemoryTier, leaseAcquiredAt, leaseAbandoned).
+    // Every script rejects documents at any other version outright: clients from a different
+    // deployment can never operate on this session's documents.
+    public static final String SCRIPT_VERSION = "3.2";
+    // Memory-tier escalation fields. Absent means tier 0 / not abandoned.
+    public static final String REQUIRED_MEMORY_TIER_FIELD_NAME = "requiredMemoryTier";
+    public static final String LEASE_ACQUIRED_AT_FIELD_NAME = "leaseAcquiredAt";
+    public static final String LEASE_ABANDONED_FIELD_NAME = "leaseAbandoned";
     public static final String COMMITTED_METRICS_FIELD_NAME = "committed_metrics";
     public static final String WORKER_ID_TEMPLATE = "{WORKER_ID}";
     public static final String CLIENT_TIMESTAMP_TEMPLATE = "{CLIENT_TIMESTAMP}";
@@ -125,6 +132,24 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
         "          ctx._source.acquisitionLeaseExponent = leaseExponent;"
             + "          ctx._source.nextAcquisitionLeaseExponent = leaseCapped"
             + "              ? leaseExponent : leaseExponent + 1;";
+    /**
+     * Shared painless guard: outright reject any document whose scriptVersion differs from this
+     * client's.  The version exists only to keep old clients off a newer session's documents
+     * (and vice versa); there is no cross-version document support.
+     */
+    private static final String VERSION_CHECK_SCRIPT =
+        "      if (ctx._source.scriptVersion != \\\"" + SCRIPT_VERSION_TEMPLATE + "\\\") {"
+            + "        throw new IllegalArgumentException(\\\"scriptVersion mismatch.  Not all participants are using the same script: sourceVersion=\\\" + ctx._source.scriptVersion);"
+            + "      } ";
+    /**
+     * Fields written on every successful acquisition: when the lease was taken (used by the
+     * dirty-lease sweep to attribute crash verdicts to the right lease) and the atomic clear of
+     * {@link #LEASE_ABANDONED_FIELD_NAME} (a sticky flag would permanently mask later hard
+     * crashes on the same item).
+     */
+    private static final String RECORD_ACQUISITION_SCRIPT =
+        "          ctx._source." + LEASE_ACQUIRED_AT_FIELD_NAME + " = params.clientTimestamp;"
+            + "          ctx._source.remove(\\\"" + LEASE_ABANDONED_FIELD_NAME + "\\\");";
     public static final String CLOCK_DEVIATION_SECONDS_THRESHOLD_TEMPLATE = "{CLOCK_DEVIATION_SECONDS_THRESHOLD}";
     public static final String OLD_EXPIRATION_THRESHOLD_TEMPLATE = "{OLD_EXPIRATION_THRESHOLD}";
     public static final String SUCCESSOR_WORK_ITEM_IDS_TEMPLATE = "{SUCCESSOR_WORK_ITEM_IDS}";
@@ -139,6 +164,14 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
     public static final String SOURCE_FIELD_NAME = "_source";
     public static final String SUCCESSOR_ITEMS_FIELD_NAME = "successor_items";
     public static final String SUCCESSOR_ITEM_DELIMITER = ",";
+    /**
+     * The shard-setup sentinel work item (see ShardWorkPreparer).  Besides gating setup, it
+     * carries the monitor-published per-tier lease caps ({@link #MAX_LEASES_FIELD_NAME}): every
+     * status/work query already excludes this document, so the caps need no index of their own.
+     */
+    public static final String SHARD_SETUP_DOC_ID = "shard_setup";
+    /** Field on the shard_setup sentinel holding {"<tier>": <maxLeases>} entries. */
+    public static final String MAX_LEASES_FIELD_NAME = "maxLeases";
 
     public static final int CREATED_RESPONSE_CODE = 201;
     public static final int CONFLICT_RESPONSE_CODE = 409;
@@ -159,6 +192,45 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
         + "        ]"
         + "      }"
         + "    }";
+
+    /**
+     * Exact-tier matching clause for acquisition queries.  Tier 0 must treat a missing
+     * {@link #REQUIRED_MEMORY_TIER_FIELD_NAME} as tier 0: a bare {@code term == 0} clause matches
+     * nothing on documents that never gained the field (all initially-created items), which would
+     * make the entire initial workload unacquirable.  Tiers above 0 use the plain term clause.
+     */
+    static String tierMatchClauseJson(int workerTier) {
+        if (workerTier == 0) {
+            return "{ \"bool\": { \"should\": ["
+                + "{ \"term\": { \"" + REQUIRED_MEMORY_TIER_FIELD_NAME + "\": 0 } },"
+                + "{ \"bool\": { \"must_not\": ["
+                + "  { \"exists\": { \"field\": \"" + REQUIRED_MEMORY_TIER_FIELD_NAME + "\" } }"
+                + "] } }"
+                + "], \"minimum_should_match\": 1 } }";
+        }
+        return "{ \"term\": { \"" + REQUIRED_MEMORY_TIER_FIELD_NAME + "\": " + workerTier + " } }";
+    }
+
+    /** {@link #QUERY_INCOMPLETE_EXPIRED_ITEMS_STR} scoped to the worker's exact memory tier. */
+    static String queryIncompleteExpiredItemsForTierStr(int workerTier) {
+        return "    \"query\": {\n"
+            + "      \"bool\": {"
+            + "        \"must\": ["
+            + "          {"
+            + "            \"range\": {"
+            + "              \"" + EXPIRATION_FIELD_NAME + "\": { \"lt\": " + OLD_EXPIRATION_THRESHOLD_TEMPLATE + " }"
+            + "            }"
+            + "          },"
+            + tierMatchClauseJson(workerTier)
+            + "        ],"
+            + "        \"must_not\": ["
+            + "          { \"exists\":"
+            + "            { \"field\": \"" + COMPLETED_AT_FIELD_NAME + "\"}"
+            + "          }"
+            + "        ]"
+            + "      }"
+            + "    }";
+    }
 
     /**
      * Helper class to make sure that we throw retryable exceptions after the initial lease
@@ -205,6 +277,10 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
     private CompletionRetryConfig completionRetryConfig = CompletionRetryConfig.DEFAULT;
     // Upper bound on any lease, in seconds; 0 means no bound. See setMaxLeaseDuration.
     private long maxExpirationWindowSeconds;
+    // The fleet memory tier this worker runs at; items are matched to exactly this tier.
+    // 0 (the default) also matches documents that never gained the requiredMemoryTier field.
+    @Getter
+    private int workerMemoryTier = 0;
 
     protected OpenSearchWorkCoordinator(
         AbstractedHttpClient httpClient,
@@ -252,6 +328,19 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
      */
     void setMaxLeaseDuration(Duration maxLeaseDuration) {
         this.maxExpirationWindowSeconds = maxLeaseDuration == null ? 0 : maxLeaseDuration.toSeconds();
+    }
+
+    /**
+     * Set the memory tier this worker runs at.  Acquisition is scoped to exactly this tier
+     * (see {@link #tierMatchClauseJson}), successor items inherit it, and the per-tier lease cap
+     * for this tier (published by the fleet monitor on the shard_setup sentinel) bounds concurrent
+     * leases.  Defaults to 0, which matches documents without the field — i.e. today's behavior.
+     */
+    public void setWorkerMemoryTier(int workerMemoryTier) {
+        if (workerMemoryTier < 0) {
+            throw new IllegalArgumentException("workerMemoryTier must be >= 0, got " + workerMemoryTier);
+        }
+        this.workerMemoryTier = workerMemoryTier;
     }
 
     public static String getFinalIndexName(String indexNameAppendage) {
@@ -455,9 +544,7 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
             + "      \"workerId\": \"" + WORKER_ID_TEMPLATE + "\"\n"
             + "    },\n"
             + "    \"source\": \""
-            + "      if (ctx._source.scriptVersion != \\\"" + SCRIPT_VERSION_TEMPLATE + "\\\") {"
-            + "        throw new IllegalArgumentException(\\\"scriptVersion mismatch.  Not all participants are using the same script: sourceVersion=\\\" + ctx.source.scriptVersion);"
-            + "      } "
+            + VERSION_CHECK_SCRIPT
             + "      long serverTimeSeconds = System.currentTimeMillis() / 1000;"
             + "      if (Math.abs(params.clientTimestamp - serverTimeSeconds) > {CLOCK_DEVIATION_SECONDS_THRESHOLD}) {"
             + "        throw new IllegalArgumentException(\\\"The current times indicated between the client and server are too different.\\\");"
@@ -475,6 +562,7 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
             "            ctx._source." + EXPIRATION_FIELD_NAME + " = newExpiration;"
             + "          ctx._source." + LEASE_HOLDER_ID_FIELD_NAME + " = params.workerId;"
             + RECORD_LEASE_EXPONENT_SCRIPT
+            + RECORD_ACQUISITION_SCRIPT
             + "        } else {"
             + "          ctx.op = \\\"noop\\\";"
             + "        }"
@@ -808,9 +896,7 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
                 + "      \"workerId\": \"" + WORKER_ID_TEMPLATE + "\"\n"
                 + "    },\n"
                 + "    \"source\": \""
-                + "      if (ctx._source.scriptVersion != \\\"" + SCRIPT_VERSION_TEMPLATE + "\\\") {"
-                + "        throw new IllegalArgumentException(\\\"scriptVersion mismatch.  Not all participants are using the same script: sourceVersion=\\\" + ctx.source.scriptVersion);"
-                + "      } "
+                + VERSION_CHECK_SCRIPT
                 + "      if (ctx._source." + LEASE_HOLDER_ID_FIELD_NAME + " != params.workerId) {"
                 + "        throw new IllegalArgumentException(\\\"work item was owned by \\\" + ctx._source."
                 +                        LEASE_HOLDER_ID_FIELD_NAME + " + \\\" not \\\" + params.workerId);"
@@ -888,9 +974,7 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
             + "      \"workerId\": \"" + WORKER_ID_TEMPLATE + "\"\n"
             + "    },\n"
             + "    \"source\": \""
-            + "      if (ctx._source.scriptVersion != \\\"" + SCRIPT_VERSION_TEMPLATE + "\\\") {"
-            + "        throw new IllegalArgumentException(\\\"scriptVersion mismatch.  Not all participants are using the same script: sourceVersion=\\\" + ctx._source.scriptVersion);"
-            + "      }"
+            + VERSION_CHECK_SCRIPT
             + "      if (ctx._source." + COMPLETED_AT_FIELD_NAME + " != null) {"
             + "        ctx.op = \\\"noop\\\";"
             + "      } else if (ctx._source." + LEASE_HOLDER_ID_FIELD_NAME + " != params.workerId) {"
@@ -1007,7 +1091,7 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
         // to acquire 40 units of work to around 800
         final var queryUpdateTemplate = "{\n"
             + "\"query\": {"
-            + "  \"function_score\": {\n" + QUERY_INCOMPLETE_EXPIRED_ITEMS_STR + ","
+            + "  \"function_score\": {\n" + queryIncompleteExpiredItemsForTierStr(workerMemoryTier) + ","
             + "    \"random_score\": {},\n"
             + "    \"boost_mode\": \"replace\"\n" + // Try to avoid the workers fighting for the same work items
             "  }"
@@ -1022,9 +1106,7 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
             + "    \"counter\": 0\n"
             + "  },\n"
             + "  \"source\": \""
-            + "      if (ctx._source.scriptVersion != \\\"" + SCRIPT_VERSION_TEMPLATE + "\\\") {"
-            + "        throw new IllegalArgumentException(\\\"scriptVersion mismatch.  Not all participants are using the same script: sourceVersion=\\\" + ctx.source.scriptVersion);"
-            + "      } "
+            + VERSION_CHECK_SCRIPT
             + "      long serverTimeSeconds = System.currentTimeMillis() / 1000;"
             + "      if (Math.abs(params.clientTimestamp - serverTimeSeconds) > {CLOCK_DEVIATION_SECONDS_THRESHOLD}) {"
             + "        throw new IllegalArgumentException(\\\"The current times indicated between the client and server are too different.\\\");"
@@ -1036,6 +1118,7 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
             "        ctx._source." + EXPIRATION_FIELD_NAME + " = newExpiration;"
             + "        ctx._source." + LEASE_HOLDER_ID_FIELD_NAME + " = params.workerId;"
             + RECORD_LEASE_EXPONENT_SCRIPT
+            + RECORD_ACQUISITION_SCRIPT
             + "      } else {"
             + "        ctx.op = \\\"noop\\\";"
             + "      }"
@@ -1086,6 +1169,329 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
         } else {
             throw new IllegalStateException("Unexpected response for update: " + resultTree);
         }
+    }
+
+    /**
+     * One acquisition attempt's view of the incomplete work at this worker's tier: how much work
+     * exists anywhere, and the waiting/leased split at the worker's own tier.  Aggregations treat
+     * a missing {@link #REQUIRED_MEMORY_TIER_FIELD_NAME} as tier 0 ({@code "missing": 0}).
+     */
+    @Getter
+    @AllArgsConstructor
+    @ToString
+    public static class TierWorkCensus {
+        final long totalIncomplete;
+        final long waitingAtTier;
+        final long leasedAtTier;
+    }
+
+    /** Pre-acquisition decision per the acquire protocol's decision table. */
+    public enum AcquisitionPrecheckResult {
+        /** waiting work exists at this worker's tier and the tier is under its lease cap */
+        ACQUIRE,
+        /** nothing incomplete anywhere — the whole migration is drained */
+        NO_WORK_LEFT,
+        /** this tier's live leases meet/exceed the monitor-published cap; idle so budget can move */
+        LEASE_CAP_REACHED,
+        /** work exists, but none is eligible for this worker (other tier, or all leased) */
+        NO_WORK_AVAILABLE_FOR_TIER
+    }
+
+    /**
+     * The acquire decision table, as a pure function so it can be tested exhaustively.
+     * Precedence: drained beats everything; then the own-tier cap (a worker idles only because
+     * of its own tier's cap — never because work exists elsewhere, which would herd); then
+     * waiting work at this tier; otherwise nothing is eligible here.
+     *
+     * @param capOrNull the published cap for this tier, or null when no cap exists
+     *                  (feature off, or the monitor hasn't written one) —
+     *                  treated as unlimited so a dead monitor can never idle a fleet.
+     */
+    public static AcquisitionPrecheckResult decideAcquisition(TierWorkCensus census, Long capOrNull) {
+        if (census.getTotalIncomplete() == 0) {
+            return AcquisitionPrecheckResult.NO_WORK_LEFT;
+        }
+        if (capOrNull != null && census.getLeasedAtTier() >= capOrNull) {
+            return AcquisitionPrecheckResult.LEASE_CAP_REACHED;
+        }
+        if (census.getWaitingAtTier() > 0) {
+            return AcquisitionPrecheckResult.ACQUIRE;
+        }
+        return AcquisitionPrecheckResult.NO_WORK_AVAILABLE_FOR_TIER;
+    }
+
+    /**
+     * Terms-agg over incomplete items grouped by {@link #REQUIRED_MEMORY_TIER_FIELD_NAME}
+     * ({@code "missing": 0} — an absent field IS tier 0), split into waiting
+     * ({@code expiration < now}) vs leased.  One query per acquisition attempt; it replaces
+     * nothing (acquisition already performs a search after the update) and the index is small.
+     */
+    TierWorkCensus getTierWorkCensus() throws IOException {
+        final var timestampEpochSeconds = clock.instant().toEpochMilli() / 1000;
+        final var queryBody = "{\n"
+            + "\"size\": 0,\n"
+            + "\"query\": {"
+            + "  \"bool\": {"
+            + "    \"must\": [ { \"exists\": { \"field\": \"" + EXPIRATION_FIELD_NAME + "\" } } ],"
+            + "    \"must_not\": [ { \"exists\": { \"field\": \"" + COMPLETED_AT_FIELD_NAME + "\" } } ]"
+            + "  }"
+            + "},"
+            + "\"aggs\": {"
+            + "  \"byTier\": {"
+            + "    \"terms\": { \"field\": \"" + REQUIRED_MEMORY_TIER_FIELD_NAME + "\","
+            + "                 \"missing\": 0, \"value_type\": \"long\", \"size\": 100 },"
+            + "    \"aggs\": {"
+            + "      \"waiting\": { \"filter\": { \"range\": {"
+            + "        \"" + EXPIRATION_FIELD_NAME + "\": { \"lt\": " + timestampEpochSeconds + " } } } }"
+            + "    }"
+            + "  }"
+            + "}"
+            + "}";
+        var response = httpClient.makeJsonRequest(
+            AbstractedHttpClient.POST_METHOD, getPathForSearches(), null, queryBody);
+        if (response.getStatusCode() != 200) {
+            throw new IOException("Tier census query returned unexpected status "
+                + response.getStatusCode() + ": " + response.toDiagnosticString());
+        }
+        var payload = objectMapper.readTree(response.getPayloadBytes());
+        long total = getTotalHitsFromSearchResponse(payload);
+        long waitingAtTier = 0;
+        long leasedAtTier = 0;
+        for (var bucket : payload.path("aggregations").path("byTier").path("buckets")) {
+            if (bucket.path("key").asLong() == workerMemoryTier) {
+                long docCount = bucket.path("doc_count").asLong();
+                waitingAtTier = bucket.path("waiting").path("doc_count").asLong();
+                leasedAtTier = docCount - waitingAtTier;
+                break;
+            }
+        }
+        return new TierWorkCensus(total, waitingAtTier, leasedAtTier);
+    }
+
+    /**
+     * Read the monitor-published per-tier lease cap for this worker's tier from the
+     * {@link #MAX_LEASES_FIELD_NAME} field of the {@code shard_setup} sentinel document — chosen
+     * because every existing status/work query already excludes that document, so the caps need
+     * no index of their own.  Workers are read-only consumers.  Returns null (no cap) when the
+     * document, field, or tier entry is absent — a cap is state, not an order, so staleness or
+     * absence degrades to "unlimited", never to idling.
+     */
+    Long readLeaseCapForTier() throws IOException {
+        var response = httpClient.makeJsonRequest(
+            AbstractedHttpClient.GET_METHOD, getPathForGets(SHARD_SETUP_DOC_ID), null, null);
+        if (response.getStatusCode() == 404) {
+            return null;
+        }
+        if (response.getStatusCode() != 200) {
+            throw new IOException("Lease-cap read returned unexpected status "
+                + response.getStatusCode() + ": " + response.toDiagnosticString());
+        }
+        var payload = objectMapper.readTree(response.getPayloadBytes());
+        var capNode = payload.path(SOURCE_FIELD_NAME).path(MAX_LEASES_FIELD_NAME)
+            .path(Integer.toString(workerMemoryTier));
+        return capNode.isNumber() ? capNode.asLong() : null;
+    }
+
+    /** Runs the full precheck: census + lease-cap read + the decision table. */
+    public AcquisitionPrecheckResult precheckAcquisition() throws IOException {
+        var census = getTierWorkCensus();
+        Long cap = census.getTotalIncomplete() == 0 ? null : readLeaseCapForTier();
+        var decision = decideAcquisition(census, cap);
+        log.atInfo().setMessage("Acquisition precheck (tier={}): census={}, cap={} -> {}")
+            .addArgument(workerMemoryTier).addArgument(census).addArgument(cap)
+            .addArgument(decision).log();
+        return decision;
+    }
+
+    /**
+     * A work item whose lease is live but was taken by a dead predecessor process in this pod
+     * (same pod-name prefix, different per-process UUID).  Found by the startup sweep.
+     */
+    @Getter
+    @AllArgsConstructor
+    @ToString
+    public static class DirtyLease {
+        final String workItemId;
+        final String leaseHolderId;
+        final long leaseAcquiredAtEpochSeconds;
+        final int requiredMemoryTier;
+    }
+
+    /**
+     * Find leases left behind by a dead predecessor in the same pod: holder matches this pod's
+     * name prefix but is a different process, the item isn't complete, the lease hasn't expired,
+     * and it wasn't deliberately abandoned.  Every benign exit path destroys or transfers its
+     * lease first, so a live foreign lease with our pod prefix is positive evidence of a hard
+     * kill.  Returns an empty list when the coordination index doesn't exist yet (first start).
+     *
+     * <p>The {@code ownWorkerId} exclusion is an invariant, not a live filter: the startup sweep
+     * runs before this process acquires anything and the id's UUID is minted per JVM, so it can
+     * never match today.  It keeps the sweep safe if it is ever re-run mid-process (e.g. once the
+     * acquire loop moves into java) — without it such a sweep could release its own live lease.
+     */
+    public List<DirtyLease> findDirtyLeases(String podNamePrefix, String ownWorkerId) throws IOException {
+        final var timestampEpochSeconds = clock.instant().toEpochMilli() / 1000;
+        final var queryBody = "{\n"
+            + "\"size\": 100,\n"
+            + "\"query\": {"
+            + "  \"bool\": {"
+            + "    \"must\": ["
+            + "      { \"prefix\": { \"" + LEASE_HOLDER_ID_FIELD_NAME + "\": "
+            +              toJsonString(podNamePrefix) + " } },"
+            + "      { \"range\": { \"" + EXPIRATION_FIELD_NAME + "\": { \"gt\": " + timestampEpochSeconds + " } } }"
+            + "    ],"
+            + "    \"must_not\": ["
+            + "      { \"term\": { \"" + LEASE_HOLDER_ID_FIELD_NAME + "\": " + toJsonString(ownWorkerId) + " } },"
+            + "      { \"exists\": { \"field\": \"" + COMPLETED_AT_FIELD_NAME + "\" } },"
+            + "      { \"term\": { \"" + LEASE_ABANDONED_FIELD_NAME + "\": true } }"
+            + "    ]"
+            + "  }"
+            + "}"
+            + "}";
+        var response = httpClient.makeJsonRequest(
+            AbstractedHttpClient.POST_METHOD, getPathForSearches(), null, queryBody);
+        if (response.getStatusCode() == 404) {
+            return List.of();
+        }
+        if (response.getStatusCode() != 200) {
+            throw new IOException("Dirty-lease query returned unexpected status "
+                + response.getStatusCode() + ": " + response.toDiagnosticString());
+        }
+        var payload = objectMapper.readTree(response.getPayloadBytes());
+        var results = new ArrayList<DirtyLease>();
+        for (var hit : payload.path("hits").path("hits")) {
+            var source = hit.path(SOURCE_FIELD_NAME);
+            results.add(new DirtyLease(
+                hit.path("_id").asText(),
+                source.path(LEASE_HOLDER_ID_FIELD_NAME).asText(),
+                source.path(LEASE_ACQUIRED_AT_FIELD_NAME).asLong(0),
+                source.path(REQUIRED_MEMORY_TIER_FIELD_NAME).asInt(0)));
+        }
+        return results;
+    }
+
+    private String toJsonString(String value) {
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (IOException e) {
+            throw Lombok.sneakyThrow(e);
+        }
+    }
+
+    /**
+     * Escalate a work item whose holder died of OOM: raise {@code requiredMemoryTier} to
+     * {@code max(current, newRequiredTier)}, restore the lease exponent (a tier bump is not a
+     * time problem), clear the lease so the right fleet can take it immediately, and clear
+     * {@code leaseAbandoned}.  Guarded on the observed lease holder and no-ops if the lease moved
+     * or the item completed, which makes a second look (or a racing sweep) harmless — clearing
+     * the lease means a repeat sweep finds nothing.
+     *
+     * @return true if the document was escalated by this call, false if it no-op'd.
+     */
+    public boolean escalateWorkItem(String workItemId, String observedLeaseHolderId, int newRequiredTier)
+        throws IOException, InterruptedException {
+        return runDirtyLeaseScript(workItemId, observedLeaseHolderId, newRequiredTier,
+            "escalateWorkItem");
+    }
+
+    /**
+     * Release a dirty lease without a tier bump (no OOM evidence): clear the lease and restore
+     * the exponent so another worker can retry immediately at the same tier.  Same guards and
+     * idempotence as {@link #escalateWorkItem}.
+     *
+     * @return true if the lease was released by this call, false if it no-op'd.
+     */
+    public boolean releaseDirtyLease(String workItemId, String observedLeaseHolderId)
+        throws IOException, InterruptedException {
+        return runDirtyLeaseScript(workItemId, observedLeaseHolderId, null, "releaseDirtyLease");
+    }
+
+    private boolean runDirtyLeaseScript(String workItemId, String observedLeaseHolderId,
+                                        Integer newRequiredTierOrNull, String operationName)
+        throws IOException, InterruptedException {
+        var tierBumpScript = newRequiredTierOrNull == null ? ""
+            : "        long currentTier = ctx._source." + REQUIRED_MEMORY_TIER_FIELD_NAME + " == null"
+            + "            ? 0L : ((Number)ctx._source." + REQUIRED_MEMORY_TIER_FIELD_NAME + ").longValue();"
+            + "        if (params.newRequiredTier > currentTier) {"
+            + "          ctx._source." + REQUIRED_MEMORY_TIER_FIELD_NAME + " = params.newRequiredTier;"
+            + "        }";
+        var bodyTemplate = "{\n"
+            + "  \"script\": {\n"
+            + "    \"lang\": \"painless\",\n"
+            + "    \"params\": { \n"
+            + "      \"observedLeaseHolderId\": " + toJsonString(observedLeaseHolderId) + ",\n"
+            + (newRequiredTierOrNull == null ? ""
+                : "      \"newRequiredTier\": " + newRequiredTierOrNull + ",\n")
+            + "      \"unused\": 0\n"
+            + "    },\n"
+            + "    \"source\": \""
+            + VERSION_CHECK_SCRIPT
+            + "      if (ctx._source." + COMPLETED_AT_FIELD_NAME + " != null) {"
+            + "        ctx.op = \\\"noop\\\";"
+            + "      } else if (ctx._source." + LEASE_HOLDER_ID_FIELD_NAME + " != params.observedLeaseHolderId) {"
+            + "        ctx.op = \\\"noop\\\";"
+            + "      } else {"
+            + tierBumpScript
+            + "        if (ctx._source.acquisitionLeaseExponent != null) {"
+            + "          ctx._source.nextAcquisitionLeaseExponent = ctx._source.acquisitionLeaseExponent;"
+            + "        }"
+            + "        ctx._source." + EXPIRATION_FIELD_NAME + " = 0;"
+            + "        ctx._source." + LEASE_HOLDER_ID_FIELD_NAME + " = null;"
+            + "        ctx._source.remove(\\\"" + LEASE_ABANDONED_FIELD_NAME + "\\\");"
+            + "      }"
+            + "\"\n"
+            + "  }\n"
+            + "}";
+        var body = bodyTemplate.replace(SCRIPT_VERSION_TEMPLATE, SCRIPT_VERSION);
+        try {
+            return retryWorkCoordinationUpdate(operationName + "[" + workItemId + "]", null, () -> {
+                var response = httpClient.makeJsonRequest(
+                    AbstractedHttpClient.POST_METHOD, getPathForUpdates(workItemId), null, body);
+                return getResult(response) == DocumentModificationResult.UPDATED;
+            });
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw e;
+        }
+    }
+
+    /**
+     * Mark this worker's live lease as deliberately abandoned so the next same-pod startup sweep
+     * does not treat the leftover lease as crash evidence.  Used by the pre-exit path that
+     * refuses to complete a work item after a failed-document-stream flush failure and instead
+     * lets the lease expire.  The flag is cleared atomically by the next acquisition and by the
+     * escalation/release scripts.
+     */
+    public void markLeaseAbandoned(String workItemId) throws IOException, InterruptedException {
+        var bodyTemplate = "{\n"
+            + "  \"script\": {\n"
+            + "    \"lang\": \"painless\",\n"
+            + "    \"params\": { \n"
+            + "      \"workerId\": \"" + WORKER_ID_TEMPLATE + "\"\n"
+            + "    },\n"
+            + "    \"source\": \""
+            + VERSION_CHECK_SCRIPT
+            + "      if (ctx._source." + COMPLETED_AT_FIELD_NAME + " != null) {"
+            + "        ctx.op = \\\"noop\\\";"
+            + "      } else if (ctx._source." + LEASE_HOLDER_ID_FIELD_NAME + " != params.workerId) {"
+            + "        ctx.op = \\\"noop\\\";"
+            + "      } else {"
+            + "        ctx._source." + LEASE_ABANDONED_FIELD_NAME + " = true;"
+            + "      }"
+            + "\"\n"
+            + "  }\n"
+            + "}";
+        var body = bodyTemplate.replace(SCRIPT_VERSION_TEMPLATE, SCRIPT_VERSION).replace(WORKER_ID_TEMPLATE, workerId);
+        retryWorkCoordinationUpdate("markLeaseAbandoned[" + workItemId + "]", null, () -> {
+            var response = httpClient.makeJsonRequest(
+                AbstractedHttpClient.POST_METHOD, getPathForUpdates(workItemId), null, body);
+            var result = getResult(response);
+            if (result != DocumentModificationResult.UPDATED && result != DocumentModificationResult.IGNORED) {
+                throw new IllegalStateException("Unexpected response marking lease abandoned for "
+                    + workItemId + ": " + response.toDiagnosticString());
+            }
+            return null;
+        });
     }
 
     private WorkItemWithPotentialSuccessors getAssignedWorkItemUnsafe()
@@ -1195,9 +1601,7 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
                 + "      \"successorWorkItems\": \"" + SUCCESSOR_WORK_ITEM_IDS_TEMPLATE + "\"\n"
                 + "    },\n"
                 + "    \"source\": \""
-                + "      if (ctx._source.scriptVersion != \\\"" + SCRIPT_VERSION_TEMPLATE + "\\\") {"
-                + "        throw new IllegalArgumentException(\\\"scriptVersion mismatch.  Not all participants are using the same script: sourceVersion=\\\" + ctx.source.scriptVersion);"
-                + "      }"
+                + VERSION_CHECK_SCRIPT
                 + "      if (ctx._source." + LEASE_HOLDER_ID_FIELD_NAME + " != params.workerId) {"
                 + "        throw new IllegalArgumentException(\\\"work item was owned by \\\" + ctx._source."
                 +                        LEASE_HOLDER_ID_FIELD_NAME + " + \\\" not \\\" + params.workerId);"
@@ -1255,14 +1659,35 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
     // because it is an expected outcome of this function that sometimes the work item is already created. That function
     // uses `createOrUpdateLease`, whereas this function deliberately never modifies an already-existing work item.
     private void createUnassignedWorkItemsIfNonexistent(List<String> workItemIds, int nextAcquisitionLeaseExponent) throws IOException, IllegalStateException {
+        // Successor items inherit this worker's memory tier: a shard that was escalated to
+        // tier n splits into chain segments that still need tier-n memory.  Tier 0 omits the
+        // field so documents keep the pre-3.2 shape on unescalated work.
+        String tierField = workerMemoryTier > 0
+            ? "\"" + REQUIRED_MEMORY_TIER_FIELD_NAME + "\":" + workerMemoryTier + ", "
+            : "";
         String workItemBodyTemplate = "{\"nextAcquisitionLeaseExponent\":" + nextAcquisitionLeaseExponent + ", \"scriptVersion\":\"" + SCRIPT_VERSION_TEMPLATE + "\", " +
+            tierField +
             "\"creatorId\":\"" + WORKER_ID_TEMPLATE + "\", \"" + EXPIRATION_FIELD_NAME + "\":0 }";
         String workItemBody = workItemBodyTemplate.replace(SCRIPT_VERSION_TEMPLATE, SCRIPT_VERSION).replace(WORKER_ID_TEMPLATE, workerId);
 
         StringBuilder body = new StringBuilder();
         for (var workItemId : workItemIds) {
             body.append("{\"create\":{\"_id\":\"").append(workItemId).append("\"}}\n");
-            body.append(workItemBody).append("\n");
+            // Record the plaintext index name alongside each successor (mirrors
+            // createOrUpdateLeaseForDocument) so per-index status rollups don't have to
+            // reverse the base64url id encoding.
+            var successorBody = workItemBody;
+            try {
+                var parsed = IWorkCoordinator.WorkItemAndDuration.WorkItem.valueFromWorkItemString(workItemId);
+                if (parsed.getShardNumber() != null) {
+                    successorBody = workItemBody.substring(0, workItemBody.lastIndexOf('}'))
+                        + ", \"" + INDEX_NAME_FIELD_NAME + "\": "
+                        + objectMapper.writeValueAsString(parsed.getIndexName()) + "}";
+                }
+            } catch (IllegalArgumentException e) {
+                // Not a decodable work-item id; keep the plain body.
+            }
+            body.append(successorBody).append("\n");
         }
         log.atInfo().setMessage("Calling createUnassignedWorkItemsIfNonexistent with workItemIds {}")
                 .addArgument(String.join(", ", workItemIds)).log();
@@ -1540,6 +1965,24 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
         throws RetriesExceededException, IOException, InterruptedException
     {
         try (var ctx = contextSupplier.get()) {
+            // Evaluated on every acquisition attempt so a worker yields to the monitor-published
+            // per-tier lease caps both when the same container grabs its next shard and when a
+            // fresh pod appears inside a monitor sweep window.
+            var precheck = precheckAcquisition();
+            switch (precheck) {
+                case NO_WORK_LEFT:
+                    ctx.recordNothingAvailable();
+                    return new NoWorkLeftToAcquire();
+                case LEASE_CAP_REACHED:
+                    ctx.recordNothingAvailable();
+                    return new LeaseCapReached();
+                case NO_WORK_AVAILABLE_FOR_TIER:
+                    ctx.recordNothingAvailable();
+                    return new NoAvailableWorkToBeDone();
+                case ACQUIRE:
+                default:
+                    break;
+            }
             final var leaseChecker = new LeaseChecker(leaseDuration, System.nanoTime());
             int driftRetries = 0;
             while (true) {

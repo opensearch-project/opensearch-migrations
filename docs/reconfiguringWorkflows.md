@@ -410,6 +410,8 @@ Every field of `documentBackfillConfig` is listed here; a test in `orchestration
 | `spec.documentBackfillConfig.failedDocumentStreamS3Endpoint` | Safe |  | ❌ |
 | `spec.documentBackfillConfig.failedDocumentStreamMaxBufferBytes` | Safe |  | ❌ |
 | `spec.documentBackfillConfig.positionGapStopword` | Impossible |  | ✅ |
+| `spec.documentBackfillConfig.memoryScaling` | Safe | Fleet policy for OOM-escalated shards; the monitor re-reads it each sweep | ❌ |
+| `spec.documentBackfillConfig.maxTotalPods` | Safe | Fleet-wide pod budget across tiers; throughput only | ❌ |
 
 ---
 

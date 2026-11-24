@@ -33,6 +33,18 @@ WORKFLOW_UID_LABEL="${RFS_MONITOR_WORKFLOW_UID_LABEL}"
 SESSION_LABEL="${RFS_MONITOR_SESSION_LABEL}"
 RESOURCE_UID_LABEL="${MIGRATION_RESOURCE_UID_LABEL}"
 
+# Memory-tier scaling env block: rendered into the CronJob ONLY when the feature is on, so the
+# feature-off CronJob object is byte-identical to the pre-feature one.
+MEMORY_SCALING_ENV=""
+if [ -n "${MEMORY_SCALING_ENABLED:-}" ]; then
+    MEMORY_SCALING_ENV="$(cat <<EOF
+                - {name: MEMORY_SCALING_ENABLED,     value: "${MEMORY_SCALING_ENABLED}"}
+                - {name: TIER_POLICY_CONFIGMAP,      value: "${TIER_POLICY_CONFIGMAP}"}
+                - {name: RFS_MEMORY_TIER_LABEL,      value: "${RFS_MEMORY_TIER_LABEL}"}
+EOF
+)"
+fi
+
 
 render_cronjob_yaml() {
     cat <<YAML
@@ -106,7 +118,8 @@ spec:
                 - {name: STARTUP_GRACE_SECONDS,      value: "${STARTUP_GRACE_SECONDS}"}
                 - {name: CONSOLE_CONFIG_BASE64,      value: "${CONSOLE_CONFIG_BASE64}"}
                 - {name: WORKFLOW_SCRIPTS_ROOT,      value: "${WORKFLOW_SCRIPTS_ROOT}"}
-                - {name: RFS_MONITOR_WORKFLOW_UID_LABEL, value: "${RFS_MONITOR_WORKFLOW_UID_LABEL}"}
+                - {name: RFS_MONITOR_WORKFLOW_UID_LABEL, value: "${RFS_MONITOR_WORKFLOW_UID_LABEL}"}${MEMORY_SCALING_ENV:+
+$MEMORY_SCALING_ENV}
                 # Phase 3 reads the failed document stream from S3 to tell Completed from
                 # CompletedWithErrors. Present only under LocalStack; on real AWS the Secret
                 # is absent and the pod's own credentials apply.

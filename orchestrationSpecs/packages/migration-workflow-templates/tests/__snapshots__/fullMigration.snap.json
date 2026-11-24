@@ -1363,8 +1363,8 @@
           [
             {
               "templateRef": {
-                "template": "setupandrunbulkload",
-                "name": "document-bulk-load"
+                "template": "setupandrunrfsbackfill",
+                "name": "rfs-backfill"
               },
               "when": "{{=!(0 == len(inputs.parameters.documentBackfillConfig))}}",
               "arguments": {

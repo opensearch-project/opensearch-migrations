@@ -55,6 +55,7 @@ import org.opensearch.migrations.bulkload.tracing.IWorkCoordinationContexts;
 import org.opensearch.migrations.bulkload.tracing.RfsContexts;
 import org.opensearch.migrations.bulkload.tracing.WorkerPhase;
 import org.opensearch.migrations.bulkload.workcoordination.CoordinateWorkHttpClient;
+import org.opensearch.migrations.bulkload.workcoordination.DirtyLeaseSweeper;
 import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator.WorkItemAndDuration.WorkItem;
 import org.opensearch.migrations.bulkload.workcoordination.LeaseExpireTrigger;
@@ -106,10 +107,17 @@ public class RfsMigrateDocuments {
     @SuppressWarnings("unused")
     private static AutoCloseable workerPhaseGauge;
     public static final int PROCESS_TIMED_OUT_EXIT_CODE = 2;
-    public static final int NO_WORK_LEFT_EXIT_CODE = 3;
+    // Exit code 3 is deliberately unassigned: the JVM exits 3 on heap OOM via
+    // -XX:+ExitOnOutOfMemoryError, and the sidecar crash witness treats exit 3 as OOM evidence
+    // for the memory-tier escalation.  NO_WORK_LEFT therefore moved from 3 to 6 (script v3.2);
+    // nothing outside the container consumed the old value.
     public static final int NO_WORK_AVAILABLE_EXIT_CODE = 4;
     // Keep harmonized with the metadata command's MigratorEvaluatorBase.SNAPSHOT_READ_FAILED_EXIT_CODE.
     public static final int SNAPSHOT_READ_FAILED_EXIT_CODE = 5;
+    public static final int NO_WORK_LEFT_EXIT_CODE = 6;
+    // Non-zero on purpose: kubelet restart backoff paces the re-checks and the waiting container
+    // makes the pod not-ready, which ranks it first for ReplicaSet downscale victim selection.
+    public static final int TIER_OVER_LEASE_CAP_EXIT_CODE = 7;
 
     // Arbitrary value, increasing from 5 to 15 seconds due to prevalence of clock skew exceptions
     // observed on production clusters during migrations
@@ -390,6 +398,22 @@ public class RfsMigrateDocuments {
 
         @ParametersDelegate
         public FailedDocumentStreamArgs failedDocumentStreamArgs = new FailedDocumentStreamArgs();
+
+        @Parameter(required = false,
+            names = { "--worker-memory-tier", "--workerMemoryTier" },
+            description = "Optional. The memory tier this worker's fleet runs at (an opaque integer; the worker " +
+                "never inspects its own memory). Work items are matched to exactly this tier; tier 0 (the default) " +
+                "also matches items that never gained the requiredMemoryTier field. Successor work items inherit " +
+                "this tier. Normally injected as RFS_WORKER_MEMORY_TIER on the per-tier Deployment. Default: 0")
+        public int workerMemoryTier = 0;
+
+        @Parameter(required = false,
+            names = { "--crash-verdict-file", "--crashVerdictFile" },
+            description = "Optional. Path to the JSONL crash-verdict file appended by the pod's sidecar crash " +
+                "witness (one record per bulk-loader termination). When unset the startup dirty-lease sweep still " +
+                "runs, but every dirty lease is release-only (no OOM attribution, so no tier escalation). " +
+                "Normally injected as RFS_CRASH_VERDICT_FILE.")
+        public String crashVerdictFile = null;
     }
 
     /**
@@ -567,6 +591,9 @@ public class RfsMigrateDocuments {
         }
         if (args.bulkRequestTraceMaxBytes < 0) {
             throw new ParameterException("--bulk-request-trace-max-bytes must be 0 (no limit) or positive.");
+        }
+        if (args.workerMemoryTier < 0) {
+            throw new ParameterException("--worker-memory-tier must be 0 or positive.");
         }
         validateFailedDocumentStreamArgs(args.failedDocumentStreamArgs);
     }
@@ -920,6 +947,18 @@ public class RfsMigrateDocuments {
 
             MDC.put(LOGGING_MDC_WORKER_ID, workerId);
 
+            workCoordinator.setWorkerMemoryTier(arguments.workerMemoryTier);
+            // Startup dirty-lease sweep: if a predecessor process in this pod died holding a
+            // lease, attribute its death from the sidecar's verdict file and escalate (OOM) or
+            // release (anything else) the item before acquiring any work.
+            DirtyLeaseSweeper.runStartupSweep(
+                workCoordinator,
+                workerId,
+                arguments.workerMemoryTier,
+                arguments.crashVerdictFile == null || arguments.crashVerdictFile.isBlank()
+                    ? null : Paths.get(arguments.crashVerdictFile),
+                Clock.systemUTC());
+
             WorkerPhase.enter(WorkerPhase.Phase.ACQUIRING_WORK);
             var status = sourceFactory.buildAndRun(
                 workCoordinator, processManager, progressCursor, cancellationRunnableRef, workItemTimeProvider,
@@ -941,6 +980,12 @@ public class RfsMigrateDocuments {
             if (status == CompletionStatus.NOTHING_DONE) {
                 log.atInfo().setMessage("Work exists but none available to this worker. Exiting with exit code " + NO_WORK_AVAILABLE_EXIT_CODE).log();
                 System.exit(NO_WORK_AVAILABLE_EXIT_CODE);
+            } else if (status == CompletionStatus.ALL_WORK_DRAINED) {
+                log.atInfo().setMessage("No incomplete work remains anywhere. Exiting with exit code " + NO_WORK_LEFT_EXIT_CODE).log();
+                System.exit(NO_WORK_LEFT_EXIT_CODE);
+            } else if (status == CompletionStatus.LEASE_CAP_REACHED) {
+                log.atInfo().setMessage("This tier's lease cap is reached; idling. Exiting with exit code " + TIER_OVER_LEASE_CAP_EXIT_CODE).log();
+                System.exit(TIER_OVER_LEASE_CAP_EXIT_CODE);
             }
         } catch (NoWorkLeftException e) {
             log.atInfo().setMessage("No work left to acquire. Exiting with exit code " + NO_WORK_LEFT_EXIT_CODE).log();
@@ -1393,6 +1438,7 @@ public class RfsMigrateDocuments {
         // successor worker re-processes from a known-good state — preserving evidence of
         // any terminal failures we accumulated but couldn't persist.
         if (!flushFailedDocumentStreamBeforeComplete(failedDocumentStreamSink, workItemId)) {
+            markLeaseAbandonedBestEffort(coordinator, workItemId);
             return;
         }
 
@@ -1455,6 +1501,26 @@ public class RfsMigrateDocuments {
                 .addArgument(workItemId)
                 .log();
             return false;
+        }
+    }
+
+    /**
+     * Best-effort write of {@code leaseAbandoned: true} on the work item whose lease we are
+     * deliberately leaving to expire (failed-document-stream flush failure blocked completion).
+     * Without this, the next same-pod startup sweep would read the leftover live lease as crash
+     * evidence.  Failures here degrade to one spurious same-tier lease release — never a tier
+     * bump (abandonment isn't an OOM verdict) — so they are logged, not propagated.
+     */
+    static void markLeaseAbandonedBestEffort(IWorkCoordinator coordinator, String workItemId) {
+        try {
+            coordinator.markLeaseAbandoned(workItemId);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.atWarn().setMessage("Interrupted while marking lease abandoned for {}")
+                .addArgument(workItemId).log();
+        } catch (Exception e) {
+            log.atWarn().setCause(e).setMessage("Could not mark lease abandoned for {}")
+                .addArgument(workItemId).log();
         }
     }
 
@@ -1526,6 +1592,7 @@ public class RfsMigrateDocuments {
                     // On flush failure, skip the mark-complete and let the lease expire so a
                     // successor reprocesses the partition and re-emits its terminal failures.
                     if (!flushFailedDocumentStreamBeforeComplete(failedDocumentStreamSink, workItemId)) {
+                        markLeaseAbandonedBestEffort(coordinator, workItemId);
                         return;
                     }
 

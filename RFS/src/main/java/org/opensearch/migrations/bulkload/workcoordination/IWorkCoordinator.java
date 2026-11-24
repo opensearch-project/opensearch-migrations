@@ -144,6 +144,16 @@ public interface IWorkCoordinator extends AutoCloseable {
     ) throws IOException, InterruptedException;
 
     /**
+     * Record that this worker is deliberately leaving its live lease to expire (e.g. after a
+     * failed-document-stream flush failure blocks completion), so a subsequent same-pod startup
+     * sweep must not treat the leftover lease as crash evidence.  Default is a no-op for
+     * implementations without the memory-tier fields.
+     */
+    default void markLeaseAbandoned(String workItemId) throws IOException, InterruptedException {
+        // no-op by default
+    }
+
+    /**
      * Add the list of successor items to the work item, create new work items for each of the successors, and mark the
      * original work item as completed.
      * @param workItemId the work item that is being completed
@@ -209,6 +219,23 @@ public interface IWorkCoordinator extends AutoCloseable {
         T onNoAvailableWorkToBeDone() throws IOException;
 
         T onAcquiredWork(WorkItemAndDuration workItem) throws IOException, InterruptedException;
+
+        /**
+         * Nothing is incomplete anywhere — the whole migration is drained.  Defaults to the
+         * no-available-work handling so existing visitors keep working.
+         */
+        default T onNoWorkLeftToAcquire() throws IOException {
+            return onNoAvailableWorkToBeDone();
+        }
+
+        /**
+         * This worker's memory tier has as many live leases as the fleet monitor's published cap
+         * allows; the worker should idle so pod budget can move to another tier.  Defaults to the
+         * no-available-work handling so existing visitors keep working.
+         */
+        default T onLeaseCapReached() throws IOException {
+            return onNoAvailableWorkToBeDone();
+        }
     }
 
     /**
@@ -229,6 +256,25 @@ public interface IWorkCoordinator extends AutoCloseable {
         @Override
         public <T> T visit(WorkAcquisitionOutcomeVisitor<T> v) throws IOException {
             return v.onNoAvailableWorkToBeDone();
+        }
+    }
+
+    /** Nothing incomplete exists anywhere: the migration's work is fully drained. */
+    class NoWorkLeftToAcquire implements WorkAcquisitionOutcome {
+        @Override
+        public <T> T visit(WorkAcquisitionOutcomeVisitor<T> v) throws IOException {
+            return v.onNoWorkLeftToAcquire();
+        }
+    }
+
+    /**
+     * The worker's own tier already holds as many live leases as its monitor-published cap;
+     * acquiring more would exceed the fleet's budget allocation for the tier.
+     */
+    class LeaseCapReached implements WorkAcquisitionOutcome {
+        @Override
+        public <T> T visit(WorkAcquisitionOutcomeVisitor<T> v) throws IOException {
+            return v.onLeaseCapReached();
         }
     }
 

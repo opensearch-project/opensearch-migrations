@@ -54,6 +54,7 @@ from .test_cases.byoc_captured_traffic_tests import *
 from .test_cases.gcs_snapshot_tests import *
 from .test_cases.azure_snapshot_tests import *
 from .test_cases.k6_load_test_tests import *
+from .test_cases.memory_tier_scaling_tests import *
 
 logger = logging.getLogger(__name__)
 
