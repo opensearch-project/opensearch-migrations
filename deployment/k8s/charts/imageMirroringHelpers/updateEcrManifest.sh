@@ -76,13 +76,14 @@ CHARTS_FILE="$TMPDIR/charts.txt"
 # Parse charts from both migrationAssistantWithArgo and testClusters
 for vf in "$CHART_DIR/values.yaml" "$TEST_CHART_DIR/values.yaml"; do
   [ -f "$vf" ] || continue
-  # Extract name|version|repo triples
+  # Extract name|version|repo triples. Strip quotes from a copy of $2: editing $2 in place rebuilds
+  # $0 without its indentation, which then matches the top-level-key rule and ends the charts section.
   awk '
     /^  [a-zA-Z].*:$/ && in_charts { name=$1; gsub(/:$/,"",name) }
-    /version:/ && in_charts && name { gsub(/[" ]/,"",$2); ver=$2 }
-    /repository:/ && in_charts && name && /http|oci/ { gsub(/[" ]/,"",$2); repo=$2; print name"|"ver"|"repo; name="" }
+    /version:/ && in_charts && name { ver=$2; gsub(/["'\'' ]/,"",ver) }
+    /repository:/ && in_charts && name && /http|oci/ { repo=$2; gsub(/["'\'' ]/,"",repo); print name"|"ver"|"repo; name="" }
     /^charts:/ { in_charts=1 }
-    /^[^ ]/ && !/^charts:/ { in_charts=0 }
+    /^[^ #]/ && !/^charts:/ { in_charts=0 }
   ' "$vf" >> "$CHARTS_FILE"
 done
 
@@ -96,23 +97,29 @@ touch "$ALL_IMAGES"
 while IFS='|' read -r name version repo; do
   [ -z "$name" ] && continue
   echo "  Pulling $name $version..."
-  cd "$TMPDIR"
+  # Untar into a per-chart directory: the archive is named after the chart, which can differ from
+  # the values.yaml key (e.g. ack-cloudwatch-controller is the cloudwatch-chart OCI artifact).
+  pull_dir="$TMPDIR/pull-$name"
+  rm -rf "$pull_dir"
+  mkdir -p "$pull_dir"
   if echo "$repo" | grep -q '^oci://'; then
-    helm pull "$repo/$name" --version "$version" 2>/dev/null || { echo "    WARN: could not pull $name"; continue; }
+    # OCI repositories in values.yaml are full chart references, passed to helm as-is by installJob.yaml.
+    helm pull "$repo" --version "$version" --untar --untardir "$pull_dir" 2>/dev/null || { echo "    WARN: could not pull $name"; continue; }
   else
-    helm pull "$name" --repo "$repo" --version "$version" 2>/dev/null || { echo "    WARN: could not pull $name"; continue; }
+    helm pull "$name" --repo "$repo" --version "$version" --untar --untardir "$pull_dir" 2>/dev/null || { echo "    WARN: could not pull $name"; continue; }
   fi
-  tgz=$(ls ${name}*.tgz 2>/dev/null | head -1)
-  [ -z "$tgz" ] && continue
-  tar xzf "$tgz" 2>/dev/null
-  dir=$(basename "$tgz" .tgz | sed 's/-[0-9].*//')
-  # Try exact dir name first, then glob
-  [ -d "$dir" ] || dir=$(ls -d ${name}*/ 2>/dev/null | head -1 | tr -d '/')
-  if [ -d "$dir" ]; then
-    helm template test "$dir/" 2>/dev/null | grep -E '^\s+image:' | \
-      sed 's/.*image:\s*//' | tr -d '"' | tr -d "'" | sed 's/^[[:space:]]*//' >> "$ALL_IMAGES"
+  dir=$(find "$pull_dir" -mindepth 1 -maxdepth 1 -type d | head -1)
+  if [ -n "$dir" ]; then
+    # Some charts (e.g. opentelemetry-operator) reject their own defaults via values.schema.json; keep
+    # going so one chart cannot abort discovery under set -e, and flag it for a manual check.
+    if ! rendered=$(helm template test "$dir/" 2>/dev/null); then
+      echo "    WARN: helm template failed for $name with default values; check its images manually"
+      rendered=""
+    fi
+    printf '%s\n' "$rendered" | grep -E '^\s+image:' | \
+      sed 's/.*image:\s*//' | tr -d '"' | tr -d "'" | sed 's/^[[:space:]]*//' >> "$ALL_IMAGES" || true
   fi
-  rm -rf "$dir" "$tgz"
+  rm -rf "$pull_dir"
 done < "$CHARTS_FILE"
 
 # --- Step 3: Add known runtime images ---
