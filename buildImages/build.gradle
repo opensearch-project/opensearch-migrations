@@ -93,7 +93,7 @@ def buildKitProjects = [
                 imageName:  "java_runtime_base",
                 imageTag:   "latest",
                 buildArgs: [
-                        BASE_IMAGE: ptc.rewrite("docker.io/library/amazoncorretto:21-al2023-headless"),
+                        BASE_IMAGE: ptc.rewrite("public.ecr.aws/amazonlinux/amazonlinux:2023-minimal"),
                         OS_UPGRADE_DATE: osUpgradeDate,
                 ]
         ],

@@ -104,7 +104,7 @@ images:
 
   # buildkit + jib base images used by --build
   - "docker.io/moby/buildkit:buildx-stable-1"
-  - "mirror.gcr.io/library/amazoncorretto:21-al2023-headless"
+  - "public.ecr.aws/amazonlinux/amazonlinux:2023-minimal"
   - "mirror.gcr.io/library/amazoncorretto:11-al2023-headless"
   - "mirror.gcr.io/library/amazoncorretto:8-alpine"
   - "mirror.gcr.io/library/amazonlinux:2023"
