@@ -47,7 +47,7 @@ images:
   - "quay.io/argoproj/argocli:v4.0.3"
   - "quay.io/argoproj/argoexec:v4.0.3"
 
-  # fluent-bit (chart 0.58.3 defaults to 5.1.3; values.yaml pins image.tag 5.2.0)
+  # fluent-bit
   - "cr.fluentbit.io/fluent/fluent-bit:5.2.0"
   - "mirror.gcr.io/library/busybox:latest"
 

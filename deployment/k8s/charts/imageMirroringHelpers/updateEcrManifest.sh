@@ -76,24 +76,13 @@ CHARTS_FILE="$TMPDIR/charts.txt"
 # Parse charts from both migrationAssistantWithArgo and testClusters
 for vf in "$CHART_DIR/values.yaml" "$TEST_CHART_DIR/values.yaml"; do
   [ -f "$vf" ] || continue
-  # Extract name|version|repo|imageTag, where imageTag is the chart's values.image.tag override
-  # (e.g. fluent-bit, localstack) so discovery reports the image that is actually deployed.
+  # Extract name|version|repo triples
   awk '
-    function unquote(s) { gsub(/["'\'' ]/, "", s); return s }
-    function flush() {
-      if (name != "" && repo != "") print name "|" ver "|" repo "|" tag
-      name = ""; ver = ""; repo = ""; tag = ""; in_values = 0; in_image = 0
-    }
-    /^charts:/ { in_charts = 1; next }
-    in_charts && /^[^ #]/ { flush(); in_charts = 0 }
-    !in_charts { next }
-    /^  [a-zA-Z][^ ]*:[[:space:]]*$/ { flush(); name = $1; sub(/:$/, "", name); next }
-    /^    version:/ { ver = unquote($2); next }
-    /^    repository:/ && /http|oci/ { repo = unquote($2); next }
-    /^    [a-zA-Z]/ { in_values = ($1 == "values:"); in_image = 0; next }
-    in_values && /^      [a-zA-Z]/ { in_image = ($1 == "image:"); next }
-    in_image && /^        tag:/ { tag = unquote($2); next }
-    END { flush() }
+    /^  [a-zA-Z].*:$/ && in_charts { name=$1; gsub(/:$/,"",name) }
+    /version:/ && in_charts && name { gsub(/[" ]/,"",$2); ver=$2 }
+    /repository:/ && in_charts && name && /http|oci/ { gsub(/[" ]/,"",$2); repo=$2; print name"|"ver"|"repo; name="" }
+    /^charts:/ { in_charts=1 }
+    /^[^ ]/ && !/^charts:/ { in_charts=0 }
   ' "$vf" >> "$CHARTS_FILE"
 done
 
@@ -104,9 +93,9 @@ echo "Step 2: Discovering images from helm template..."
 ALL_IMAGES="$TMPDIR/all_images.txt"
 touch "$ALL_IMAGES"
 
-while IFS='|' read -r name version repo image_tag; do
+while IFS='|' read -r name version repo; do
   [ -z "$name" ] && continue
-  echo "  Pulling $name $version${image_tag:+ (image.tag $image_tag)}..."
+  echo "  Pulling $name $version..."
   cd "$TMPDIR"
   if echo "$repo" | grep -q '^oci://'; then
     helm pull "$repo/$name" --version "$version" 2>/dev/null || { echo "    WARN: could not pull $name"; continue; }
@@ -120,10 +109,8 @@ while IFS='|' read -r name version repo image_tag; do
   # Try exact dir name first, then glob
   [ -d "$dir" ] || dir=$(ls -d ${name}*/ 2>/dev/null | head -1 | tr -d '/')
   if [ -d "$dir" ]; then
-    # A chart whose default render has no image (or fails) must not abort discovery under pipefail.
-    { helm template test "$dir/" ${image_tag:+--set-string "image.tag=$image_tag"} 2>/dev/null | grep -E '^\s+image:' | \
-      sed 's/.*image:\s*//' | tr -d '"' | tr -d "'" | sed 's/^[[:space:]]*//' >> "$ALL_IMAGES"; } || \
-      echo "    WARN: no images rendered for $name"
+    helm template test "$dir/" 2>/dev/null | grep -E '^\s+image:' | \
+      sed 's/.*image:\s*//' | tr -d '"' | tr -d "'" | sed 's/^[[:space:]]*//' >> "$ALL_IMAGES"
   fi
   rm -rf "$dir" "$tgz"
 done < "$CHARTS_FILE"
