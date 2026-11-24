@@ -77,12 +77,15 @@ CHARTS_FILE="$TMPDIR/charts.txt"
 for vf in "$CHART_DIR/values.yaml" "$TEST_CHART_DIR/values.yaml"; do
   [ -f "$vf" ] || continue
   # Extract name|version|repo triples
+  # Unquote copies of $2: assigning to a field rebuilds $0 without its indentation, which would make
+  # the end-of-section rule below fire on the first quoted version. That rule also skips the
+  # commented-out entries at column 0 inside charts:.
   awk '
     /^  [a-zA-Z].*:$/ && in_charts { name=$1; gsub(/:$/,"",name) }
-    /version:/ && in_charts && name { gsub(/[" ]/,"",$2); ver=$2 }
-    /repository:/ && in_charts && name && /http|oci/ { gsub(/[" ]/,"",$2); repo=$2; print name"|"ver"|"repo; name="" }
+    /version:/ && in_charts && name { ver=$2; gsub(/[" ]/,"",ver) }
+    /repository:/ && in_charts && name && /http|oci/ { repo=$2; gsub(/[" ]/,"",repo); print name"|"ver"|"repo; name="" }
     /^charts:/ { in_charts=1 }
-    /^[^ ]/ && !/^charts:/ { in_charts=0 }
+    /^[^ #]/ && !/^charts:/ { in_charts=0 }
   ' "$vf" >> "$CHARTS_FILE"
 done
 
@@ -109,8 +112,14 @@ while IFS='|' read -r name version repo; do
   # Try exact dir name first, then glob
   [ -d "$dir" ] || dir=$(ls -d ${name}*/ 2>/dev/null | head -1 | tr -d '/')
   if [ -d "$dir" ]; then
-    helm template test "$dir/" 2>/dev/null | grep -E '^\s+image:' | \
-      sed 's/.*image:\s*//' | tr -d '"' | tr -d "'" | sed 's/^[[:space:]]*//' >> "$ALL_IMAGES"
+    RENDERED="$TMPDIR/rendered.yaml"
+    helm template test "$dir/" > "$RENDERED" 2>/dev/null || true
+    grep -E '^\s+image:' "$RENDERED" | \
+      sed 's/.*image:\s*//' | tr -d '"' | tr -d "'" | sed 's/^[[:space:]]*//' >> "$ALL_IMAGES" || true
+    # prometheus-operator receives the config-reloader and thanos images as flags, not image: fields
+    grep -oE -- '--(prometheus-config-reloader|thanos-default-base-image)=[^[:space:]"]+' "$RENDERED" | \
+      sed 's/^[^=]*=//' >> "$ALL_IMAGES" || true
+    rm -f "$RENDERED"
   fi
   rm -rf "$dir" "$tgz"
 done < "$CHARTS_FILE"
@@ -127,7 +136,11 @@ quay.io/coreos/etcd:v3.5.12
 public.ecr.aws/aws-observability/aws-otel-collector:v0.49.0
 mirror.gcr.io/amazon/aws-cli:2.25.11
 mirror.gcr.io/amazon/aws-cli:latest
+mirror.gcr.io/library/busybox:latest
+registry.k8s.io/kubectl:v1.35.3
 RUNTIME
+# The last two are the kube-prometheus-stack CRD upgrade job images. The job is off in the chart's
+# defaults, so the template render above does not show them; values.yaml enables it and pins kubectl.
 
 # Deduplicate and sort
 sort -u "$ALL_IMAGES" | grep -v '^$' > "$TMPDIR/unique_images.txt"
