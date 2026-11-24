@@ -267,7 +267,7 @@ spec:
                 check_dependency "{{ $chart.dependsOn }}" {{ default "300" $dependencyChart.timeout }}
           {{- end }}
           {{- if eq $name "strimzi-kafka-operator" }}
-                {{- include "migration.strimziCrdUpgrade" (dict "name" $name "chart" $chart) | nindent 16 }}
+                {{- include "migration.strimziCrdUpgrade" (dict "name" $name "chart" $chart "namespace" $.Release.Namespace "operatorNamespace" ($chart.namespace | default $.Release.Namespace) "serviceAccount" $.Values.installer.serviceAccount.name) | nindent 16 }}
           {{- end }}
 
                 do_install_{{ $name | replace "-" "_" }}() {
