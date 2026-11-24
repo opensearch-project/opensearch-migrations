@@ -724,6 +724,7 @@ function makeRfsTierDeploymentDefinition(
             workloadNodePoolName: inputs.workloadNodePoolName,
             workloadZoneSpread: inputs.workloadZoneSpread,
             workloadZoneSpreadExtras: inputs.workloadZoneSpreadExtras,
+            cloudProvider: inputs.cloudProvider,
             memoryTier: inputs.memoryTier,
             tierMemoryQuantity: inputs.tierMemoryQuantity,
             consoleImageName: inputs.imageMigrationConsoleLocation,
