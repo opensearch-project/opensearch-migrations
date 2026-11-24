@@ -974,9 +974,12 @@ charts:
           # The distroless variant is the grafana chart's default since chart 13.0.0. It omits the
           # Alpine OS packages that the standard image carries.
           tag: "13.3.2-distroless"
+        # Grafana 13 runs many more internal API services than 11.x: its working set is about 290Mi
+        # once the dashboards load, so the old 256Mi limit OOM-killed it. The chart sets GOMEMLIMIT
+        # to 90% of the memory limit.
         resources:
-          requests: { cpu: 100m, memory: 128Mi }
-          limits:   { cpu: 500m, memory: 256Mi }
+          requests: { cpu: 100m, memory: 384Mi }
+          limits:   { cpu: 500m, memory: 1Gi }
         sidecar:
           image:
             # 1.30.11 never loads a dashboard: after loading the in-cluster config, its watches call
