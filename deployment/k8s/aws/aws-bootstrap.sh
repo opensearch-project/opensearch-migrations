@@ -2346,14 +2346,13 @@ if [[ "$build" == "true" && -z "$ma_images_source" ]]; then
   set_buildkit_node_class_helm_arg
   ensure_eks_buildkit_release
 
-  if builder_status=$(docker buildx inspect "$BUILDER_NAME" 2>/dev/null) \
-      && buildx_nodes_are_ready <<< "$builder_status"; then
+  # Reuse a builder only when it is pinned to ${KUBE_CONTEXT} and healthy. Any other builder (e.g.
+  # orphaned by an interrupted run, or created before builders were pinned to a context) is removed
+  # and recreated by ensure_eks_buildx_builder, which never acts on a cluster other than ${KUBE_CONTEXT}.
+  if eks_buildx_builder_is_ready "$BUILDER_NAME"; then
     echo "Buildkit release reconciled and existing builder is healthy"
   else
     echo "Setting up the buildx builder for local builds..."
-    # Remove stale builder if it exists but failed health check above (e.g. orphaned
-    # from a previous interrupted run). This is safe — the builder is recreated below.
-    docker buildx rm "$BUILDER_NAME" 2>/dev/null || true
     ensure_eks_buildx_builder
   fi
 
@@ -2374,7 +2373,7 @@ if [[ "$build" == "true" && -z "$ma_images_source" ]]; then
     || { echo "Image build failed on retry, giving up."; exit 1; }
 
   echo "Cleaning up docker buildx builder to free buildkit pods..."
-  docker buildx rm "$BUILDER_NAME" 2>/dev/null || true
+  remove_eks_buildx_builder "$BUILDER_NAME"
   echo "Builder removed. Buildkit pods will be terminated by kubernetes driver."
 fi
 

@@ -131,8 +131,130 @@ buildx_nodes_are_ready() {
   '
 }
 
+# The kubernetes driver has no context option and rejects endpoint arguments. It records $KUBECONFIG
+# in each node's endpoint at `docker buildx create` time and later loads that file with no context
+# override, so the builder follows the file's current-context. Each builder therefore gets its own
+# single-context kubeconfig for KUBE_CONTEXT, which keeps its BuildKit pods on the requested cluster
+# whatever the ambient current-context is now or later. The file can hold credentials, so it is 0600.
+eks_buildx_kubeconfig_path() {
+  local builder_name="$1"
+  printf '%s\n' "${BUILDKIT_KUBECONFIG_DIR:-${HOME}/.kube/buildx}/${builder_name}.kubeconfig"
+}
+
+# Prints the minified kubeconfig for KUBE_CONTEXT, resolved from the caller's KUBECONFIG (which may
+# list several files) or ~/.kube/config. --flatten inlines certificate files so the result stands alone.
+render_eks_buildx_kubeconfig() {
+  kubectl config view --minify --flatten --context="${KUBE_CONTEXT}"
+}
+
+write_eks_buildx_kubeconfig() {
+  local builder_name="$1" kubeconfig_path tmp_path
+  kubeconfig_path="$(eks_buildx_kubeconfig_path "${builder_name}")"
+  (umask 077 && mkdir -p "$(dirname "${kubeconfig_path}")") || return 1
+  tmp_path="$(umask 077 && mktemp "${kubeconfig_path}.XXXXXX")" || return 1
+  if ! render_eks_buildx_kubeconfig > "${tmp_path}"; then
+    rm -f "${tmp_path}"
+    echo "ERROR: could not resolve kube context '${KUBE_CONTEXT}' from ${KUBECONFIG:-~/.kube/config}." >&2
+    return 1
+  fi
+  mv -f "${tmp_path}" "${kubeconfig_path}"
+  printf '%s\n' "${kubeconfig_path}"
+}
+
+# Encodes $1 the way Go's url.QueryEscape does, which is how buildx stores KUBECONFIG in an endpoint.
+query_escape() {
+  local LC_ALL=C
+  local value="$1" encoded="" char code hex i
+  for (( i = 0; i < ${#value}; i++ )); do
+    char="${value:i:1}"
+    case "${char}" in
+      [a-zA-Z0-9._~-]) encoded+="${char}" ;;
+      ' ') encoded+='+' ;;
+      *)
+        # Bytes >= 0x80 can come back sign-extended, so keep only the low byte.
+        printf -v code '%d' "'${char}"
+        printf -v hex '%%%02X' "$((code & 255))"
+        encoded+="${hex}"
+        ;;
+    esac
+  done
+  printf '%s\n' "${encoded}"
+}
+
+# Reads `docker buildx inspect` output on stdin. Succeeds only when every node is a kubernetes-driver
+# node created with KUBECONFIG=$1 and $1 exists, i.e. when the builder can only reach that file's
+# context. A node created without it (e.g. by an older version of this script), or whose file is
+# gone, falls back to the ambient current-context.
+buildx_nodes_use_kubeconfig() {
+  local expected_kubeconfig="$1" expected_query line endpoint query found=false
+  local endpoint_re='^Endpoint:[[:space:]]+(.*)$'
+  local kubeconfig_re='(^|&)kubeconfig=([^&]*)'
+  [[ -f "${expected_kubeconfig}" ]] || return 1
+  expected_query="$(query_escape "${expected_kubeconfig}")"
+  while IFS= read -r line; do
+    [[ "${line}" =~ ${endpoint_re} ]] || continue
+    endpoint="${BASH_REMATCH[1]}"
+    [[ "${endpoint}" == kubernetes://*\?* ]] || return 1
+    query="${endpoint#*\?}"
+    [[ "${query}" =~ ${kubeconfig_re} && "${BASH_REMATCH[2]}" == "${expected_query}" ]] || return 1
+    found=true
+  done
+  [[ "${found}" == true ]]
+}
+
+# Succeeds when builder $1 can be reused for KUBE_CONTEXT: its nodes use this builder's kubeconfig,
+# that file still matches what KUBE_CONTEXT resolves to, and both native nodes are running.
+eks_buildx_builder_is_ready() {
+  local builder_name="$1" builder_kubeconfig builder_status
+  if [[ -n "${KUBE_CONTEXT:-}" ]]; then
+    builder_kubeconfig="$(eks_buildx_kubeconfig_path "${builder_name}")"
+    [[ -f "${builder_kubeconfig}" ]] || return 1
+    # Compare the files so that a context re-pointed at another cluster gets a new builder.
+    render_eks_buildx_kubeconfig 2>/dev/null | cmp -s - "${builder_kubeconfig}" || return 1
+  fi
+  builder_status="$(docker buildx inspect "${builder_name}" 2>/dev/null)" || return 1
+  if [[ -n "${KUBE_CONTEXT:-}" ]] &&
+      ! buildx_nodes_use_kubeconfig "${builder_kubeconfig}" <<< "${builder_status}"; then
+    echo "Existing builder ${builder_name} is not pinned to kube context ${KUBE_CONTEXT}; it will be recreated." >&2
+    return 1
+  fi
+  buildx_nodes_are_ready <<< "${builder_status}"
+}
+
+# Removes builder $1 and its BuildKit Deployments without acting on any cluster other than KUBE_CONTEXT.
+# `docker buildx rm` deletes the Deployments through the builder's recorded kubeconfig, which is only
+# safe when that is this builder's pinned file. Otherwise the builder would resolve the ambient
+# current-context, possibly another deployment's cluster, so only its local entry is removed and its
+# Deployments are deleted by explicit context instead.
+remove_eks_buildx_builder() {
+  local builder_name="$1" builder_kubeconfig builder_status
+  if [[ "${BUILDX_BUILDER:-}" == "${builder_name}" ]]; then
+    unset BUILDX_BUILDER
+  fi
+  if [[ -z "${KUBE_CONTEXT:-}" ]]; then
+    docker buildx rm "${builder_name}" 2>/dev/null || true
+    return 0
+  fi
+
+  builder_kubeconfig="$(eks_buildx_kubeconfig_path "${builder_name}")"
+  builder_status="$(docker buildx inspect "${builder_name}" 2>/dev/null)" || builder_status=""
+  if [[ -n "${builder_status}" ]] &&
+      buildx_nodes_use_kubeconfig "${builder_kubeconfig}" <<< "${builder_status}"; then
+    docker buildx rm "${builder_name}" 2>/dev/null || true
+  else
+    # --keep-daemon only drops the local entry; it is a no-op when the builder does not exist.
+    docker buildx rm --keep-daemon "${builder_name}" 2>/dev/null || true
+    if [[ -n "${builder_status}" ]]; then
+      echo "Builder ${builder_name} was not pinned to kube context ${KUBE_CONTEXT}; removed it without using its recorded kubeconfig." >&2
+      kubectl --context="${KUBE_CONTEXT}" -n "${BUILDKIT_NAMESPACE:-buildkit}" \
+        delete deployment builder-amd64 builder-arm64 --ignore-not-found >&2 || true
+    fi
+  fi
+  rm -f "${builder_kubeconfig}"
+}
+
 ensure_eks_buildx_builder() {
-  local context builder_name namespace
+  local context builder_name namespace builder_kubeconfig
   set_k8s_context_args
   require_eks_context
 
@@ -148,7 +270,13 @@ ensure_eks_buildx_builder() {
     return 1
   fi
 
-  docker buildx rm "${builder_name}" 2>/dev/null || true
+  remove_eks_buildx_builder "${builder_name}"
+
+  # Without an explicit KUBE_CONTEXT the builder keeps following the caller's KUBECONFIG, as before.
+  builder_kubeconfig="${KUBECONFIG:-}"
+  if [[ -n "${KUBE_CONTEXT:-}" ]]; then
+    builder_kubeconfig="$(write_eks_buildx_kubeconfig "${builder_name}")" || return 1
+  fi
 
   echo "Creating buildx builder with the kubernetes driver for context ${context}"
   BUILDKIT_RESOURCE_OPTS=(
@@ -158,7 +286,7 @@ ensure_eks_buildx_builder() {
     --driver-opt="limits.memory=${BUILDKIT_LIMITS_MEMORY:-16Gi}"
   )
 
-  docker buildx create \
+  KUBECONFIG="${builder_kubeconfig}" docker buildx create \
     --name="${builder_name}" \
     --driver=kubernetes \
     --platform=linux/amd64 \
@@ -169,7 +297,7 @@ ensure_eks_buildx_builder() {
     "${BUILDKIT_RESOURCE_OPTS[@]}" \
     ${BUILDKIT_IMAGE:+--driver-opt="image=${BUILDKIT_IMAGE}"}
 
-  docker buildx create \
+  KUBECONFIG="${builder_kubeconfig}" docker buildx create \
     --append \
     --name="${builder_name}" \
     --driver=kubernetes \
@@ -181,7 +309,9 @@ ensure_eks_buildx_builder() {
     "${BUILDKIT_RESOURCE_OPTS[@]}" \
     ${BUILDKIT_IMAGE:+--driver-opt="image=${BUILDKIT_IMAGE}"}
 
-  docker buildx use "${builder_name}"
+  # Select the builder for this shell and its children only. `docker buildx use` would change the
+  # current builder for every other build on this machine. Callers can also pass --builder explicitly.
+  export BUILDX_BUILDER="${builder_name}"
   echo "BUILDX_BUILDER=${builder_name}"
   echo "Bootstrapping builder..."
 
