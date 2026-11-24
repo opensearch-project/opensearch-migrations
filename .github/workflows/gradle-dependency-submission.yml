@@ -1,36 +1,22 @@
 name: Gradle Dependency Submission
 
-# Resolves every Gradle configuration and submits the resulting graph, including transitive
-# JARs, to GitHub's dependency graph through the Dependency Submission API. Without this, the
-# dependency graph has no resolved Gradle dependencies, so Dependabot raises no alerts for Maven
-# artifacts, whether they're pulled in transitively or pinned through the version catalog and BOMs.
-#
-# Runs only for the default branch of the upstream repository. It doesn't run on pull_request
-# because submitting the graph needs a token with `contents: write`, and PR code must not run with one.
+# Submits the resolved Gradle dependency graph, including transitive JARs, to GitHub so that
+# Dependabot alerts cover Maven dependencies. It runs only on main because submitting needs
+# contents: write, and PR code must not run with that permission.
 on:
   push:
     branches:
       - main
-  schedule:
-    # Weekly refresh so the graph tracks the current resolution even when main is quiet.
-    - cron: '23 5 * * 1'
-  workflow_dispatch:
 
 permissions:
   contents: read
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
 
 jobs:
   dependency-submission:
     if: github.repository == 'opensearch-project/opensearch-migrations'
     runs-on: ubuntu-22.04
     permissions:
-      # The Dependency Submission API (POST /repos/{owner}/{repo}/dependency-graph/snapshots)
-      # requires contents: write. Nothing else in this job writes to the repository.
-      contents: write
+      contents: write # required by the Dependency Submission API
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -39,16 +25,4 @@ jobs:
         with:
           java-version: 21
           distribution: "corretto"
-      - name: Generate and submit dependency graph
-        uses: gradle/actions/dependency-submission@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
-        with:
-          # Reuse the Gradle User Home cached by CI.yml instead of adding another cache entry.
-          cache-read-only: true
-          artifact-retention-days: 7
-        env:
-          # Tag dependencies as 'runtime' only when they come from a main runtime classpath, or from the
-          # lucene configurations that get shaded into the snapshot reader jars. Everything else is
-          # tagged 'development': test and compile-only classpaths, build tooling in buildSrc, and the
-          # projects that hold only test fixtures. Every dependency is still submitted, whatever its scope.
-          DEPENDENCY_GRAPH_RUNTIME_INCLUDE_CONFIGURATIONS: '^(runtimeClasspath|lucene[0-9]+)$'
-          DEPENDENCY_GRAPH_RUNTIME_EXCLUDE_PROJECTS: '^:(buildSrc|testHelperFixtures|searchClusterTestFixtures)(:.*)?$'
+      - uses: gradle/actions/dependency-submission@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
