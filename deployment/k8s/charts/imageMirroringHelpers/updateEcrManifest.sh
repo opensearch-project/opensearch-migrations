@@ -18,6 +18,8 @@ CHART_DIR="$(cd "$SCRIPT_DIR/../aggregates/migrationAssistantWithArgo" && pwd)"
 TEST_CHART_DIR="$(cd "$SCRIPT_DIR/../aggregates/testClusters" && pwd)"
 MANIFEST="$CHART_DIR/infra/mirror/private-ecr-manifest.yaml"
 ECR_HOST="${ECR_HOST:-123456789012.dkr.ecr.us-east-1.amazonaws.com}"
+# Render for the EKS version MA deploys (Chart.yaml kubeVersion); helm 3's default is older and fails it.
+KUBE_VERSION="${KUBE_VERSION:-1.35.0}"
 DRY_RUN=false
 
 manifest_section() {
@@ -119,13 +121,15 @@ while IFS='|' read -r name version repo image_tag; do
   else
     helm pull "$name" --repo "$repo" --version "$version" --untar --untardir "$pull_dir" 2>/dev/null || { echo "    WARN: could not pull $name"; continue; }
   fi
-  dir=$(find "$pull_dir" -mindepth 1 -maxdepth 1 -type d | head -1)
-  if [ -n "$dir" ]; then
+  # Find the chart by its Chart.yaml: helm 3 also leaves an empty directory named after the chart reference.
+  chart_yaml=$(find "$pull_dir" -mindepth 2 -maxdepth 2 -name Chart.yaml | head -1)
+  if [ -n "$chart_yaml" ]; then
+    dir=$(dirname "$chart_yaml")
     # Render once into $RENDERED, with the values.yaml image.tag override (if any) so the deployed
     # tag is reported. Some charts (e.g. opentelemetry-operator) reject their own defaults via
     # values.schema.json; keep going so one chart cannot abort discovery, and flag it.
     RENDERED="$TMPDIR/rendered.yaml"
-    if ! helm template test "$dir/" ${image_tag:+--set-string "image.tag=$image_tag"} > "$RENDERED" 2>/dev/null; then
+    if ! helm template test "$dir/" --kube-version "$KUBE_VERSION" ${image_tag:+--set-string "image.tag=$image_tag"} > "$RENDERED" 2>/dev/null; then
       echo "    WARN: helm template failed for $name with default values; check its images manually"
       : > "$RENDERED"
     fi

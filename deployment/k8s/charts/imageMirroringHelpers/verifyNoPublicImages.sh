@@ -12,6 +12,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CHART_DIR="$(cd "$SCRIPT_DIR/../aggregates/migrationAssistantWithArgo" && pwd)"
 ECR="${1:-}"
+# Render for the EKS version MA deploys (Chart.yaml kubeVersion); helm 3's default is older and fails it.
+KUBE_VERSION="${KUBE_VERSION:-1.35.0}"
 
 if [ -z "$ECR" ]; then
   echo "Usage: $0 <ecr-host>" >&2
@@ -22,7 +24,7 @@ VALUES_FILE=$(mktemp)
 "$CHART_DIR/scripts/generatePrivateEcrValues.sh" "$ECR" > "$VALUES_FILE"
 
 echo "Rendering helm template with ECR values..."
-RENDERED=$(helm template test "$CHART_DIR" \
+RENDERED=$(helm template test "$CHART_DIR" --kube-version "$KUBE_VERSION" \
   -f "$CHART_DIR/values.yaml" \
   -f "$CHART_DIR/valuesEks.yaml" \
   -f "$VALUES_FILE" \
