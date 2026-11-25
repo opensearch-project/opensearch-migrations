@@ -106,13 +106,13 @@ public class DeltaLuceneReader {
         var previousSegmentToLeafReader = new TreeMap<String, LuceneLeafReader>();
         previousReader.leaves().forEach(
             leaf ->
-                previousSegmentToLeafReader.put(leaf.reader().getSegmentName(), leaf.reader())
+                previousSegmentToLeafReader.put(segmentKey(leaf.reader(), "previous"), leaf.reader())
         );
 
         var currentSegmentToLeafReader = new TreeMap<String, LuceneLeafReader>();
         currentReader.leaves().forEach(
             leaf ->
-                currentSegmentToLeafReader.put(leaf.reader().getSegmentName(), leaf.reader())
+                currentSegmentToLeafReader.put(segmentKey(leaf.reader(), "current"), leaf.reader())
         );
 
         log.atInfo()
@@ -175,6 +175,13 @@ public class DeltaLuceneReader {
             ).subscribeOn(Schedulers.boundedElastic());
 
         return new DeltaResult(additionsStream, deletionsStream);
+    }
+
+    private static String segmentKey(LuceneLeafReader reader, String snapshot) {
+        var id = reader.getSegmentId();
+        // Pre-Lucene-5 segments have no immutable ID. Conservatively rewrite these rather
+        // than assuming an identical filename proves the contents are identical.
+        return reader.getSegmentName() + ":" + (id == null ? snapshot : id);
     }
 
     private static List<ReaderAndBase> getAdditionsBetweenSnapshot(TreeMap<String, LuceneLeafReader>

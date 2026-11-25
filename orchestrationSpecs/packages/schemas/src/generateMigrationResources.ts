@@ -174,10 +174,16 @@ function statusSchemaFor(resource: ResourceProjection): Record<string, YamlValue
     }
     if (resource.kind === "DataSnapshot") {
         common.snapshotName = {type: "string"};
+        common.snapshotStartTimeMillis = {type: "integer", nullable: true};
         common.checksumForSnapshotMigration = {type: "string"};
     }
     if (resource.kind === "SnapshotMigration") {
         common.checksumForReplayer = {type: "string"};
+        common.sequenceCompletionChecksum = {type: "string"};
+        common.backfillRepeat = {
+            type: "object",
+            "x-kubernetes-preserve-unknown-fields": true,
+        };
         // Set once, when the backfill first starts; see fullMigration.ts migrateFromSnapshot.
         common.rfsSessionName = {type: "string"};
         common.outputs = {type: "object", "x-kubernetes-preserve-unknown-fields": true};

@@ -21,6 +21,7 @@
 #   0080-0089  Load tests (k6 traffic driven through the capture proxy). These need the
 #              standalone k6LoadTest chart, which the test runner installs when one of
 #              these IDs is selected. Explicit-selection only.
+#   0090-0099  Successive snapshot backfills on EKS. Explicit-selection only.
 #
 import json
 import os
@@ -54,6 +55,7 @@ from .test_cases.byoc_captured_traffic_tests import *
 from .test_cases.gcs_snapshot_tests import *
 from .test_cases.azure_snapshot_tests import *
 from .test_cases.k6_load_test_tests import *
+from .test_cases.continuous_backfill_tests import *
 
 logger = logging.getLogger(__name__)
 

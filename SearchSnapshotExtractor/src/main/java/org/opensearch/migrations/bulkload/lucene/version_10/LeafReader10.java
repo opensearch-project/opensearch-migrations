@@ -151,6 +151,12 @@ public class LeafReader10 implements LuceneLeafReader {
             .toString();
     }
 
+    @Override
+    public String getSegmentId() {
+        var id = getSegmentReader().getSegmentInfo().info.getId();
+        return id == null ? null : Base64.getEncoder().encodeToString(id);
+    }
+
     private volatile List<DocValueFieldInfo> cachedDocValueFields;
 
     @Override
