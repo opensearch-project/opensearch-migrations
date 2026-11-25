@@ -37,8 +37,9 @@ def getRepoNameIfPublishing = { Map cfg ->
     return publishedRepoByImageName[imageName]
 }
 
-// Changes daily so the registry layer cache can't replay an old 'dnf upgrade' layer
-def osUpgradeDate = java.time.LocalDate.now(java.time.ZoneOffset.UTC).toString()
+// Pinned AL2023 release and base images (see gradle.properties) for reproducible image builds
+def al2023Releasever = rootProject.property("al2023Releasever").toString()
+def al2023Image = ptc.rewrite(rootProject.property("al2023Image").toString())
 
 // Jib can't run 'dnf upgrade', so the Jib images build on java_runtime_base
 def javaRuntimeBase = [
@@ -93,7 +94,7 @@ def buildKitProjects = [
                 imageTag:   "latest",
                 buildArgs: [
                         BASE_IMAGE: ptc.rewrite("public.ecr.aws/amazonlinux/amazonlinux:2023-minimal"),
-                        OS_UPGRADE_DATE: osUpgradeDate,
+                        AL2023_RELEASEVER: al2023Releasever,
                 ]
         ],
         [
@@ -102,9 +103,9 @@ def buildKitProjects = [
                 imageName:  "elasticsearch_test_console",
                 imageTag:   "latest",
                 buildArgs: [
-                        BUILDER_IMAGE: ptc.rewrite("docker.io/library/amazonlinux:2023"),
-                        RUNTIME_IMAGE: ptc.rewrite("docker.io/library/amazonlinux:2023"),
-                        OS_UPGRADE_DATE: osUpgradeDate,
+                        BUILDER_IMAGE: al2023Image,
+                        RUNTIME_IMAGE: al2023Image,
+                        AL2023_RELEASEVER: al2023Releasever,
                 ]
         ],
         [

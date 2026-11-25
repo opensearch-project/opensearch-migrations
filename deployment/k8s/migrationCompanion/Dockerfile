@@ -2,10 +2,9 @@ ARG BASE_IMAGE=docker.io/library/amazonlinux:2023
 
 FROM ${BASE_IMAGE}
 
-# Move to the newest AL2023 release. OS_UPGRADE_DATE (set daily by the build) keeps the layer
-# cache from replaying an old upgrade.
-ARG OS_UPGRADE_DATE=unset
-RUN dnf upgrade -y --releasever=latest && dnf clean all && rm -rf /var/cache/dnf
+# Upgrade to the pinned AL2023 release (al2023Releasever in gradle.properties)
+ARG AL2023_RELEASEVER=2023.12.20261120
+RUN dnf upgrade -y --releasever=${AL2023_RELEASEVER} && dnf clean all && rm -rf /var/cache/dnf
 
 ARG MIGRATION_ASSISTANT_VERSION=0.0.0-dev
 

@@ -6,11 +6,11 @@ FROM ${BASE_IMAGE}
 ENV LANG=C.UTF-8 \
     JAVA_HOME=/usr/lib/jvm/java-21-amazon-corretto
 
-# AL2023 pins microdnf to the image's release, so only --releasever=latest finds newer packages.
-# OS_UPGRADE_DATE (set daily by the build) keeps the layer cache from replaying an old upgrade.
+# Upgrade to the pinned AL2023 release (al2023Releasever in gradle.properties), then add Corretto.
 # src.zip (JDK sources, ~50MB) isn't needed at runtime; the amazoncorretto image drops it too.
-ARG OS_UPGRADE_DATE=unset
-RUN microdnf upgrade -y --releasever=latest --setopt=install_weak_deps=0 --nodocs && \
-    microdnf install -y --setopt=install_weak_deps=0 --nodocs java-21-amazon-corretto-headless && \
+ARG AL2023_RELEASEVER=2023.12.20261120
+RUN microdnf upgrade -y --releasever=${AL2023_RELEASEVER} --setopt=install_weak_deps=0 --nodocs && \
+    microdnf install -y --releasever=${AL2023_RELEASEVER} --setopt=install_weak_deps=0 --nodocs \
+        java-21-amazon-corretto-headless && \
     microdnf clean all && \
     rm -rf /var/cache/dnf "${JAVA_HOME}/lib/src.zip"

@@ -45,10 +45,10 @@ FROM ${RUNTIME_IMAGE}
 ENV PIP_ROOT_USER_ACTION=ignore
 ENV LANG=C.UTF-8
 
-# Move to the newest AL2023 release (also for later installs here and in the console images).
-# OS_UPGRADE_DATE (set daily by the build) keeps the layer cache from replaying an old upgrade.
-ARG OS_UPGRADE_DATE=unset
-RUN dnf upgrade -y --releasever=latest && dnf clean all && rm -rf /var/cache/dnf
+# Upgrade to the pinned AL2023 release (al2023Releasever in gradle.properties); later installs
+# here and in the console images then come from that release too.
+ARG AL2023_RELEASEVER=2023.12.20261120
+RUN dnf upgrade -y --releasever=${AL2023_RELEASEVER} && dnf clean all && rm -rf /var/cache/dnf
 
 # Minimal runtime deps (no compilers, no *-devel)
 RUN dnf install -y \
