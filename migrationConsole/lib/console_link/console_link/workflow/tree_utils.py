@@ -23,7 +23,10 @@ APPROVAL_TEMPLATE_NAME = 'waitforuserapproval'
 # keep current. Matched by template rather than step name: step names vary by caller
 # (waitIndefinitelyForSnapshotMigration, ...Deps, waitIndefinitelyForSnapshot,
 # waitIndefinitelyForCompletion) and a rename silently blanked the overlay before.
-SNAPSHOT_MIGRATION_WAIT_TEMPLATE_NAME = 'waitindefinitelyforsnapshotmigration'
+SNAPSHOT_MIGRATION_WAIT_TEMPLATE_NAMES = frozenset({
+    'waitindefinitelyforsnapshotmigration',
+    'readsnapshotsequencecheckpoint',
+})
 DATA_SNAPSHOT_WAIT_TEMPLATE_NAME = 'waitindefinitelyfordatasnapshot'
 
 
@@ -197,7 +200,7 @@ def _node_template_name(node: Dict[str, Any]) -> str:
 
 
 def _is_snapshot_migration_wait_node(node: Dict[str, Any]) -> bool:
-    return _node_template_name(node) == SNAPSHOT_MIGRATION_WAIT_TEMPLATE_NAME
+    return _node_template_name(node) in SNAPSHOT_MIGRATION_WAIT_TEMPLATE_NAMES
 
 
 def _is_data_snapshot_wait_node(node: Dict[str, Any]) -> bool:
