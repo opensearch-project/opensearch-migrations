@@ -2,7 +2,6 @@
 ARG BASE_IMAGE=docker.io/library/amazoncorretto:21-al2023-headless
 FROM ${BASE_IMAGE}
 
-# AL2023 pins dnf to the image's release, so only --releasever=latest finds newer packages.
-# OS_UPGRADE_DATE (set daily by the build) keeps the layer cache from replaying an old upgrade.
-ARG OS_UPGRADE_DATE=unset
-RUN dnf upgrade -y --releasever=latest && dnf clean all && rm -rf /var/cache/dnf
+# Upgrade to the pinned AL2023 release (al2023Releasever in gradle.properties)
+ARG AL2023_RELEASEVER=2023.12.20261120
+RUN dnf upgrade -y --releasever=${AL2023_RELEASEVER} && dnf clean all && rm -rf /var/cache/dnf
