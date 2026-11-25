@@ -858,4 +858,92 @@ class JsonCommandLineParserTest {
         Assertions.assertTrue(exception.getMessage().contains("Unrecognized parameter"));
         Assertions.assertTrue(exception.getMessage().contains("invalidKey"));
     }
+
+    // ── Flags trailing the JSON: how a launcher adds per-invocation parameters (e.g. the RFS
+    // supervisor's --worker-instance-id) without rewriting the JSON document ─────────────────────
+
+    @Test
+    void testFlagsAfterInlineJsonOverlayTheDocument() throws Exception {
+        SimpleArgs args = new SimpleArgs();
+        JsonCommandLineParser parser = JsonCommandLineParser.newBuilder().addObject(args).build();
+
+        String json = "{\"name\":\"fromJson\",\"count\":7}";
+        parser.parse(new String[]{"---INLINE-JSON", json,
+            "--name", "fromCli", "--enabled", "--tags", "one", "--tags", "two"});
+
+        Assertions.assertEquals("fromCli", args.name);  // CLI wins over the document
+        Assertions.assertEquals(7, args.count);         // untouched JSON values survive
+        Assertions.assertTrue(args.enabled);            // trailing flag with no value = boolean
+        Assertions.assertEquals(List.of("one", "two"), args.tags);  // a list flag collects every occurrence
+    }
+
+    @Test
+    void testBooleanFlagTakesOnlyAnExplicitTrueOrFalse() throws Exception {
+        SimpleArgs args = new SimpleArgs();
+        JsonCommandLineParser parser = JsonCommandLineParser.newBuilder().addObject(args).build();
+        parser.parse(new String[]{"---INLINE-JSON", "{\"enabled\":true}", "--enabled", "false", "--name", "n"});
+        Assertions.assertFalse(args.enabled);
+        Assertions.assertEquals("n", args.name);
+    }
+
+    @Test
+    void testValueFlagWithoutValueIsRejected() throws Exception {
+        SimpleArgs args = new SimpleArgs();
+        JsonCommandLineParser parser = JsonCommandLineParser.newBuilder().addObject(args).build();
+        Exception exception = assertThrows(IllegalArgumentException.class, () ->
+            parser.parse(new String[]{"---INLINE-JSON", "{}", "--name"}));
+        Assertions.assertTrue(exception.getMessage().contains("requires a value"), exception.getMessage());
+    }
+
+    @Test
+    void testFlagsAfterJsonSkipRequirednessChecksLikeJsonItself() throws Exception {
+        // The overlay populates through the JSON path, so flags never trip JCommander's
+        // required-parameter validation (the document already satisfied or omitted those).
+        MainArgs args = new MainArgs();
+        JsonCommandLineParser parser = JsonCommandLineParser.newBuilder().addObject(args).build();
+
+        parser.parse(new String[]{"---INLINE-JSON", "{\"snapshotName\":\"snap\"}",
+            "--username", "worker-7"});
+
+        Assertions.assertEquals("snap", args.snapshotName);
+        Assertions.assertEquals("worker-7", args.connectionArgs.username);  // delegate fields too
+    }
+
+    @Test
+    void testUnknownFlagAfterJsonIsRejected() throws Exception {
+        SimpleArgs args = new SimpleArgs();
+        JsonCommandLineParser parser = JsonCommandLineParser.newBuilder().addObject(args).build();
+
+        Exception exception = assertThrows(IllegalArgumentException.class, () ->
+            parser.parse(new String[]{"---INLINE-JSON", "{\"name\":\"x\"}", "--no-such-flag", "v"}));
+        Assertions.assertTrue(exception.getMessage().contains("Unrecognized parameter"));
+    }
+
+    @Test
+    void testBareWordAfterJsonWithoutCommandsIsStillAnError() throws Exception {
+        SimpleArgs args = new SimpleArgs();
+        JsonCommandLineParser parser = JsonCommandLineParser.newBuilder().addObject(args).build();
+
+        Exception exception = assertThrows(IllegalArgumentException.class, () ->
+            parser.parse(new String[]{"---INLINE-JSON", "{\"name\":\"x\"}", "stray"}));
+        Assertions.assertTrue(exception.getMessage().contains("stray"));
+    }
+
+    @Test
+    void testFlagsAfterJsonWithLeadingCommand() throws Exception {
+        GlobalArgs globalArgs = new GlobalArgs();
+        MigrateCommand migrateCmd = new MigrateCommand();
+        JsonCommandLineParser parser = JsonCommandLineParser.newBuilder()
+            .addObject(globalArgs)
+            .addCommand(migrateCmd)
+            .build();
+
+        parser.parse(new String[]{"migrate", "---INLINE-JSON",
+            "{\"source\":\"/src\",\"target\":\"/dst\"}", "--verbose", "--source", "/cli-src"});
+
+        Assertions.assertEquals("migrate", parser.getParsedCommand());
+        Assertions.assertTrue(globalArgs.verbose);
+        Assertions.assertEquals("/cli-src", migrateCmd.source);
+        Assertions.assertEquals("/dst", migrateCmd.target);
+    }
 }

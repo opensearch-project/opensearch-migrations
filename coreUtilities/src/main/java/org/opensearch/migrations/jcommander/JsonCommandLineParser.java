@@ -19,6 +19,8 @@ import com.beust.jcommander.converters.NoConverter;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.Getter;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
@@ -152,16 +154,20 @@ public class JsonCommandLineParser {
     }
 
     private static class OuterParsedArgs {
+        private static final String[] NO_EXTRA_ARGS = new String[0];
         final String jsonContent;
         final String commandName;
+        final String[] extraArgs;
 
         public OuterParsedArgs() {
             this.commandName = null;
             this.jsonContent = null;
+            this.extraArgs = NO_EXTRA_ARGS;
         }
 
-        public OuterParsedArgs(String jsonContent, String commandName) {
+        public OuterParsedArgs(String jsonContent, String commandName, String[] extraArgs) {
             this.commandName = commandName;
+            this.extraArgs = extraArgs;
             String trimmedContent = jsonContent.trim();
             this.jsonContent = (trimmedContent.startsWith("{") || trimmedContent.startsWith("[")) ? jsonContent :
                 decodeBase64String(jsonContent);
@@ -215,46 +221,88 @@ public class JsonCommandLineParser {
         String jsonArg = args[jsonFlagIndex + 1];
         var jsonContent = isInline ? jsonArg : loadContentsFromFile(jsonArg);
 
-        // Valid args: [flag, json] or [command, flag, json] or [flag, json, command]
-        // Anything else is an error
-        if (args.length != 2 && args.length != 3) {
+        // Valid shapes: [flag, json], [command, flag, json], [flag, json, command] — optionally
+        // followed by ordinary --name value arguments, which overlay the JSON's values (how a
+        // launcher adds per-invocation parameters without rewriting the JSON document).
+        if (jsonFlagIndex > 1) {
             throw new IllegalArgumentException(
                 "Invalid arguments. Expected: [---INLINE-JSON|---JSON-FILE] <json> [command] " +
                     "or [command] [---INLINE-JSON|---JSON-FILE] <json>");
         }
+        String commandName = jsonFlagIndex == 1 ? args[0] : null;
+        int consumed = jsonFlagIndex + 2;
+        if (commandName == null && consumed < args.length && !args[consumed].startsWith("-")) {
+            commandName = args[consumed];
+            consumed++;
+        }
+        String[] extraArgs = Arrays.copyOfRange(args, consumed, args.length);
 
-        // check for commands if they're possibly defined
-        String commandName;
-        if (!commandObjects.isEmpty()) {
-            // Look at the extra argument - either null, or in slot 0 or 2
-            commandName = (args.length != 3) ? null : args[jsonFlagIndex == 0 ? 2 : 0];
-            if (commandName != null) {
+        if (commandName != null) {
+            if (commandObjects.isEmpty()) {
+                throw new IllegalArgumentException(
+                    "Unexpected argument: '" + commandName + "'. No commands have been configured.");
+            }
+            if (!commandObjects.containsKey(commandName)) {
+                throw new IllegalArgumentException(
+                    "Unknown command: '" + commandName + "'. " +
+                        "Available commands: " + commandObjects.keySet());
+            }
+        } else if (!commandObjects.isEmpty()) { // check json fields
+            JsonNode rootNode = objectMapper.readTree(jsonContent);
+            if (rootNode.has(JCOMMANDER_COMMAND_JSON_FIELD_NAME)) {
+                commandName = rootNode.get(JCOMMANDER_COMMAND_JSON_FIELD_NAME).asText();
                 if (!commandObjects.containsKey(commandName)) {
                     throw new IllegalArgumentException(
-                        "Unknown command: '" + commandName + "'. " +
+                        "Unknown command in JSON: '" + commandName + "'. " +
                             "Available commands: " + commandObjects.keySet());
                 }
-            } else { // check json fields
-                JsonNode rootNode = objectMapper.readTree(jsonContent);
-                if (rootNode.has(JCOMMANDER_COMMAND_JSON_FIELD_NAME)) {
-                    commandName = rootNode.get(JCOMMANDER_COMMAND_JSON_FIELD_NAME).asText();
-                    if (!commandObjects.containsKey(commandName)) {
-                        throw new IllegalArgumentException(
-                            "Unknown command in JSON: '" + commandName + "'. " +
-                                "Available commands: " + commandObjects.keySet());
-                    }
-                }
             }
-            return new OuterParsedArgs(jsonContent, commandName);
-        } else if (args.length == 3) {
-            throw new IllegalArgumentException(
-                "Unexpected argument: '" + (jsonFlagIndex == 0 ? args[2] : args[0]) + "'. " +
-                    "No commands have been configured.");
-        } else {
-            commandName = null;
         }
 
-        return new OuterParsedArgs(jsonContent, commandName);
+        return new OuterParsedArgs(jsonContent, commandName, extraArgs);
+    }
+
+    /**
+     * {@code --name value} / {@code --flag} arguments trailing the JSON, as a JSON object so they
+     * populate (and validate) through exactly the same path as the document itself. A boolean
+     * parameter takes a value only when the next token is {@code true} or {@code false}; a list
+     * parameter collects every occurrence; an unknown name keeps its value as text so validation
+     * reports it.
+     */
+    private ObjectNode buildOverlayNode(String[] extraArgs, String commandName) throws ReflectiveOperationException {
+        Map<String, FieldInfo> parameters = new HashMap<>();
+        for (Object obj : mainObjects) {
+            parameters.putAll(buildParameterMap(obj, obj.getClass()));
+        }
+        if (commandName != null) {
+            Object commandObj = commandObjects.get(commandName);
+            parameters.putAll(buildParameterMap(commandObj, commandObj.getClass()));
+        }
+        var overlay = objectMapper.createObjectNode();
+        for (int i = 0; i < extraArgs.length; i++) {
+            String arg = extraArgs[i];
+            if (!arg.startsWith("-")) {
+                throw new IllegalArgumentException(
+                    "Invalid arguments: expected a --name argument after the JSON content, but got '" + arg + "'");
+            }
+            String name = arg.replaceAll("^-+", "");
+            FieldInfo fieldInfo = parameters.get(name);
+            Class<?> type = fieldInfo == null ? String.class : fieldInfo.field.getType();
+            String next = i + 1 < extraArgs.length ? extraArgs[i + 1] : null;
+            if (type == boolean.class || type == Boolean.class) {
+                boolean explicit = "true".equalsIgnoreCase(next) || "false".equalsIgnoreCase(next);
+                overlay.put(name, explicit ? Boolean.parseBoolean(extraArgs[++i]) : true);
+            } else if (next == null || next.startsWith("-")) {
+                throw new IllegalArgumentException("Invalid arguments: " + arg + " requires a value");
+            } else if (List.class.isAssignableFrom(type)) {
+                JsonNode existing = overlay.get(name);
+                var values = existing instanceof ArrayNode array ? array : overlay.putArray(name);
+                values.add(extraArgs[++i]);
+            } else {
+                overlay.put(name, extraArgs[++i]);
+            }
+        }
+        return overlay;
     }
 
     private void parseJson(OuterParsedArgs parsedArgs) throws JsonProcessingException, ReflectiveOperationException
@@ -263,7 +311,7 @@ public class JsonCommandLineParser {
         JsonNode rootNode = objectMapper.readTree(parsedArgs.jsonContent);
 
         // Build combined parameter map from ALL objects that will be populated
-        validateAllKeysAreParameters(parsedArgs, rootNode);
+        validateAllKeysAreParameters(parsedArgs.commandName, rootNode);
 
         for (Object obj : mainObjects) {
             populateFromJson(objectMapper, obj, rootNode);
@@ -277,17 +325,29 @@ public class JsonCommandLineParser {
             parsedCommandField.setAccessible(true);
             parsedCommandField.set(jCommander, parsedArgs.commandName);
         }
+
+        if (parsedArgs.extraArgs.length > 0) {
+            // Explicit command-line arguments overlay the JSON document's values.
+            ObjectNode overlay = buildOverlayNode(parsedArgs.extraArgs, parsedArgs.commandName);
+            validateAllKeysAreParameters(parsedArgs.commandName, overlay);
+            for (Object obj : mainObjects) {
+                populateFromJson(objectMapper, obj, overlay);
+            }
+            if (parsedArgs.commandName != null) {
+                populateFromJson(objectMapper, commandObjects.get(parsedArgs.commandName), overlay);
+            }
+        }
     }
 
-    private void validateAllKeysAreParameters(OuterParsedArgs parsedArgs, JsonNode rootNode)
+    private void validateAllKeysAreParameters(String commandName, JsonNode rootNode)
         throws ReflectiveOperationException
     {
         var allParameters = new HashSet<>();
         for (Object obj : mainObjects) {
             allParameters.addAll(buildParameterMap(obj, obj.getClass()).keySet());
         }
-        if (parsedArgs.commandName != null) {
-            Object commandObj = commandObjects.get(parsedArgs.commandName);
+        if (commandName != null) {
+            Object commandObj = commandObjects.get(commandName);
             allParameters.addAll(buildParameterMap(commandObj, commandObj.getClass()).keySet());
         }
 
