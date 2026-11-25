@@ -93,7 +93,7 @@ def buildKitProjects = [
                 imageName:  "java_runtime_base",
                 imageTag:   "latest",
                 buildArgs: [
-                        BASE_IMAGE: ptc.rewrite("public.ecr.aws/amazonlinux/amazonlinux:2023-minimal"),
+                        BASE_IMAGE: ptc.rewrite(rootProject.property("al2023MinimalImage").toString()),
                         AL2023_RELEASEVER: al2023Releasever,
                 ]
         ],
