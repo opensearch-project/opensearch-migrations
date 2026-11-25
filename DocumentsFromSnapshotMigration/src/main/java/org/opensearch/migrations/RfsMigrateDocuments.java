@@ -103,20 +103,26 @@ import software.amazon.awssdk.services.s3.S3AsyncClient;
 
 @Slf4j
 public class RfsMigrateDocuments {
+    @FunctionalInterface
+    private interface CheckedRunnable {
+        void run() throws Exception;
+    }
+
     // Keeps the worker-phase gauge registered for the life of the process.
     @SuppressWarnings("unused")
     private static AutoCloseable workerPhaseGauge;
     public static final int PROCESS_TIMED_OUT_EXIT_CODE = 2;
     // Exit code 3 is deliberately unassigned: the JVM exits 3 on heap OOM via
-    // -XX:+ExitOnOutOfMemoryError, and the sidecar crash witness treats exit 3 as OOM evidence
+    // -XX:+ExitOnOutOfMemoryError, and the in-container supervisor records exit 3 as OOM evidence
     // for the memory-tier escalation.  NO_WORK_LEFT therefore moved from 3 to 6 (script v3.2);
     // nothing outside the container consumed the old value.
     public static final int NO_WORK_AVAILABLE_EXIT_CODE = 4;
     // Keep harmonized with the metadata command's MigratorEvaluatorBase.SNAPSHOT_READ_FAILED_EXIT_CODE.
     public static final int SNAPSHOT_READ_FAILED_EXIT_CODE = 5;
     public static final int NO_WORK_LEFT_EXIT_CODE = 6;
-    // Non-zero on purpose: kubelet restart backoff paces the re-checks and the waiting container
-    // makes the pod not-ready, which ranks it first for ReplicaSet downscale victim selection.
+    // Non-zero on purpose: the in-container supervisor sleeps 15-30s before relaunching, pacing
+    // the re-checks while the pod stays Ready at a low pod-deletion-cost — exactly the pod a
+    // monitor-driven scale-down should take.
     public static final int TIER_OVER_LEASE_CAP_EXIT_CODE = 7;
 
     // Arbitrary value, increasing from 5 to 15 seconds due to prevalence of clock skew exceptions
@@ -408,12 +414,27 @@ public class RfsMigrateDocuments {
         public int workerMemoryTier = 0;
 
         @Parameter(required = false,
-            names = { "--crash-verdict-file", "--crashVerdictFile" },
-            description = "Optional. Path to the JSONL crash-verdict file appended by the pod's sidecar crash " +
-                "witness (one record per bulk-loader termination). When unset the startup dirty-lease sweep still " +
-                "runs, but every dirty lease is release-only (no OOM attribution, so no tier escalation). " +
-                "Normally injected as RFS_CRASH_VERDICT_FILE.")
-        public String crashVerdictFile = null;
+            names = { "--worker-instance-id", "--workerInstanceId" },
+            description = "Optional. This process's instance id; the worker id becomes <hostname>_<instanceId>. The " +
+                "in-container supervisor passes one per launch so it can later tell the " +
+                "next worker how this one died. Default: a random UUID.")
+        public String workerInstanceId = null;
+
+        @Parameter(required = false,
+            names = { "--predecessor-crashes", "--predecessorCrashes" },
+            description = "Optional. How recent predecessor workers in this container died, as " +
+                "<instanceId>=<exit code or OOMKilled>[,...]. Passed by the in-container supervisor. " +
+                "The startup dirty-lease sweep escalates a dead predecessor's lease on OOM " +
+                "(exit 3 or OOMKilled) and releases it at the same tier otherwise or when the holder isn't listed.")
+        public String predecessorCrashes = null;
+
+        @Parameter(required = false,
+            names = { "--sweep-only", "--sweepOnly" },
+            description = "Optional. Run the startup dirty-lease sweep (escalate or release leases that dead " +
+                "predecessors in this pod left behind) and exit without acquiring work. The in-container " +
+                "supervisor passes this when it is terminated between a worker crash and the next " +
+                "worker launch.")
+        public boolean sweepOnly = false;
     }
 
     /**
@@ -595,6 +616,10 @@ public class RfsMigrateDocuments {
         if (args.workerMemoryTier < 0) {
             throw new ParameterException("--worker-memory-tier must be 0 or positive.");
         }
+        if (args.workerInstanceId != null && !args.workerInstanceId.matches("[A-Za-z0-9.-]*")) {
+            // The worker id is <hostname>_<instanceId>; the dirty-lease sweep splits on the last '_'.
+            throw new ParameterException("--worker-instance-id may only contain letters, digits, '.' and '-'.");
+        }
         validateFailedDocumentStreamArgs(args.failedDocumentStreamArgs);
     }
 
@@ -716,10 +741,8 @@ public class RfsMigrateDocuments {
     }
 
     public static void main(String[] args) throws Exception {
-        var workerId = ProcessHelpers.getNodeInstanceName();
         System.err.println("Starting program with: " + String.join(" ", ArgLogUtils.getRedactedArgs(args, ArgNameConstants.CENSORED_ARGS)));
         System.setProperty("log4j2.shutdownHookEnabled", "false");
-        log.atInfo().setMessage("Starting RfsMigrateDocuments with workerId={}").addArgument(workerId).log();
 
         Args arguments = EnvVarParameterPuller.injectFromEnv(new Args(), "RFS_");
         var jCommander = JsonCommandLineParser.newBuilder().addObject(arguments).build();
@@ -731,6 +754,8 @@ public class RfsMigrateDocuments {
         }
 
         validateArgs(arguments);
+        var workerId = resolveWorkerId(arguments);
+        log.atInfo().setMessage("Starting RfsMigrateDocuments with workerId={}").addArgument(workerId).log();
 
         // Forward the position-gap stopword to the reconstruction layer via system property —
         // LuceneLeafReader.joinWithOffsets reads it from RfsTunables.positionGapStopword().
@@ -914,9 +939,33 @@ public class RfsMigrateDocuments {
                         context.getWorkCoordinationContext()::createReleaseWorkItemContext,
                         failedDocumentStreamSink, metricsReporter),
                 Clock.systemUTC());) {
+            // Startup dirty-lease sweep: if a predecessor process in this pod died holding a lease,
+            // escalate (OOM) or release (anything else) the item before acquiring any work, using the
+            // supervisor's report of how each predecessor died. The shutdown hook runs it too when
+            // SIGTERM arrives before it finished, so a crashed predecessor's lease is never left behind.
+            var startupSweepDone = new AtomicBoolean(false);
+            CheckedRunnable startupSweep = () -> {
+                DirtyLeaseSweeper.runStartupSweep(
+                    workCoordinator,
+                    workerId,
+                    arguments.workerMemoryTier,
+                    DirtyLeaseSweeper.parsePredecessorCrashes(arguments.predecessorCrashes),
+                    context.makeEscalationRecorder());
+                startupSweepDone.set(true);
+            };
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
                 Thread.currentThread().setName("Cleanup-Hook-Thread");
                 log.atWarn().setMessage("Received shutdown signal. Trying to mark progress and shutdown cleanly.").log();
+                if (!startupSweepDone.get()) {
+                    try {
+                        log.atWarn().setMessage("Shutdown arrived before the startup dirty-lease sweep finished; sweeping now").log();
+                        startupSweep.run();
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    } catch (Exception e) {
+                        log.atError().setCause(e).setMessage("Dirty-lease sweep during shutdown failed").log();
+                    }
+                }
                 try {
                     Optional.ofNullable(cancellationRunnableRef.get()).ifPresent(Runnable::run);
                     executeCleanShutdownProcess(workItemRef, progressCursor, workCoordinator, cleanShutdownCompleted,
@@ -948,18 +997,13 @@ public class RfsMigrateDocuments {
             MDC.put(LOGGING_MDC_WORKER_ID, workerId);
 
             workCoordinator.setWorkerMemoryTier(arguments.workerMemoryTier);
-            // Startup dirty-lease sweep: if a predecessor process in this pod died holding a
-            // lease, attribute its death from the sidecar's verdict file and escalate (OOM) or
-            // release (anything else) the item before acquiring any work.
-            DirtyLeaseSweeper.runStartupSweep(
-                workCoordinator,
-                workerId,
-                arguments.workerMemoryTier,
-                arguments.crashVerdictFile == null || arguments.crashVerdictFile.isBlank()
-                    ? null : Paths.get(arguments.crashVerdictFile),
-                Clock.systemUTC(),
-                DirtyLeaseSweeper.DEFAULT_VERDICT_POLL_BUDGET,
-                context.makeEscalationRecorder());
+            startupSweep.run();
+            if (arguments.sweepOnly) {
+                log.atInfo().setMessage("Sweep-only run finished; exiting without acquiring work").log();
+                cleanShutdownCompleted.set(true);
+                WorkerPhase.enter(WorkerPhase.Phase.EXITED);
+                System.exit(0);
+            }
 
             WorkerPhase.enter(WorkerPhase.Phase.ACQUIRING_WORK);
             var status = sourceFactory.buildAndRun(
@@ -1228,6 +1272,15 @@ public class RfsMigrateDocuments {
             .addArgument(calculateTotalRetryWindowSeconds(completionRetryConfig))
             .log();
         return completionRetryConfig;
+    }
+
+    /** {@code <hostname>_<instanceId>}, with the supervisor's instance id when it provides one. */
+    static String resolveWorkerId(Args arguments) {
+        var nodeInstanceName = ProcessHelpers.getNodeInstanceName();
+        if (arguments.workerInstanceId == null || arguments.workerInstanceId.isBlank()) {
+            return nodeInstanceName;
+        }
+        return DirtyLeaseSweeper.podNamePrefixOf(nodeInstanceName) + arguments.workerInstanceId;
     }
 
     /**

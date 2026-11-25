@@ -1,82 +1,82 @@
 package org.opensearch.migrations.bulkload.workcoordination;
 
 import java.io.IOException;
-import java.nio.file.Path;
-import java.time.Clock;
-import java.time.Duration;
-import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.function.IntConsumer;
 
 import lombok.extern.slf4j.Slf4j;
 
 /**
  * Startup sweep run by each worker process before any acquisition: find leases left live by a dead
- * predecessor process in the same pod (hard kills — heap OOM, cgroup SIGKILL, native crash — are
- * the only exits that leave a live lease behind), decide from the sidecar's crash-verdict file
- * whether the death was an OOM, and either escalate the item to a higher memory tier or release
- * it for an immediate same-tier retry.
+ * predecessor process in the same pod (hard kills — heap OOM, SIGKILL, native crash — are the only
+ * exits that leave a live lease behind) and either escalate the item to a higher memory tier or
+ * release it for an immediate same-tier retry.
  *
- * <p>The verdict-file poll is bounded (~10 s) and incurred only when a dirty lease exists with no
- * covering verdict record — the normal cold start and clean restart pay nothing.  The miss case is
- * fail-safe in the cheap direction: no verdict → release-only, no tier bump; a real OOM recurs and
- * is attributed on a later round.
+ * <p>Why each predecessor died comes from the in-container supervisor
+ * (runJavaWithClasspathWithRepeat.sh), which launches every worker with an instance id and passes
+ * the next worker the recent crashes as {@code <instanceId>=<exit code or OOMKilled>} entries. A
+ * lease names its holder as {@code <podName>_<instanceId>}, so attribution is exact. A dirty lease
+ * whose holder isn't in that list (for example one left by the previous incarnation of the
+ * container) has no evidence and is released at the same tier: a real OOM recurs and is attributed
+ * on a later round.
  */
 @Slf4j
 public class DirtyLeaseSweeper {
-    /** Covering-verdict skew allowance between kubelet and coordinator clocks. */
-    public static final long CLOCK_SKEW_ALLOWANCE_SECONDS = 15;
-    /** Total budget for waiting on the sidecar to append a covering verdict record. */
-    public static final Duration DEFAULT_VERDICT_POLL_BUDGET = Duration.ofSeconds(10);
-    private static final Duration VERDICT_POLL_INTERVAL = Duration.ofMillis(500);
-
     private DirtyLeaseSweeper() {}
 
     public enum Disposition { ESCALATE, RELEASE }
 
     /**
-     * The sweep's classification rule as a pure function: a covering OOM verdict escalates;
-     * a covering non-OOM verdict, or no covering verdict at all, releases at the same tier.
+     * The classification rule: only positive OOM evidence (a heap-OOM exit 3, or OOMKilled) climbs
+     * the memory ladder. Any other crash, a bare 137 included, and the no-evidence case release at
+     * the same tier, so a fleet-wide non-memory crasher can never multiply the run's cost.
      */
-    public static Disposition classify(Optional<CrashVerdictReader.VerdictRecord> coveringVerdict) {
-        return coveringVerdict.map(v -> v.isOom() ? Disposition.ESCALATE : Disposition.RELEASE)
+    public static Disposition classify(Optional<String> predecessorOutcome) {
+        return predecessorOutcome
+            .map(outcome -> "3".equals(outcome) || "OOMKilled".equals(outcome)
+                ? Disposition.ESCALATE : Disposition.RELEASE)
             .orElse(Disposition.RELEASE);
     }
 
-    /** The pod-name prefix (including the trailing separator) of a {@code <podName>_<uuid>} worker id. */
+    /**
+     * Parses the supervisor's {@code id=outcome[,id=outcome...]} list. Blank input means no known
+     * crashes; malformed entries are skipped.
+     */
+    public static Map<String, String> parsePredecessorCrashes(String spec) {
+        var crashes = new LinkedHashMap<String, String>();
+        if (spec == null || spec.isBlank()) {
+            return crashes;
+        }
+        for (var entry : spec.split(",")) {
+            int separator = entry.indexOf('=');
+            if (separator <= 0 || separator == entry.length() - 1) {
+                continue;
+            }
+            crashes.put(entry.substring(0, separator).trim(), entry.substring(separator + 1).trim());
+        }
+        return crashes;
+    }
+
+    /** The pod-name prefix (including the trailing separator) of a {@code <podName>_<instanceId>} worker id. */
     public static String podNamePrefixOf(String workerId) {
         int separator = workerId.lastIndexOf('_');
         if (separator < 0) {
             throw new IllegalArgumentException(
-                "workerId '" + workerId + "' does not follow the <podName>_<uuid> convention");
+                "workerId '" + workerId + "' does not follow the <podName>_<instanceId> convention");
         }
         return workerId.substring(0, separator + 1);
     }
 
-    public static void runStartupSweep(
-        OpenSearchWorkCoordinator coordinator,
-        String workerId,
-        int workerMemoryTier,
-        Path verdictFileOrNull,
-        Clock clock
-    ) throws IOException, InterruptedException {
-        runStartupSweep(coordinator, workerId, workerMemoryTier, verdictFileOrNull, clock,
-            DEFAULT_VERDICT_POLL_BUDGET);
-    }
-
-    public static void runStartupSweep(
-        OpenSearchWorkCoordinator coordinator,
-        String workerId,
-        int workerMemoryTier,
-        Path verdictFileOrNull,
-        Clock clock,
-        Duration verdictPollBudget
-    ) throws IOException, InterruptedException {
-        runStartupSweep(coordinator, workerId, workerMemoryTier, verdictFileOrNull, clock,
-            verdictPollBudget, null);
+    /** The instance id (everything after the last separator) of a {@code <podName>_<instanceId>} worker id. */
+    public static String instanceIdOf(String workerId) {
+        return workerId.substring(podNamePrefixOf(workerId).length());
     }
 
     /**
+     * @param predecessorCrashes how recent predecessors in this container died, keyed by instance id
      * @param onEscalation invoked with the destination tier for each escalation actually applied
      *                     (metrics hook); may be null
      */
@@ -84,10 +84,8 @@ public class DirtyLeaseSweeper {
         OpenSearchWorkCoordinator coordinator,
         String workerId,
         int workerMemoryTier,
-        Path verdictFileOrNull,
-        Clock clock,
-        Duration verdictPollBudget,
-        java.util.function.IntConsumer onEscalation
+        Map<String, String> predecessorCrashes,
+        IntConsumer onEscalation
     ) throws IOException, InterruptedException {
         List<OpenSearchWorkCoordinator.DirtyLease> dirtyLeases;
         try {
@@ -105,64 +103,33 @@ public class DirtyLeaseSweeper {
         }
         log.atWarn().setMessage("Dirty-lease sweep found {} live lease(s) from dead predecessor(s) in this pod: {}")
             .addArgument(dirtyLeases.size()).addArgument(dirtyLeases).log();
-        // One shared poll deadline bounds total startup delay even with several dirty leases.
-        var pollDeadline = clock.instant().plus(verdictPollBudget);
         for (var lease : dirtyLeases) {
-            var verdict = awaitCoveringVerdict(verdictFileOrNull, lease.getLeaseAcquiredAtEpochSeconds(),
-                pollDeadline, clock);
-            switch (classify(verdict)) {
-                case ESCALATE: {
-                    int newTier = workerMemoryTier + 1;
-                    boolean applied = coordinator.escalateWorkItem(
-                        lease.getWorkItemId(), lease.getLeaseHolderId(), newTier);
-                    if (applied && onEscalation != null) {
-                        onEscalation.accept(newTier);
-                    }
-                    log.atWarn().setMessage(
-                            "OOM verdict {} for dirty lease {}; escalate to tier >= {} {}")
-                        .addArgument(verdict.orElse(null))
-                        .addArgument(lease.getWorkItemId())
-                        .addArgument(newTier)
-                        .addArgument(applied ? "applied" : "no-op (lease moved or item completed)")
-                        .log();
-                    break;
+            var outcome = Optional.ofNullable(
+                predecessorCrashes.get(instanceIdOf(lease.getLeaseHolderId())));
+            if (classify(outcome) == Disposition.ESCALATE) {
+                int newTier = workerMemoryTier + 1;
+                boolean applied = coordinator.escalateWorkItem(
+                    lease.getWorkItemId(), lease.getLeaseHolderId(), newTier);
+                if (applied && onEscalation != null) {
+                    onEscalation.accept(newTier);
                 }
-                case RELEASE:
-                default: {
-                    boolean applied = coordinator.releaseDirtyLease(
-                        lease.getWorkItemId(), lease.getLeaseHolderId());
-                    log.atWarn().setMessage(
-                            "No OOM evidence for dirty lease {} (verdict={}); released at same tier: {}")
-                        .addArgument(lease.getWorkItemId())
-                        .addArgument(verdict.orElse(null))
-                        .addArgument(applied ? "applied" : "no-op (lease moved or item completed)")
-                        .log();
-                    break;
-                }
+                log.atWarn().setMessage("Predecessor {} died of OOM ({}) holding {}; escalate to tier >= {} {}")
+                    .addArgument(lease.getLeaseHolderId())
+                    .addArgument(outcome.orElse(null))
+                    .addArgument(lease.getWorkItemId())
+                    .addArgument(newTier)
+                    .addArgument(applied ? "applied" : "no-op (lease moved or item completed)")
+                    .log();
+            } else {
+                boolean applied = coordinator.releaseDirtyLease(
+                    lease.getWorkItemId(), lease.getLeaseHolderId());
+                log.atWarn().setMessage("No OOM evidence for {} held by {} (outcome={}); released at same tier: {}")
+                    .addArgument(lease.getWorkItemId())
+                    .addArgument(lease.getLeaseHolderId())
+                    .addArgument(outcome.orElse("unknown"))
+                    .addArgument(applied ? "applied" : "no-op (lease moved or item completed)")
+                    .log();
             }
-        }
-    }
-
-    /**
-     * Return the newest covering verdict, polling the file until {@code pollDeadline} only while
-     * no covering record exists.  A null verdict file (sidecar not configured) returns empty
-     * immediately so every dirty lease is release-only.
-     */
-    static Optional<CrashVerdictReader.VerdictRecord> awaitCoveringVerdict(
-        Path verdictFileOrNull, long leaseAcquiredAtEpochSeconds, Instant pollDeadline, Clock clock
-    ) throws InterruptedException {
-        if (verdictFileOrNull == null) {
-            return Optional.empty();
-        }
-        while (true) {
-            var covering = CrashVerdictReader.newestCoveringVerdict(
-                CrashVerdictReader.readVerdicts(verdictFileOrNull),
-                leaseAcquiredAtEpochSeconds,
-                CLOCK_SKEW_ALLOWANCE_SECONDS);
-            if (covering.isPresent() || !clock.instant().isBefore(pollDeadline)) {
-                return covering;
-            }
-            Thread.sleep(VERDICT_POLL_INTERVAL.toMillis());
         }
     }
 }

@@ -1,11 +1,8 @@
 package org.opensearch.migrations.bulkload.workcoordination;
 
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Stream;
 
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
@@ -20,7 +17,6 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.TestInstance;
-import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 
@@ -303,7 +299,7 @@ public class WorkCoordinatorMemoryTierTest {
     @ParameterizedTest
     @MethodSource("coordinatorVariants")
     void dirtyLeaseSweepEscalatesOnOomAndReleasesOtherwise(
-        SearchClusterContainer.ContainerVersion version, @TempDir Path tempDir) throws Exception {
+        SearchClusterContainer.ContainerVersion version) throws Exception {
         setup(version);
         var context = WorkCoordinationTestContext.factory().noOtelTracking();
         var oomItem = workId("oom-index", 0, 0);
@@ -312,7 +308,6 @@ public class WorkCoordinatorMemoryTierTest {
 
         // Three "predecessor" processes in pod1 (a worker holds at most one lease at a time)
         // each lease one item and die hard (no release); the third deliberately abandons its.
-        long leaseAcquiredAt;
         try (var creator = factory.get(httpClient, 3600, "pod1_creatoruuid")) {
             for (var item : List.of(oomItem, crashItem, abandonedItem)) {
                 creator.createUnassignedWorkItem(item, context::createUnassignedWorkContext);
@@ -333,8 +328,8 @@ public class WorkCoordinatorMemoryTierTest {
             }
         }
         Assertions.assertNotNull(abandonedHolder, "one predecessor should have drawn the abandoned item");
-        leaseAcquiredAt = workItemSource(oomItem)
-            .path(OpenSearchWorkCoordinator.LEASE_ACQUIRED_AT_FIELD_NAME).asLong();
+        var oomHolder = workItemSource(oomItem).path("leaseHolderId").asText();
+        var crashHolder = workItemSource(crashItem).path("leaseHolderId").asText();
 
         // Case (d-ish): a different pod's worker must see nothing dirty here.
         try (var otherPod = factory.get(httpClient, 3600, "pod9_other-uuid")) {
@@ -346,21 +341,24 @@ public class WorkCoordinatorMemoryTierTest {
             var dirty = successor.findDirtyLeases("pod1_", "pod1_new-uuid");
             Assertions.assertEquals(2, dirty.size(), "abandoned lease must be skipped: " + dirty);
 
-            // OOM verdict covering the lease -> escalation; sweep both items with one file.
-            var verdictFile = tempDir.resolve("verdicts.jsonl");
-            Files.write(verdictFile,
-                ("{\"finishedAt\": " + (leaseAcquiredAt + 5) + ", \"exitCode\": 3, \"reason\": \"Error\", \"restartCount\": 1}\n")
-                    .getBytes(StandardCharsets.UTF_8));
-            DirtyLeaseSweeper.runStartupSweep(successor, "pod1_new-uuid", 0, verdictFile,
-                Clock.systemUTC(), Duration.ofSeconds(1));
+            // The supervisor reports the OOM-item holder as heap OOM and the other as an uncaught
+            // exception; the abandoned item's holder as OOM too, which must not matter.
+            var crashes = Map.of(
+                DirtyLeaseSweeper.instanceIdOf(oomHolder), "3",
+                DirtyLeaseSweeper.instanceIdOf(crashHolder), "1",
+                DirtyLeaseSweeper.instanceIdOf(abandonedHolder), "3");
+            DirtyLeaseSweeper.runStartupSweep(successor, "pod1_new-uuid", 0, crashes, null);
 
-            for (var item : List.of(oomItem, crashItem)) {
-                var doc = workItemSource(item);
-                Assertions.assertEquals(0, doc.path("expiration").asLong(), item + " lease must be cleared");
-                Assertions.assertEquals(1,
-                    doc.path(OpenSearchWorkCoordinator.REQUIRED_MEMORY_TIER_FIELD_NAME).asInt(),
-                    item + " must be escalated to tier 1");
-            }
+            var oomDoc = workItemSource(oomItem);
+            Assertions.assertEquals(0, oomDoc.path("expiration").asLong(), "OOM item lease must be cleared");
+            Assertions.assertEquals(1,
+                oomDoc.path(OpenSearchWorkCoordinator.REQUIRED_MEMORY_TIER_FIELD_NAME).asInt(),
+                "the OOM item must be escalated to tier 1");
+            var crashDoc = workItemSource(crashItem);
+            Assertions.assertEquals(0, crashDoc.path("expiration").asLong(), "crash item lease must be cleared");
+            Assertions.assertEquals(0,
+                crashDoc.path(OpenSearchWorkCoordinator.REQUIRED_MEMORY_TIER_FIELD_NAME).asInt(0),
+                "a non-OOM crash must be released at the same tier");
             var abandonedDoc = workItemSource(abandonedItem);
             Assertions.assertEquals(abandonedHolder, abandonedDoc.path("leaseHolderId").asText(),
                 "the deliberately-abandoned lease must be left alone");
@@ -369,24 +367,16 @@ public class WorkCoordinatorMemoryTierTest {
             Assertions.assertTrue(successor.findDirtyLeases("pod1_", "pod1_new-uuid").isEmpty());
         }
 
-        // Non-OOM variant: a fresh hard kill with a bare-137 verdict releases without a tier bump.
+        // No-evidence variant: a hard kill the supervisor didn't report releases without a tier bump.
         try (var secondVictim = factory.get(httpClient, 3600, "pod2_dead-uuid")) {
             secondVictim.setWorkerMemoryTier(1);
             var outcome = secondVictim.acquireNextWorkItem(Duration.ofMinutes(30),
                 context::createAcquireNextItemContext);
             var acquired = Assertions.assertInstanceOf(IWorkCoordinator.WorkItemAndDuration.class, outcome);
             var itemId = acquired.getWorkItem().toString();
-            long acquiredAt = workItemSource(itemId)
-                .path(OpenSearchWorkCoordinator.LEASE_ACQUIRED_AT_FIELD_NAME).asLong();
-
-            var verdictFile = tempDir.resolve("verdicts2.jsonl");
-            Files.write(verdictFile,
-                ("{\"finishedAt\": " + (acquiredAt + 5) + ", \"exitCode\": 137, \"reason\": \"Error\", \"restartCount\": 1}\n")
-                    .getBytes(StandardCharsets.UTF_8));
             try (var podmate = factory.get(httpClient, 3600, "pod2_new-uuid")) {
                 podmate.setWorkerMemoryTier(1);
-                DirtyLeaseSweeper.runStartupSweep(podmate, "pod2_new-uuid", 1, verdictFile,
-                    Clock.systemUTC(), Duration.ofSeconds(1));
+                DirtyLeaseSweeper.runStartupSweep(podmate, "pod2_new-uuid", 1, Map.of("some-other-id", "3"), null);
             }
             var doc = workItemSource(itemId);
             Assertions.assertEquals(0, doc.path("expiration").asLong(), "lease recovered immediately");
