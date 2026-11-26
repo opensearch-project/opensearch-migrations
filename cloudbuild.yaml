@@ -44,15 +44,6 @@ steps:
         echo "=== Migration resources generated ==="
         ls /workspace/migrationConsole/nodeStaging/migrationResources/
 
-  # Build the Java runtime base that reindex-from-snapshot builds on
-  - name: 'gcr.io/cloud-builders/docker'
-    args:
-      - 'build'
-      - '--no-cache'
-      - '-t'
-      - 'migrations/java_runtime_base:latest'
-      - 'TrafficCapture/dockerSolution/src/main/docker/javaRuntimeBase'
-
   # Build reindex-from-snapshot image (independent of console chain)
   - name: 'gcr.io/cloud-builders/docker'
     args:

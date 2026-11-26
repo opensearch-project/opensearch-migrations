@@ -37,43 +37,35 @@ def getRepoNameIfPublishing = { Map cfg ->
     return publishedRepoByImageName[imageName]
 }
 
-// Jib can't run commands, so the Jib images build on java_runtime_base (Corretto on minimal AL2023)
-def javaRuntimeBase = [
-        baseImageRegistryEndpoint: intermediateRegistry.hostUrl,
-        baseImageGroup           : "migrations",
-        baseImageName            : "java_runtime_base",
-        baseImageTag             : "latest",
-]
+// Pinned by Corretto version tag and digest; keep in sync with the reindex_from_snapshot base below.
+def correttoBase = ptc.baseImageConfig("docker.io", "library", "amazoncorretto", "21.0.13-al2023-headless@sha256:f8a793166c52b283f647980492ca88312d2de60f30849c1db98b4da3015d1c9a")
 
 def defaultJvmFlags = ['-XX:MaxRAMPercentage=80.0', '-XX:+ExitOnOutOfMemoryError']
 
 def jibProjects = [
-        "TrafficCapture:trafficReplayer": javaRuntimeBase + [
+        "TrafficCapture:trafficReplayer": correttoBase + [
                 imageName     : "traffic_replayer",
                 imageTag      : "latest",
                 jvmFlags      : defaultJvmFlags,
                 extraPermissions: ['/runJavaWithClasspath.sh': '755'],
                 requiredDependencies: [
-                    "": ["buildKit_javaRuntimeBase"],
                     ":TrafficCapture:trafficReplayer": ["syncVersionFile_traffic_replayer"]
                 ]
         ],
-        "TrafficCapture:transformationShim": javaRuntimeBase + [
+        "TrafficCapture:transformationShim": correttoBase + [
                 imageName     : "transformation_shim",
                 imageTag      : "latest",
                 requiredDependencies: [
-                    "": ["buildKit_javaRuntimeBase"],
                     ":TrafficCapture:transformationShim": ["syncVersionFile_transformation_shim", "stageTransformsForImage"]
                 ]
         ],
-        "TrafficCapture:trafficCaptureProxyServer": javaRuntimeBase + [
+        "TrafficCapture:trafficCaptureProxyServer": correttoBase + [
                 // purposefully omit '-Dio.netty.handler.codec.http.defaultStrictLineParsing=false'
                 imageName      : "capture_proxy",
                 imageTag       : "latest",
                 jvmFlags      : defaultJvmFlags,
                 extraPermissions: ['/runJavaWithClasspath.sh': '755'],
                 requiredDependencies: [
-                    "": ["buildKit_javaRuntimeBase"],
                     ":TrafficCapture:trafficCaptureProxyServer": ["generateSelfSignedCerts", "syncVersionFile_capture_proxy"]
                 ]
         ]
@@ -83,19 +75,6 @@ jibProjects.values().each { cfg ->
 }
 
 def buildKitProjects = [
-        [
-                serviceName: "javaRuntimeBase",
-                contextDir: "TrafficCapture/dockerSolution/src/main/docker/javaRuntimeBase",
-                imageName:  "java_runtime_base",
-                imageTag:   "latest",
-                // Duplicates the Dockerfile ARG default only so the Jenkins ECR pull-through-cache rewrite
-                // (ptc.rewrite) can redirect the pull. Jenkins isn't used for these builds today and this path
-                // may be removed; keep in sync with the Dockerfile default (a dependency bot is expected to
-                // update both).
-                buildArgs: [
-                        BASE_IMAGE: ptc.rewrite("public.ecr.aws/amazonlinux/amazonlinux:2023.12.20261120.0-minimal@sha256:75a2d4226d9b98c914d7eed878a03bef4f365ad548be5d28d464ccba504cec79"),
-                ]
-        ],
         [
                 serviceName: "elasticsearchTestConsole",
                 contextDir: "TrafficCapture/dockerSolution/src/main/docker/elasticsearchTestConsole",
@@ -115,14 +94,16 @@ def buildKitProjects = [
                 contextDir: "DocumentsFromSnapshotMigration/docker",
                 imageName:  "reindex_from_snapshot",
                 imageTag:   "latest",
+                // Duplicates the Dockerfile ARG default only so the Jenkins ECR pull-through-cache rewrite
+                // (ptc.rewrite) can redirect the pull. Jenkins isn't used for these builds today and this path
+                // may be removed; keep in sync with the Dockerfile default (a dependency bot is expected to
+                // update both).
                 buildArgs: [
-                        BASE_IMAGE: RegistryImageBuildUtils.resolveBaseImageForContainer(
-                                intermediateRegistry, "migrations", "java_runtime_base", "latest"),
+                        BASE_IMAGE: ptc.rewrite("docker.io/library/amazoncorretto:21.0.13-al2023-headless@sha256:f8a793166c52b283f647980492ca88312d2de60f30849c1db98b4da3015d1c9a"),
                 ],
                 requiredDependencies: [
                         ":DocumentsFromSnapshotMigration:copyDockerRuntimeJars",
-                        ":DocumentsFromSnapshotMigration:syncVersionFile_reindexFromSnapshot",
-                        "buildKit_javaRuntimeBase" // All buildKit projects are configured at the root
+                        ":DocumentsFromSnapshotMigration:syncVersionFile_reindexFromSnapshot"
                 ]
         ],
         [
