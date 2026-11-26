@@ -2,7 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import {parse as parseYaml} from "yaml";
 import {renderWorkflowTemplate} from "@opensearch-migrations/argo-workflow-builders";
-import {DocumentBulkLoad, RFS_TERMINATION_GRACE_PERIOD_SECONDS, CRASH_VERDICT_FILE_PATH, CRASH_VERDICTS_VOLUME_NAME, CRASH_VERDICTS_MOUNT_PATH} from "../src/workflowTemplates/documentBulkLoad";
+import {DocumentBulkLoad, RFS_TERMINATION_GRACE_PERIOD_SECONDS} from "../src/workflowTemplates/documentBulkLoad";
 import {CONTAINER_NAMES} from "../src/containerNames";
 import {
     COMPONENT_LABEL,
@@ -57,34 +57,39 @@ describe("per-tier RFS deployment manifest", () => {
         expect(deployment.spec.selector.matchLabels[MIGRATION_RESOURCE_UID_LABEL]).toMatch(/crdUid/);
     });
 
-    it("runs the crash-witness sidecar alongside the bulk loader", () => {
+    it("runs only the bulk loader: crash handling lives in the container's own wrapper", () => {
         const names = deployment.spec.template.spec.containers.map((c: any) => c.name);
-        expect(names).toEqual([CONTAINER_NAMES.BULK_LOADER, CONTAINER_NAMES.CRASH_WITNESS]);
-        const witness = deployment.spec.template.spec.containers[1];
-        expect(witness.args[0]).toContain("rfsCrashWitness.py");
-        const envNames = witness.env.map((e: any) => e.name);
-        expect(envNames).toEqual(expect.arrayContaining(
-            ["POD_NAME", "POD_NAMESPACE", "WATCHED_CONTAINER_NAME", "CRASH_VERDICT_FILE"]));
-        expect(witness.env.find((e: any) => e.name === "WATCHED_CONTAINER_NAME").value)
-            .toBe(CONTAINER_NAMES.BULK_LOADER);
-        expect(witness.volumeMounts).toEqual(
-            [{name: CRASH_VERDICTS_VOLUME_NAME, mountPath: CRASH_VERDICTS_MOUNT_PATH}]);
-    });
-
-    it("shares the crash-verdicts emptyDir with the bulk loader", () => {
-        // The volume and the bulk-loader mount ride the fileSource concat expressions, where
-        // sprig.dict renders string values single-quoted.
+        expect(names).toEqual([CONTAINER_NAMES.BULK_LOADER]);
         const raw = rawManifestFor("createrfstierdeployment");
-        expect(raw).toContain(`'${CRASH_VERDICTS_VOLUME_NAME}'`);
-        expect(raw).toContain('"emptyDir", sprig.dict()');
-        expect(raw).toContain(`'${CRASH_VERDICTS_MOUNT_PATH}'`);
+        expect(raw).not.toContain("crash-witness");
     });
 
-    it("tells the worker its tier and where the verdicts are", () => {
+    it("tells the worker its tier, which also turns on the wrapper's supervised restarts", () => {
         const bulkLoader = deployment.spec.template.spec.containers[0];
         const env = Object.fromEntries(bulkLoader.env.map((e: any) => [e.name, e.value]));
         expect(env.RFS_WORKER_MEMORY_TIER).toMatch(/memoryTier/);
-        expect(env.RFS_CRASH_VERDICT_FILE).toBe(CRASH_VERDICT_FILE_PATH);
+        expect(env).not.toHaveProperty("RFS_CRASH_VERDICT_FILE");
+    });
+
+    it("gives the supervisor a pod-lifetime state dir and the monitor's kernel-OOM evidence file", () => {
+        const bulkLoader = deployment.spec.template.spec.containers[0];
+        const env = Object.fromEntries(bulkLoader.env.map((e: any) => [e.name, e.value]));
+        expect(env.RFS_STATE_DIR).toBe("/var/run/rfs-state");
+        expect(env.RFS_CRASH_EVIDENCE_FILE).toBe("/var/run/rfs-evidence/predecessor-crashes");
+
+        // Volumes and mounts are folded into the file-source concat expressions, so they appear
+        // in the rendered manifest text. The state dir survives container restarts (emptyDir =
+        // pod lifetime); the evidence file is a downward-API projection of the monitor's witness
+        // annotation.
+        const raw = rawManifestFor("createrfstierdeployment");
+        expect(raw).toContain("rfs-state");
+        expect(raw).toContain("emptyDir");
+        expect(raw).toContain("rfs-crash-evidence");
+        expect(raw).toContain("downwardAPI");
+        // The fieldPath's inner quotes are escaped in the rendered sprig expression, so match the
+        // annotation name and the fieldRef separately.
+        expect(raw).toContain("fieldPath");
+        expect(raw).toContain("migrations.opensearch.org/rfs-predecessor-crashes");
     });
 
     it("sets the tier's memory for both requests and limits (Guaranteed QoS stays intact)", () => {
@@ -115,7 +120,7 @@ describe("feature-off byte-identity", () => {
     it("the feature-off deployment has no tier label, sidecar, or grace-period override", () => {
         const raw = rawManifestFor("createrfsdeployment");
         expect(raw).not.toContain(RFS_MEMORY_TIER_LABEL);
-        expect(raw).not.toContain(CONTAINER_NAMES.CRASH_WITNESS);
+        expect(raw).not.toContain("crash-witness");
         expect(raw).not.toContain("terminationGracePeriodSeconds");
         expect(raw).not.toContain("RFS_WORKER_MEMORY_TIER");
     });

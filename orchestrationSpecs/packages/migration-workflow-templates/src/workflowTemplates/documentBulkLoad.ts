@@ -29,7 +29,7 @@ import {
     typeToken,
     WorkflowBuilder
 } from "@opensearch-migrations/argo-workflow-builders";
-import {Deployment} from "@opensearch-migrations/argo-workflow-builders";
+import {Deployment, Volume, VolumeMount} from "@opensearch-migrations/argo-workflow-builders";
 import {OwnerReference} from "@opensearch-migrations/k8s-types";
 import {makeRepoParamDict} from "./metadataMigration";
 import {
@@ -37,7 +37,7 @@ import {
     setupLog4jConfigForContainer,
     setupTestCredsForContainer,
 } from "./commonUtils/containerFragments";
-import {CommonWorkflowParameters, WORKFLOW_SCRIPTS_ROOT_ENV, cloudProviderResolvedInput, workflowIdentityEnvVars, workflowScriptCommand, workflowScriptRootEnvVars} from "./commonUtils/workflowParameters";
+import {CommonWorkflowParameters, cloudProviderResolvedInput, workflowIdentityEnvVars, workflowScriptCommand, workflowScriptRootEnvVars} from "./commonUtils/workflowParameters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 import {makeTargetParamDict, makeRfsCoordinatorParamDict} from "./commonUtils/clusterSettingManipulators";
 import {getHttpAuthSecretName} from "./commonUtils/clusterSettingManipulators";
@@ -205,7 +205,12 @@ function getRfsDeploymentManifest
     workloadNodePoolName: BaseExpression<string>,
     workloadZoneSpread: BaseExpression<string>,
     workloadZoneSpreadExtras: BaseExpression<string>,
-    cloudProvider: BaseExpression<string>
+    cloudProvider: BaseExpression<string>,
+    // Memory-tier additions (plain literals, threaded through the volume/mount pipeline).
+    // Absent on the feature-off path, which stays byte-identical.
+    extraEnv?: {name: string, value: string}[],
+    extraVolumeMounts?: VolumeMount[],
+    extraVolumes?: Volume[],
 }): Deployment {
     const ownerReferences: OwnerReference[] = [{
         apiVersion: "migrations.opensearch.org/v1alpha1",
@@ -243,14 +248,16 @@ function getRfsDeploymentManifest
             {
                 name: "CONSOLE_LOG_FORMAT",
                 value: "json"
-            }
+            },
+            ...(args.extraEnv ?? [])
         ],
         args: [
             "org.opensearch.migrations.RfsMigrateDocuments",
             "---INLINE-JSON",
             makeStringTypeProxy(args.jsonConfig)
         ],
-        resources: makeDirectTypeProxy(args.resources)
+        resources: makeDirectTypeProxy(args.resources),
+        ...(args.extraVolumeMounts ? {volumeMounts: args.extraVolumeMounts} : {})
     };
 
     const finalContainerDefinition = setupFileSourcesForContainer(
@@ -261,7 +268,7 @@ function getRfsDeploymentManifest
             setupLog4jConfigForContainer(
                 useCustomLogging,
                 args.loggingConfigMap,
-                {container: baseContainerDefinition, volumes: []},
+                {container: baseContainerDefinition, volumes: args.extraVolumes ?? []},
                 args.jvmArgs
             )
         )
@@ -582,42 +589,22 @@ function makeRfsPodDisruptionBudgetDefinition(
 // the feature-off path uses the unchanged createRfsDeployment/createRfsPodDisruptionBudget
 // templates above, byte for byte.
 
-/** Where the crash-witness sidecar and the bulk-loader share crash verdicts (pod-lifetime evidence). */
-export const CRASH_VERDICTS_VOLUME_NAME = "crash-verdicts";
-export const CRASH_VERDICTS_MOUNT_PATH = "/var/rfs-crash-verdicts";
-export const CRASH_VERDICT_FILE_PATH = CRASH_VERDICTS_MOUNT_PATH + "/verdicts.jsonl";
 // Comfortably above the worker's shutdown path's worst case (the failed-document-stream flush is
 // bounded at 5 minutes) so a busy pod that loses the pod-deletion-cost race can still checkpoint.
 export const RFS_TERMINATION_GRACE_PERIOD_SECONDS = 390;
 
+// Pod-lifetime supervisor state (crash list + open-launch ledger): survives container restarts so
+// crash evidence outlives a kernel-OOM group kill. Plain env/paths — the wrapper is k8s-unaware.
+export const RFS_STATE_DIR_PATH = "/var/run/rfs-state";
+// The monitor's kernel-OOM witness annotation, projected into the container as a file the
+// supervisor polls when a launch died without a recorded outcome. Keep the annotation name in
+// sync with rfsTierSweep.py's CRASH_EVIDENCE_ANNOTATION.
+export const RFS_CRASH_EVIDENCE_ANNOTATION = "migrations.opensearch.org/rfs-predecessor-crashes";
+export const RFS_CRASH_EVIDENCE_MOUNT_PATH = "/var/run/rfs-evidence";
+export const RFS_CRASH_EVIDENCE_FILE_NAME = "predecessor-crashes";
+
 export function getRfsTierDeploymentName(sessionName: BaseExpression<string>, memoryTier: BaseExpression<string>) {
     return expr.concat(getRfsDeploymentName(sessionName), expr.literal("-t"), memoryTier);
-}
-
-function getCrashWitnessContainer(args: {
-    consoleImageName: BaseExpression<string>,
-    consoleImagePullPolicy: BaseExpression<IMAGE_PULL_POLICY>,
-    workflowScriptsRoot: BaseExpression<string>,
-}) {
-    return {
-        name: CONTAINER_NAMES.CRASH_WITNESS,
-        image: makeStringTypeProxy(args.consoleImageName),
-        imagePullPolicy: makeStringTypeProxy(args.consoleImagePullPolicy),
-        command: ["/bin/bash", "-lc"],
-        args: [`exec python3 "\${${WORKFLOW_SCRIPTS_ROOT_ENV}}/rfsCrashWitness.py"`],
-        env: [
-            {name: "POD_NAME", valueFrom: {fieldRef: {fieldPath: "metadata.name"}}},
-            {name: "POD_NAMESPACE", valueFrom: {fieldRef: {fieldPath: "metadata.namespace"}}},
-            {name: "WATCHED_CONTAINER_NAME", value: CONTAINER_NAMES.BULK_LOADER},
-            {name: "CRASH_VERDICT_FILE", value: CRASH_VERDICT_FILE_PATH},
-            {name: WORKFLOW_SCRIPTS_ROOT_ENV, value: makeStringTypeProxy(args.workflowScriptsRoot)},
-        ],
-        resources: {
-            requests: {cpu: "100m", memory: "128Mi"},
-            limits: {cpu: "200m", memory: "256Mi"},
-        },
-        volumeMounts: [{name: CRASH_VERDICTS_VOLUME_NAME, mountPath: CRASH_VERDICTS_MOUNT_PATH}],
-    };
 }
 
 /** Each tier sets requests.memory and limits.memory to the same tier value (Guaranteed QoS). */
@@ -634,28 +621,45 @@ function tierResourceOverride(
 }
 
 /**
- * The per-tier RFS Deployment: the ordinary RFS worker manifest plus the crash-witness sidecar,
- * the shared verdicts emptyDir, the tier label in the immutable selector / pod labels, the tier
- * env for the worker, the tier's memory quantity (requests == limits), and the raised termination
- * grace period.  Built by mutating the base manifest so the two shapes can never drift apart.
+ * The per-tier RFS Deployment: the ordinary RFS worker manifest plus the tier label in the
+ * immutable selector / pod labels, the tier env for the worker (which also switches the container's
+ * wrapper into its supervised restart loop), the tier's memory quantity (requests == limits), and
+ * the raised termination grace period.  Built by mutating the base manifest so the two shapes can
+ * never drift apart.
  */
 function getRfsTierDeploymentManifest(
     args: Parameters<typeof getRfsDeploymentManifest>[0] & {
         memoryTier: BaseExpression<string>,
         tierMemoryQuantity: BaseExpression<string>,
-        consoleImageName: BaseExpression<string>,
-        consoleImagePullPolicy: BaseExpression<IMAGE_PULL_POLICY>,
-        workflowScriptsRoot: BaseExpression<string>,
     }
 ): Deployment {
-    const crashVerdictsVolume = {name: CRASH_VERDICTS_VOLUME_NAME, emptyDir: {}};
-    const crashVerdictsMount = {name: CRASH_VERDICTS_VOLUME_NAME, mountPath: CRASH_VERDICTS_MOUNT_PATH};
     const deployment = getRfsDeploymentManifest({
         ...args,
-        fileSourceVolumes: expr.concatArrays(
-            expr.templateValue([crashVerdictsVolume]), args.fileSourceVolumes),
-        fileSourceVolumeMounts: expr.concatArrays(
-            expr.templateValue([crashVerdictsMount]), args.fileSourceVolumeMounts),
+        // Supervisor state dir (crash evidence outliving container restarts) and the monitor's
+        // kernel-OOM witness file. See the constants above for why each exists.
+        extraEnv: [
+            {name: "RFS_STATE_DIR", value: RFS_STATE_DIR_PATH},
+            {
+                name: "RFS_CRASH_EVIDENCE_FILE",
+                value: `${RFS_CRASH_EVIDENCE_MOUNT_PATH}/${RFS_CRASH_EVIDENCE_FILE_NAME}`,
+            },
+        ],
+        extraVolumeMounts: [
+            {name: "rfs-state", mountPath: RFS_STATE_DIR_PATH},
+            {name: "rfs-crash-evidence", mountPath: RFS_CRASH_EVIDENCE_MOUNT_PATH, readOnly: true},
+        ],
+        extraVolumes: [
+            {name: "rfs-state", emptyDir: {sizeLimit: "1Mi"}},
+            {
+                name: "rfs-crash-evidence",
+                downwardAPI: {
+                    items: [{
+                        path: RFS_CRASH_EVIDENCE_FILE_NAME,
+                        fieldRef: {fieldPath: `metadata.annotations['${RFS_CRASH_EVIDENCE_ANNOTATION}']`},
+                    }],
+                },
+            },
+        ],
     }) as any;
 
     const tierLabelValue = makeStringTypeProxy(args.memoryTier);
@@ -667,31 +671,18 @@ function getRfsTierDeploymentManifest(
     deployment.spec.template.spec.terminationGracePeriodSeconds = RFS_TERMINATION_GRACE_PERIOD_SECONDS;
 
     const bulkLoader = deployment.spec.template.spec.containers[0];
-    bulkLoader.env.push(
-        {name: "RFS_WORKER_MEMORY_TIER", value: tierLabelValue},
-        {name: "RFS_CRASH_VERDICT_FILE", value: CRASH_VERDICT_FILE_PATH});
+    bulkLoader.env.push({name: "RFS_WORKER_MEMORY_TIER", value: tierLabelValue});
     bulkLoader.resources =
         makeDirectTypeProxy(tierResourceOverride(args.resources, args.tierMemoryQuantity));
-
-    deployment.spec.template.spec.containers.push(getCrashWitnessContainer({
-        consoleImageName: args.consoleImageName,
-        consoleImagePullPolicy: args.consoleImagePullPolicy,
-        workflowScriptsRoot: args.workflowScriptsRoot,
-    }));
     return deployment as Deployment;
 }
 
 type TierInputExpressions = StartHistoricalBackfillInputExpressions & {
     memoryTier: BaseExpression<string>,
     tierMemoryQuantity: BaseExpression<string>,
-    imageMigrationConsoleLocation: BaseExpression<string>,
-    imageMigrationConsolePullPolicy: BaseExpression<IMAGE_PULL_POLICY>,
 };
 
-function makeRfsTierDeploymentDefinition(
-    inputs: TierInputExpressions,
-    workflowScriptsRoot: BaseExpression<string>
-) {
+function makeRfsTierDeploymentDefinition(inputs: TierInputExpressions) {
     return {
         action: "apply" as const,
         setOwnerReference: false,
@@ -727,9 +718,6 @@ function makeRfsTierDeploymentDefinition(
             cloudProvider: inputs.cloudProvider,
             memoryTier: inputs.memoryTier,
             tierMemoryQuantity: inputs.tierMemoryQuantity,
-            consoleImageName: inputs.imageMigrationConsoleLocation,
-            consoleImagePullPolicy: inputs.imageMigrationConsolePullPolicy,
-            workflowScriptsRoot,
         })
     };
 }
@@ -788,7 +776,6 @@ export const DocumentBulkLoad = documentBulkLoadBaseBuilder
         .addInputsFromRecord(startHistoricalBackfillInputs)
         .addRequiredInput("memoryTier", typeToken<string>())
         .addRequiredInput("tierMemoryQuantity", typeToken<string>())
-        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
         .addResourceTask(b => b
             .setDefinition(makeRfsTierPodDisruptionBudgetDefinition(b.inputs)))
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
@@ -798,10 +785,8 @@ export const DocumentBulkLoad = documentBulkLoadBaseBuilder
         .addInputsFromRecord(startHistoricalBackfillInputs)
         .addRequiredInput("memoryTier", typeToken<string>())
         .addRequiredInput("tierMemoryQuantity", typeToken<string>())
-        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
         .addResourceTask(b => b
-            .setDefinition(makeRfsTierDeploymentDefinition(
-                b.inputs, t.inputs.workflowParameters.workflowScriptsRoot)))
+            .setDefinition(makeRfsTierDeploymentDefinition(b.inputs)))
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
 
@@ -809,7 +794,6 @@ export const DocumentBulkLoad = documentBulkLoadBaseBuilder
         .addInputsFromRecord(startHistoricalBackfillInputs)
         .addRequiredInput("memoryTier", typeToken<string>())
         .addRequiredInput("tierMemoryQuantity", typeToken<string>())
-        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
         .addSteps(b => b
             .addStep("createTierPodDisruptionBudget", INTERNAL, "createRfsTierPodDisruptionBudget", c =>
                 c.register({...selectInputsForRegister(b, c)}))
@@ -885,7 +869,7 @@ export const DocumentBulkLoad = documentBulkLoadBaseBuilder
 
 
     // Feature-on analogue of startHistoricalBackfillFromConfig: creates the TIER-0 runtime
-    // (crash-witness sidecar, tier label/env, raised grace period) with replicas bootstrapped
+    // (tier label/env, raised grace period) with replicas bootstrapped
     // at 1 — the monitor's first sweep after the shard_setup sentinel right-sizes the fleet.
     .addTemplate("startTierZeroBackfillFromConfig", t => t
         .addRequiredInput("sessionName", typeToken<string>())
@@ -899,7 +883,7 @@ export const DocumentBulkLoad = documentBulkLoadBaseBuilder
         .addRequiredInput("crdName", typeToken<string>())
         .addRequiredInput("crdUid", typeToken<string>())
         .addOptionalInput("sourceEndpoint", c => "")
-        .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot", "MigrationConsole"]))
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot"]))
 
         .addSteps(b => b
             .addStep("startTierHistoricalBackfill", INTERNAL, "startTierHistoricalBackfill", c => {

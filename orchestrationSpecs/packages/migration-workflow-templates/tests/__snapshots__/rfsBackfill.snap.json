@@ -450,14 +450,6 @@
                     "value": "{{inputs.parameters.imageReindexFromSnapshotPullPolicy}}"
                   },
                   {
-                    "name": "imageMigrationConsoleLocation",
-                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
-                  },
-                  {
-                    "name": "imageMigrationConsolePullPolicy",
-                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
-                  },
-                  {
                     "name": "rfsCoordinatorConfig",
                     "value": "{{=((!(fromJSON(inputs.parameters.documentBackfillConfig)['useTargetClusterForWorkCoordination'])) ? (toJSON(sprig.dict(\"endpoint\", 'https://'+inputs.parameters.sessionName+'-rfs-coordinator'+':9200', \"label\", inputs.parameters.sessionName+'-rfs-coordinator', \"allowInsecure\", true, \"authConfig\", sprig.dict(\"basic\", sprig.dict(\"secretName\", inputs.parameters.sessionName+'-rfs-coordinator'+'-creds'))))) : (inputs.parameters.targetConfig))}}"
                   }

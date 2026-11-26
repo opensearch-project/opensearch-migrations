@@ -38,7 +38,6 @@ logger = logging.getLogger(__name__)
 COMPONENT_SELECTOR = "migrations.opensearch.org/component=rfs-worker"
 TIER_LABEL = "migrations.opensearch.org/rfs-memory-tier"
 BULK_LOADER_CONTAINER = "bulk-loader"
-CRASH_WITNESS_CONTAINER = "crash-witness"
 
 HEAVY_DOCS = 760          # ~380 per shard across 2 shards
 HEAVY_SHARDS = 2
@@ -416,7 +415,7 @@ class Test0092NonOomCrashDoesNotEscalate(MemoryTierTestBase):
 
 class Test0093MemoryScalingOffIsUnchanged(MemoryTierTestBase):
     """(d) Feature off: the same data migrates through the single pre-feature Deployment —
-    today's name, no tier label, no crash-witness sidecar, no tier-policy ConfigMap."""
+    today's name, no tier label, no tier-policy ConfigMap."""
 
     def __init__(self, user_args: MATestUserArguments):
         super().__init__(user_args, "Memory-tier scaling absent: byte-identical runtime behavior.")

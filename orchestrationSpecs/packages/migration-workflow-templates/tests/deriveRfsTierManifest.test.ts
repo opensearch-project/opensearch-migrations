@@ -63,13 +63,7 @@ const tier0Deployment = {
                         },
                         env: [
                             {name: "RFS_WORKER_MEMORY_TIER", value: "0"},
-                            {name: "RFS_CRASH_VERDICT_FILE", value: "/var/rfs-crash-verdicts/verdicts.jsonl"},
                         ],
-                    },
-                    {
-                        name: "crash-witness",
-                        resources: {requests: {cpu: "100m", memory: "128Mi"}, limits: {cpu: "200m", memory: "256Mi"}},
-                        env: [],
                     },
                 ],
             },
@@ -118,12 +112,11 @@ describe("deriveRfsTierManifest.jq", () => {
         expect(derived.spec.selector.matchLabels["migrations.opensearch.org/component"]).toBe("rfs-worker");
     });
 
-    it("sets the tier's memory on the bulk loader only, requests == limits", () => {
-        const [bulkLoader, witness] = derived.spec.template.spec.containers;
+    it("sets the tier's memory on the bulk loader, requests == limits", () => {
+        const [bulkLoader] = derived.spec.template.spec.containers;
         expect(bulkLoader.resources.requests.memory).toBe("28000Mi");
         expect(bulkLoader.resources.limits.memory).toBe("28000Mi");
         expect(bulkLoader.resources.requests.cpu).toBe("3300m");  // CPU carries over unchanged
-        expect(witness.resources.requests.memory).toBe("128Mi");  // sidecar untouched
     });
 
     it("sets the worker's tier env and stores the manifest dormant (replicas 0)", () => {
