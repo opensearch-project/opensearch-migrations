@@ -27,7 +27,7 @@ ecrAuth:
 charts:
   cert-manager:
     repository: "oci://${ECR}/charts/cert-manager"
-    version: "v1.17.2"
+    version: "v1.17.4"
     values:
       image:
         repository: "${M}/quay.io/jetstack/cert-manager-controller"
@@ -196,7 +196,7 @@ charts:
 
   aws-privateca-issuer:
     repository: "oci://${ECR}/charts/aws-privateca-issuer"
-    version: "v1.4.0"
+    version: "v1.4.1"
     values:
       image:
         repository: "${M}/public.ecr.aws/k1n1h4h4/cert-manager-aws-privateca-issuer"
@@ -216,19 +216,19 @@ charts:
 
   ack-acmpca-controller:
     repository: "oci://${ECR}/charts/acmpca-chart"
-    version: "1.2.2"
+    version: "1.8.0"
     values:
       image:
         repository: "${M}/public.ecr.aws/aws-controllers-k8s/acmpca-controller"
-        tag: "1.2.2"
+        tag: "1.8.0"
 
   ack-cloudwatch-controller:
     repository: "oci://${ECR}/charts/cloudwatch-chart"
-    version: "1.4.2"
+    version: "1.12.0"
     values:
       image:
         repository: "${M}/public.ecr.aws/aws-controllers-k8s/cloudwatch-controller"
-        tag: "1.4.2"
+        tag: "1.12.0"
 
 # --- Direct template image overrides ---
 defaultBucketConfiguration:

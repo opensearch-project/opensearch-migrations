@@ -515,7 +515,7 @@ awsPrivateCA:
 charts:
 
   cert-manager:
-    version: 1.17.2
+    version: 1.17.4
     repository: https://charts.jetstack.io
     values:
       crds:
@@ -578,7 +578,7 @@ charts:
           limits:   { cpu: 100m, memory: 128Mi }
 
   aws-privateca-issuer:
-    version: "1.4.0"
+    version: "1.4.1"
     repository: "https://cert-manager.github.io/aws-privateca-issuer"
     dependsOn: cert-manager
     values:
@@ -589,7 +589,7 @@ charts:
         limits:   { cpu: 100m, memory: 128Mi }
 
   ack-acmpca-controller:
-    version: "1.2.2"
+    version: "1.8.0"
     repository: "oci://public.ecr.aws/aws-controllers-k8s/acmpca-chart"
     dependsOn: cert-manager
     values:
@@ -597,7 +597,7 @@ charts:
         name: ack-acmpca-controller
 
   ack-cloudwatch-controller:
-    version: "1.4.2"
+    version: "1.12.0"
     repository: "oci://public.ecr.aws/aws-controllers-k8s/cloudwatch-chart"
     deletionPolicy: delete
     values:
