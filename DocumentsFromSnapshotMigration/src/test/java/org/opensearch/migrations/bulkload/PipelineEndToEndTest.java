@@ -78,11 +78,11 @@ public class PipelineEndToEndTest {
         var extractor = createSnapshot(sourceVersion);
         Path workDir = Files.createTempDirectory("pipeline_e2e_full");
 
-        try (var targetCluster = new SearchClusterContainer(targetVersion)) {
+        try (var targetCluster = new SearchClusterContainer(targetVersion);
+             var source = LuceneSnapshotSource.builder(extractor, SNAPSHOT_NAME, workDir).build()) {
             targetCluster.start();
             var targetClient = createClient(targetCluster);
 
-            var source = LuceneSnapshotSource.builder(extractor, SNAPSHOT_NAME, workDir).build();
             var sink = new OpenSearchDocumentSink(targetClient, null, false, DocumentExceptionAllowlist.empty(), null);
             var pipeline = new DocumentMigrationPipeline(source, sink, 1000, Long.MAX_VALUE);
 
@@ -106,11 +106,11 @@ public class PipelineEndToEndTest {
         var extractor = createSnapshot(sourceVersion);
         Path workDir = Files.createTempDirectory("pipeline_e2e_batch");
 
-        try (var targetCluster = new SearchClusterContainer(targetVersion)) {
+        try (var targetCluster = new SearchClusterContainer(targetVersion);
+             var source = LuceneSnapshotSource.builder(extractor, SNAPSHOT_NAME, workDir).build()) {
             targetCluster.start();
             var targetClient = createClient(targetCluster);
 
-            var source = LuceneSnapshotSource.builder(extractor, SNAPSHOT_NAME, workDir).build();
             var sink = new OpenSearchDocumentSink(targetClient, null, false, DocumentExceptionAllowlist.empty(), null);
             // Batch size of 2 → should produce 3 batches for 5 docs
             var pipeline = new DocumentMigrationPipeline(source, sink, 2, Long.MAX_VALUE);
@@ -160,11 +160,11 @@ public class PipelineEndToEndTest {
         var extractor = createComplexSnapshot(sourceVersion);
         Path workDir = Files.createTempDirectory("pipeline_e2e_complex");
 
-        try (var targetCluster = new SearchClusterContainer(targetVersion)) {
+        try (var targetCluster = new SearchClusterContainer(targetVersion);
+             var source = LuceneSnapshotSource.builder(extractor, SNAPSHOT_NAME, workDir).build()) {
             targetCluster.start();
             var targetClient = createClient(targetCluster);
 
-            var source = LuceneSnapshotSource.builder(extractor, SNAPSHOT_NAME, workDir).build();
             var sink = new OpenSearchDocumentSink(targetClient, null, false, DocumentExceptionAllowlist.empty(), null);
             var pipeline = new DocumentMigrationPipeline(source, sink, 1000, Long.MAX_VALUE);
 

@@ -1,10 +1,14 @@
 package org.opensearch.migrations.bulkload.pipeline.adapter;
 
 import java.nio.file.Path;
+import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -21,6 +25,8 @@ import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
+import reactor.core.scheduler.Scheduler;
+import reactor.core.scheduler.Schedulers;
 
 /**
  * Real {@link DocumentSource} adapter that reads documents from a Lucene snapshot
@@ -49,6 +55,8 @@ public class LuceneSnapshotSource implements DocumentSource {
     /** Cache ShardEntry lookups to avoid repeated metadata reads */
     private final Map<EsShardPartition, SnapshotExtractor.ShardEntry> shardEntryCache = new HashMap<>();
     private final Map<EsShardPartition, SnapshotExtractor.ShardEntry> previousShardEntryCache = new HashMap<>();
+    private final Map<String, Set<String>> snapshotIndices = new HashMap<>();
+    private final Set<String> loadedCollections = new HashSet<>();
 
     private final Map<Partition, SnapshotDocumentCounts> snapshotCounts = new ConcurrentHashMap<>();
 
@@ -62,6 +70,11 @@ public class LuceneSnapshotSource implements DocumentSource {
     private final boolean useRecoverySource;
 
     private final LuceneAdapter luceneAdapter;
+
+    // Unpacking waits for work on the shared bounded-elastic pool. Keep its caller on
+    // a separately owned blocking scheduler, serializing initialization of the source caches.
+    private final Scheduler initializationScheduler = Schedulers.newBoundedElastic(
+        1, Schedulers.DEFAULT_BOUNDED_ELASTIC_QUEUESIZE, "snapshot-initialization", 60, true);
 
 
     private LuceneSnapshotSource(Builder builder) {
@@ -144,35 +157,49 @@ public class LuceneSnapshotSource implements DocumentSource {
 
     @Override
     public List<String> listCollections() {
-        return extractor.listIndices(snapshotName);
+        var indices = new TreeSet<>(indicesInSnapshot(snapshotName));
+        if (isDeltaMode()) {
+            indices.addAll(indicesInSnapshot(previousSnapshotName));
+        }
+        return List.copyOf(indices);
+    }
+
+    private Set<String> indicesInSnapshot(String name) {
+        return snapshotIndices.computeIfAbsent(name, snapshot -> {
+            // Some repository providers return an empty index list for a nonexistent snapshot.
+            // A missing baseline must never be mistaken for an empty baseline.
+            if (isDeltaMode() && !extractor.listSnapshots().contains(snapshot)) {
+                throw new IllegalArgumentException("Snapshot not found: " + snapshot);
+            }
+            return new TreeSet<>(extractor.listIndices(snapshot));
+        });
     }
 
     @Override
     public List<Partition> listPartitions(String collectionName) {
-        var entries = extractor.listShards(snapshotName, collectionName);
-        var result = entries.stream()
-            .map(entry -> {
+        // Work-item shard numbers resolve by list position, including persisted sessions.
+        var result = new TreeSet<EsShardPartition>(Comparator.comparingInt(EsShardPartition::shardNumber));
+        if (indicesInSnapshot(snapshotName).contains(collectionName)) {
+            if (isDeltaMode()) {
+                extractor.validateDeltaSource(snapshotName, collectionName);
+            }
+            for (var entry : extractor.listShards(snapshotName, collectionName)) {
                 var partition = new EsShardPartition(snapshotName, collectionName, entry.shardId());
                 shardEntryCache.put(partition, entry);
-                return (Partition) partition;
-            })
-            .toList();
-
-        // Pre-cache previous snapshot shard entries for delta mode
-        if (isDeltaMode()) {
-            try {
-                var previousEntries = extractor.listShards(previousSnapshotName, collectionName);
-                for (var entry : previousEntries) {
-                    var partition = new EsShardPartition(snapshotName, collectionName, entry.shardId());
-                    previousShardEntryCache.put(partition, entry);
-                }
-            } catch (Exception e) {
-                log.warn("Could not list shards for previous snapshot {} collection {}: {}",
-                    previousSnapshotName, collectionName, e.getMessage());
+                result.add(partition);
             }
         }
 
-        return result;
+        if (isDeltaMode() && indicesInSnapshot(previousSnapshotName).contains(collectionName)) {
+            extractor.validateDeltaSource(previousSnapshotName, collectionName);
+            for (var entry : extractor.listShards(previousSnapshotName, collectionName)) {
+                var partition = new EsShardPartition(snapshotName, collectionName, entry.shardId());
+                previousShardEntryCache.put(partition, entry);
+                result.add(partition);
+            }
+        }
+        loadedCollections.add(collectionName);
+        return List.copyOf(result);
     }
 
     @Override
@@ -185,8 +212,9 @@ public class LuceneSnapshotSource implements DocumentSource {
      * Read ES-specific index metadata. Used internally and by the ES metadata migration pipeline.
      */
     public IndexMetadataSnapshot readEsIndexMetadata(String collectionName) {
-        var meta = extractor.getSnapshotReader().getIndexMetadata()
-            .fromRepo(snapshotName, collectionName);
+        var metadataSnapshot = isDeltaMode() && !indicesInSnapshot(snapshotName).contains(collectionName)
+            ? previousSnapshotName : snapshotName;
+        var meta = extractor.getSnapshotReader().getIndexMetadata().fromRepo(metadataSnapshot, collectionName);
         return IndexMetadataConverter.convert(collectionName, meta);
     }
 
@@ -202,44 +230,60 @@ public class LuceneSnapshotSource implements DocumentSource {
 
     @Override
     public Flux<Document> readDocuments(Partition partition, long startingPosition) {
+        return Flux.defer(() -> readPartition(partition, startingPosition))
+            .subscribeOn(initializationScheduler);
+    }
+
+    private Flux<Document> readPartition(Partition partition, long startingPosition) {
         var esPartition = (EsShardPartition) partition;
         var entry = resolveShardEntry(esPartition, shardEntryCache);
-        if (entry == null) {
+        var previousEntry = isDeltaMode() ? resolveShardEntry(esPartition, previousShardEntryCache) : null;
+        if (entry == null && previousEntry == null) {
             return Flux.error(new IllegalArgumentException("Partition not found: " + partition));
         }
 
-        // Enforce shard size limit to prevent disk overflow
+        // Delta readers hold both snapshots on disk at once.
         if (maxShardSizeBytes > 0) {
-            long shardSize = entry.metadata().getTotalSizeBytes();
+            long shardSize = (entry == null ? 0 : entry.metadata().getTotalSizeBytes())
+                + (previousEntry == null ? 0 : previousEntry.metadata().getTotalSizeBytes());
             if (shardSize > maxShardSizeBytes) {
                 return Flux.error(new ShardTooLargeException(partition, shardSize, maxShardSizeBytes));
             }
         }
 
         if (isDeltaMode()) {
-            var previousEntry = resolveShardEntry(esPartition, previousShardEntryCache);
-            if (previousEntry == null) {
-                log.info("No previous partition for {} — treating as full read (all additions)", partition);
-                if (deltaMode == DeltaMode.DELETES_ONLY) {
-                    return Flux.empty();
-                }
-                return readRegularDocuments(entry, partition, startingPosition);
-            }
-            log.info("Reading delta documents from {} (mode={}, position={})", partition, deltaMode, startingPosition);
-            // Delta doc numbers can overlap across snapshots; resume by stream ordinal.
-            return extractor.readDeltaDocuments(entry, previousEntry, deltaMode, workDir, deltaContextFactory,
-                    current -> snapshotCounts.put(partition, current))
-                .index()
-                .skip(startingPosition)
-                .map(indexed -> {
-                    var doc = luceneAdapter.fromLucene(indexed.getT2());
-                    var metadata = new HashMap<>(doc.sourceMetadata());
-                    metadata.put(Document.SOURCE_META_POSITION, indexed.getT1());
-                    return new Document(doc.id(), doc.source(), doc.operation(), doc.hints(), metadata);
-                });
+            return readDeltaDocuments(entry, previousEntry, partition, startingPosition);
         }
 
         return readRegularDocuments(entry, partition, startingPosition);
+    }
+
+    private Flux<Document> readDeltaDocuments(
+        SnapshotExtractor.ShardEntry entry, SnapshotExtractor.ShardEntry previousEntry,
+        Partition partition, long startingPosition
+    ) {
+        if (previousEntry == null) {
+            return deltaMode == DeltaMode.DELETES_ONLY ? Flux.empty()
+                : readRegularDocuments(entry, partition, startingPosition);
+        }
+        if (entry == null) {
+            return deltaMode == DeltaMode.UPDATES_ONLY ? Flux.empty()
+                : readRegularDocuments(previousEntry, partition, startingPosition)
+                    .map(doc -> new Document(doc.id(), doc.source(), Document.Operation.DELETE,
+                        doc.hints(), doc.sourceMetadata()));
+        }
+        log.info("Reading delta documents from {} (mode={}, offset={})", partition, deltaMode, startingPosition);
+        return extractor.readDeltaDocuments(entry, previousEntry, deltaMode, workDir, deltaContextFactory,
+                count -> snapshotCounts.put(partition, count))
+            // Delta doc numbers can overlap across snapshots; resume by stream ordinal.
+            .index()
+            .skip(startingPosition)
+            .map(indexed -> {
+                var doc = luceneAdapter.fromLucene(indexed.getT2());
+                var metadata = new HashMap<>(doc.sourceMetadata());
+                metadata.put(Document.SOURCE_META_POSITION, indexed.getT1());
+                return new Document(doc.id(), doc.source(), doc.operation(), doc.hints(), metadata);
+            });
     }
 
     private Flux<Document> readRegularDocuments(
@@ -258,18 +302,19 @@ public class LuceneSnapshotSource implements DocumentSource {
     private SnapshotExtractor.ShardEntry resolveShardEntry(
         EsShardPartition partition, Map<EsShardPartition, SnapshotExtractor.ShardEntry> cache
     ) {
-        var entry = cache.get(partition);
-        if (entry == null) {
+        if (!loadedCollections.contains(partition.indexName())) {
             listPartitions(partition.indexName());
-            entry = cache.get(partition);
         }
-        return entry;
+        return cache.get(partition);
     }
 
     @Override
     public void close() {
+        initializationScheduler.dispose();
         shardEntryCache.clear();
         previousShardEntryCache.clear();
+        snapshotIndices.clear();
+        loadedCollections.clear();
         snapshotCounts.clear();
     }
 }

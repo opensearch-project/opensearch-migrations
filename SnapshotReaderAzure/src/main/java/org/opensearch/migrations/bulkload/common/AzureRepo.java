@@ -2,8 +2,10 @@ package org.opensearch.migrations.bulkload.common;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -168,11 +170,31 @@ public class AzureRepo implements SourceRepo {
             .addArgument(localPath)
             .log();
 
+        // SDK cleanup can run after the download call returns. Isolate each attempt so a
+        // failed request cannot remove a retry's file or publish an incomplete cache entry.
+        Path downloadPath = null;
         try {
-            containerClient.getBlobClient(azureUri.key).downloadToFile(localPath.toString(), true);
+            downloadPath = Files.createTempFile(localPath.toAbsolutePath().getParent(), ".azure-download-", ".tmp");
+            containerClient.getBlobClient(azureUri.key).downloadToFile(downloadPath.toString(), true);
+            Files.move(downloadPath, localPath, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
         } catch (BlobStorageException e) {
             // Local filesystem errors are not BlobStorageException, so they keep their own classification.
             throw new CouldNotReadFromAzure(azureUri.containerName, azureUri.key, e);
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to write the Azure local download file: " + localPath, e);
+        } finally {
+            if (downloadPath != null) {
+                deletePartialDownload(downloadPath);
+            }
+        }
+    }
+
+    // Preserve the download's original error if cleanup fails.
+    private static void deletePartialDownload(Path downloadPath) {
+        try {
+            Files.deleteIfExists(downloadPath);
+        } catch (IOException e) {
+            log.atWarn().setCause(e).setMessage("Failed to delete partial download: {}").addArgument(downloadPath).log();
         }
     }
 

@@ -22,6 +22,8 @@ import org.opensearch.migrations.reindexer.tracing.RootDocumentMigrationContext;
 import com.beust.jcommander.ParameterException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import reactor.core.publisher.Mono;
 
 import static org.hamcrest.MatcherAssert.assertThat;
@@ -509,11 +511,29 @@ class RfsMigrateDocumentsHelpersTest {
             "{\"regexCollectionRouting\": [{\"sourceIndex\": \"(.+)-\\\\d{4}\", \"collection\": \"$1\"}]}").orElseThrow();
         var target = new CollectionRoutedTarget(routing, collection -> false);
 
-        assertDoesNotThrow(() -> RfsMigrateDocuments.validateCollectionRouting(null, source, List.of()));
-        assertDoesNotThrow(() -> RfsMigrateDocuments.validateCollectionRouting(target, source, List.of("tenant-a-2024")));
+        assertDoesNotThrow(() -> RfsMigrateDocuments.validateCollectionRouting(null, source, List.of(), null));
+        assertDoesNotThrow(() -> RfsMigrateDocuments.validateCollectionRouting(target, source, List.of("tenant-a-2024"), null));
         var e = assertThrows(IllegalArgumentException.class,
-            () -> RfsMigrateDocuments.validateCollectionRouting(target, source, List.of()));
+            () -> RfsMigrateDocuments.validateCollectionRouting(target, source, List.of(), null));
         assertThat(e.getMessage(), equalTo("No collection routing entry matches source indices [unrouted]"));
+    }
+
+    @ParameterizedTest
+    @EnumSource(DeltaMode.class)
+    void validateCollectionRouting_deltaRequiresSourceIdsInEveryIncludedCollection(DeltaMode deltaMode) {
+        var source = mock(DocumentSource.class);
+        when(source.listCollections()).thenReturn(List.of("search-2024", "vector-2024", ".system"));
+        var routing = ServerlessCollectionRouting.fromJson(
+            "{\"regexCollectionRouting\": [{\"sourceIndex\": \"(.+)-\\\\d{4}\", \"collection\": \"$1\"}]}").orElseThrow();
+        var target = new CollectionRoutedTarget(routing, "vector"::equals);
+
+        assertDoesNotThrow(() -> RfsMigrateDocuments.validateCollectionRouting(target, source, List.of(), null));
+        assertDoesNotThrow(() -> RfsMigrateDocuments.validateCollectionRouting(
+            target, source, List.of("search-2024"), deltaMode));
+        var e = assertThrows(ParameterException.class,
+            () -> RfsMigrateDocuments.validateCollectionRouting(target, source, List.of(), deltaMode));
+        assertThat(e.getMessage(), equalTo(
+            "Delta migration requires source document IDs, but target collection 'vector' uses server-generated IDs."));
     }
 
     @Test
@@ -639,7 +659,7 @@ class RfsMigrateDocumentsHelpersTest {
         // delta mode intentionally left null
         var thrown = assertThrows(ParameterException.class,
             () -> RfsMigrateDocuments.validateArgs(args));
-        assertThat(thrown.getMessage(), org.hamcrest.Matchers.containsString("--experimental-delta-mode"));
+        assertThat(thrown.getMessage(), org.hamcrest.Matchers.containsString("--delta-mode"));
     }
 
     @Test
@@ -650,7 +670,38 @@ class RfsMigrateDocumentsHelpersTest {
         var thrown = assertThrows(ParameterException.class,
             () -> RfsMigrateDocuments.validateArgs(args));
         assertThat(thrown.getMessage(),
-            org.hamcrest.Matchers.containsString("--experimental-previous-snapshot-name"));
+            org.hamcrest.Matchers.containsString("--previous-snapshot-name"));
+    }
+
+    @Test
+    void deltaOptionsAcceptTheWorkflowInlineJsonAndLegacyFlags() {
+        var args = validEsArgs();
+        JsonCommandLineParser.newBuilder().addObject(args).build().parse(new String[] {
+            "---INLINE-JSON", "{\"previousSnapshotName\":\"baseline\", \"deltaMode\":\"DELETES_ONLY\"}"
+        });
+        assertThat(args.experimental.previousSnapshotName, equalTo("baseline"));
+        assertThat(args.experimental.experimentalDeltaMode, equalTo(DeltaMode.DELETES_ONLY));
+        assertDoesNotThrow(() -> RfsMigrateDocuments.validateArgs(args));
+
+        var legacy = validEsArgs();
+        JsonCommandLineParser.newBuilder().addObject(legacy).build().parse(new String[] {
+            "--target-host", "http://localhost:9200",
+            "--experimental-previous-snapshot-name", "baseline", "--experimental-delta-mode", "UPDATES_ONLY"
+        });
+        assertThat(legacy.experimental.previousSnapshotName, equalTo("baseline"));
+        assertThat(legacy.experimental.experimentalDeltaMode, equalTo(DeltaMode.UPDATES_ONLY));
+    }
+
+    @Test
+    void deltaValidationRejectsGeneratedIdsAndSourceReconstruction() {
+        var args = validEsArgs();
+        args.experimental.previousSnapshotName = "baseline";
+        args.experimental.experimentalDeltaMode = DeltaMode.UPDATES_ONLY;
+        args.serverGeneratedIds = RfsMigrateDocuments.ServerGeneratedIdMode.ALWAYS;
+        assertThrows(ParameterException.class, () -> RfsMigrateDocuments.validateArgs(args));
+        args.serverGeneratedIds = RfsMigrateDocuments.ServerGeneratedIdMode.NEVER;
+        args.experimental.enableSourcelessMigrations = true;
+        assertThrows(ParameterException.class, () -> RfsMigrateDocuments.validateArgs(args));
     }
 
     @Test

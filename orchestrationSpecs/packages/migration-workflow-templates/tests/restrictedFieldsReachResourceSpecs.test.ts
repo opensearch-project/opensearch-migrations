@@ -26,6 +26,9 @@ describe("restricted SnapshotMigration fields reach the resource spec", () => {
     test.each(restricted.map(field => [field.specPath.join("."), field.changeRestriction]))(
         "%s (%s) is written by the upsert manifest", (specPath) => {
             const topLevelKey = specPath.split(".")[0];
-            expect(upsertManifest()).toMatch(new RegExp(`^\\s+${topLevelKey}:`, "m"));
+            // Optional immutable delta fields require a computed spec. Accept both YAML keys
+            // and the dictionary entries that Argo merges into that spec.
+            expect(upsertManifest()).toMatch(new RegExp(
+                `(?:^\\s+${topLevelKey}:|[,(]\\s*"${topLevelKey}"\\s*,)`, "m"));
         });
 });

@@ -247,7 +247,8 @@ public class DocumentMigrationPipeline {
         Flux<Document> documents, String collectionName
     ) {
         return documents
-            .bufferUntil(new BatchSizePredicate<>(maxDocsPerBatch, maxBytesPerBatch, Document::sourceLength), true)
+            .bufferUntil(new BatchSizePredicate<>(maxDocsPerBatch, maxBytesPerBatch,
+                (Document doc) -> estimatedDocumentBytes(doc, collectionName)), true)
             .flatMapSequential(sourceBatch -> {
                 activeBatches.incrementAndGet();
                 var lastPosition = sourceBatch.get(sourceBatch.size() - 1).position();
@@ -318,7 +319,7 @@ public class DocumentMigrationPipeline {
                 .bufferUntil(new BatchSizePredicate<>(
                     preparationChunkDocuments,
                     maxBytesPerBatch,
-                    Document::sourceLength
+                    (Document doc) -> estimatedDocumentBytes(doc, collectionName)
                 ), true)
                 .map(sourceChunk -> {
                     long sourceBytes = sourceChunk.stream().mapToLong(Document::sourceLength).sum();
@@ -398,7 +399,7 @@ public class DocumentMigrationPipeline {
                 .bufferUntil(new BatchSizePredicate<>(
                     preparationChunkDocuments,
                     maxBytesPerBatch,
-                    Document::sourceLength
+                    (Document doc) -> estimatedDocumentBytes(doc, collectionName)
                 ), true)
                 .map(sourceChunk -> newLaneSourceChunk(nextSequence.getAndIncrement(), sourceChunk));
 
@@ -943,4 +944,18 @@ public class DocumentMigrationPipeline {
             .concatMap(this::migrateCollection);
     }
 
+    /**
+     * Bound pre-sink batches even for deletes with no source; the sink enforces exact request sizes.
+     */
+    private static long estimatedDocumentBytes(Document doc, String collectionName) {
+        long bytes = doc.sourceLength();
+        if (doc.operation() == Document.Operation.DELETE) {
+            // Conservatively include up to six JSON bytes per UTF-16 unit of metadata.
+            bytes += 64L + 6L * (collectionName.length() + doc.id().length());
+            for (var hint : doc.hints().entrySet()) {
+                bytes += 6L * (hint.getKey().length() + hint.getValue().length()) + 6;
+            }
+        }
+        return bytes;
+    }
 }

@@ -40,6 +40,11 @@ public interface LuceneLeafReader {
 
     public String getSegmentName();
 
+    /** Immutable segment identity, or null for old Lucene formats without segment IDs. */
+    default String getSegmentId() {
+        return null;
+    }
+
     public String getSegmentInfoString();
 
     /**
