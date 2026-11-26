@@ -18,6 +18,8 @@ CHART_DIR="$(cd "$SCRIPT_DIR/../aggregates/migrationAssistantWithArgo" && pwd)"
 TEST_CHART_DIR="$(cd "$SCRIPT_DIR/../aggregates/testClusters" && pwd)"
 MANIFEST="$CHART_DIR/infra/mirror/private-ecr-manifest.yaml"
 ECR_HOST="${ECR_HOST:-123456789012.dkr.ecr.us-east-1.amazonaws.com}"
+# Render for the EKS version MA deploys (Chart.yaml kubeVersion); helm 3's default is older and fails it.
+KUBE_VERSION="${KUBE_VERSION:-1.35.0}"
 DRY_RUN=false
 
 manifest_section() {
@@ -76,13 +78,25 @@ CHARTS_FILE="$TMPDIR/charts.txt"
 # Parse charts from both migrationAssistantWithArgo and testClusters
 for vf in "$CHART_DIR/values.yaml" "$TEST_CHART_DIR/values.yaml"; do
   [ -f "$vf" ] || continue
-  # Extract name|version|repo triples
+  # Extract name|version|repo|imageTag, where imageTag is the chart's values.image.tag override
+  # (e.g. localstack) so discovery reports the image that is actually deployed. Fields are unquoted
+  # from copies, and commented-out entries at column 0 inside charts: do not end the section.
   awk '
-    /^  [a-zA-Z].*:$/ && in_charts { name=$1; gsub(/:$/,"",name) }
-    /version:/ && in_charts && name { gsub(/[" ]/,"",$2); ver=$2 }
-    /repository:/ && in_charts && name && /http|oci/ { gsub(/[" ]/,"",$2); repo=$2; print name"|"ver"|"repo; name="" }
-    /^charts:/ { in_charts=1 }
-    /^[^ ]/ && !/^charts:/ { in_charts=0 }
+    function unquote(s) { gsub(/["'\'' ]/, "", s); return s }
+    function flush() {
+      if (name != "" && repo != "") print name "|" ver "|" repo "|" tag
+      name = ""; ver = ""; repo = ""; tag = ""; in_values = 0; in_image = 0
+    }
+    /^charts:/ { in_charts = 1; next }
+    in_charts && /^[^ #]/ { flush(); in_charts = 0 }
+    !in_charts { next }
+    /^  [a-zA-Z][^ ]*:[[:space:]]*$/ { flush(); name = $1; sub(/:$/, "", name); next }
+    /^    version:/ { ver = unquote($2); next }
+    /^    repository:/ && /http|oci/ { repo = unquote($2); next }
+    /^    [a-zA-Z]/ { in_values = ($1 == "values:"); in_image = 0; next }
+    in_values && /^      [a-zA-Z]/ { in_image = ($1 == "image:"); next }
+    in_image && /^        tag:/ { tag = unquote($2); next }
+    END { flush() }
   ' "$vf" >> "$CHARTS_FILE"
 done
 
@@ -93,29 +107,40 @@ echo "Step 2: Discovering images from helm template..."
 ALL_IMAGES="$TMPDIR/all_images.txt"
 touch "$ALL_IMAGES"
 
-while IFS='|' read -r name version repo; do
+while IFS='|' read -r name version repo image_tag; do
   [ -z "$name" ] && continue
-  echo "  Pulling $name $version..."
-  cd "$TMPDIR"
+  echo "  Pulling $name $version${image_tag:+ (image.tag $image_tag)}..."
+  # Untar into a per-chart directory: the archive is named after the chart, which can differ from
+  # the values.yaml key (e.g. ack-cloudwatch-controller is the cloudwatch-chart OCI artifact).
+  pull_dir="$TMPDIR/pull-$name"
+  rm -rf "$pull_dir"
+  mkdir -p "$pull_dir"
   if echo "$repo" | grep -q '^oci://'; then
-    helm pull "$repo/$name" --version "$version" 2>/dev/null || { echo "    WARN: could not pull $name"; continue; }
+    # OCI repositories in values.yaml are full chart references, passed to helm as-is by installJob.yaml.
+    helm pull "$repo" --version "$version" --untar --untardir "$pull_dir" 2>/dev/null || { echo "    WARN: could not pull $name"; continue; }
   else
-    helm pull "$name" --repo "$repo" --version "$version" 2>/dev/null || { echo "    WARN: could not pull $name"; continue; }
+    helm pull "$name" --repo "$repo" --version "$version" --untar --untardir "$pull_dir" 2>/dev/null || { echo "    WARN: could not pull $name"; continue; }
   fi
-  tgz=$(ls ${name}*.tgz 2>/dev/null | head -1)
-  [ -z "$tgz" ] && continue
-  tar xzf "$tgz" 2>/dev/null
-  dir=$(basename "$tgz" .tgz | sed 's/-[0-9].*//')
-  # Try exact dir name first, then glob
-  [ -d "$dir" ] || dir=$(ls -d ${name}*/ 2>/dev/null | head -1 | tr -d '/')
-  if [ -d "$dir" ]; then
-    helm template test "$dir/" 2>/dev/null | grep -E '^\s+image:' | \
+  # Find the chart by its Chart.yaml: helm 3 also leaves an empty directory named after the chart reference.
+  chart_yaml=$(find "$pull_dir" -mindepth 2 -maxdepth 2 -name Chart.yaml | head -1)
+  if [ -n "$chart_yaml" ]; then
+    dir=$(dirname "$chart_yaml")
+    # Render once into $RENDERED, with the values.yaml image.tag override (if any) so the deployed
+    # tag is reported. Some charts (e.g. opentelemetry-operator) reject their own defaults via
+    # values.schema.json; keep going so one chart cannot abort discovery, and flag it.
+    RENDERED="$TMPDIR/rendered.yaml"
+    if ! helm template test "$dir/" --kube-version "$KUBE_VERSION" ${image_tag:+--set-string "image.tag=$image_tag"} > "$RENDERED" 2>/dev/null; then
+      echo "    WARN: helm template failed for $name with default values; check its images manually"
+      : > "$RENDERED"
+    fi
+    { grep -E '^\s+image:' "$RENDERED" || true; } | \
       sed 's/.*image:\s*//' | tr -d '"' | tr -d "'" | sed 's/^[[:space:]]*//' >> "$ALL_IMAGES"
     # prometheus-operator receives the config-reloader and thanos images as flags, not image: fields
     grep -oE -- '--(prometheus-config-reloader|thanos-default-base-image)=[^[:space:]"]+' "$RENDERED" | \
       sed 's/^[^=]*=//' >> "$ALL_IMAGES" || true
+    rm -f "$RENDERED"
   fi
-  rm -rf "$dir" "$tgz"
+  rm -rf "$pull_dir"
 done < "$CHARTS_FILE"
 
 # --- Step 3: Add known runtime images ---
