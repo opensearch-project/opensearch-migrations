@@ -218,6 +218,23 @@ def coordinator_search(cluster, index, body):
     return response.json()
 
 
+def shard_setup_complete(cluster, index):
+    """Whether the shard_setup sentinel work item has completed. Until it has, the item counts are
+    meaningless (work items don't exist yet), so the monitor must lay off: no caps, no trims, no
+    creates — the fleet starts at the full pod budget and workers self-coordinate through the
+    setup barrier exactly as they always have. GET /_doc/{id} is typeless on both OS and ES 6.8."""
+    import requests
+    from console_link.models.cluster import HttpMethod
+    try:
+        response = cluster.call_api(f"/{index}/_doc/{SHARD_SETUP_DOC_ID}", method=HttpMethod.GET)
+    except requests.HTTPError as e:
+        if e.response is not None and e.response.status_code == 404:
+            return False
+        raise
+    doc = response.json()
+    return bool(doc.get("_source", {}).get("completedAt"))
+
+
 def gather_coordinator_state(cluster, index, tier_count):
     now = int(time.time())
     body = {
@@ -371,6 +388,10 @@ def main():
     tier_label = policy["tierLabel"]
 
     try:
+        if not shard_setup_complete(cluster, index):
+            logger.info("shard_setup has not completed; laying off (no caps, trims, or creates) "
+                        "until work items exist")
+            return 0
         tiers, total_incomplete, lease_holders_by_tier = gather_coordinator_state(
             cluster, index, len(tier_table))
     except Exception as e:  # noqa: BLE001

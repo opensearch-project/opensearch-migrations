@@ -2034,7 +2034,7 @@
                   },
                   {
                     "name": "podReplicas",
-                    "value": "1"
+                    "value": "{{=sprig.dig('maxTotalPods', fromJSON(inputs.parameters.documentBackfillConfig)['podReplicas'], fromJSON(inputs.parameters.documentBackfillConfig))}}"
                   },
                   {
                     "name": "minPodReplicas",

@@ -869,8 +869,10 @@ export const DocumentBulkLoad = documentBulkLoadBaseBuilder
 
 
     // Feature-on analogue of startHistoricalBackfillFromConfig: creates the TIER-0 runtime
-    // (tier label/env, raised grace period) with replicas bootstrapped
-    // at 1 — the monitor's first sweep after the shard_setup sentinel right-sizes the fleet.
+    // (tier label/env, raised grace period) at the full pod budget — workers have always
+    // self-coordinated through the coordination index, so the fleet rolls immediately and node
+    // provisioning overlaps shard setup instead of trailing the monitor's first sweep. The
+    // monitor lays off (no trims) until the shard_setup sentinel completes, then right-sizes.
     .addTemplate("startTierZeroBackfillFromConfig", t => t
         .addRequiredInput("sessionName", typeToken<string>())
         .addRequiredInput("sourceVersion", typeToken<z.infer<typeof CLUSTER_VERSION_STRING>>())
@@ -895,8 +897,10 @@ export const DocumentBulkLoad = documentBulkLoadBaseBuilder
                     ...selectInputsForRegister(b, c),
                     memoryTier: expr.literal("0"),
                     tierMemoryQuantity: expr.index(tierTable, expr.literal(0)),
-                    // Bootstrap: level 0 starts at one pod; the monitor right-sizes after setup.
-                    podReplicas: expr.literal(1),
+                    // Start at the full budget (maxTotalPods, or podReplicas as its stand-in):
+                    // excess pods idle cheaply and the monitor trims them after shard setup.
+                    podReplicas: expr.dig(backfillConfig, ["maxTotalPods"],
+                        expr.cast(expr.get(backfillConfig, "podReplicas")).to<number>()),
                     minPodReplicas: scaling.minPodReplicas,
                     targetBasicCredsSecretNameOrEmpty: getHttpAuthSecretName(b.inputs.targetConfig),
                     coordinatorBasicCredsSecretNameOrEmpty: getHttpAuthSecretName(b.inputs.rfsCoordinatorConfig),
