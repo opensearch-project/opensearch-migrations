@@ -22,15 +22,13 @@ import re
 import sys
 
 NS = "OpenSearchMigrations"
-Q = "MA_QUALIFIER"
-RFS_SESSION = "RFS_SESSION"
 R = "REGION"
 RI = "$__rate_interval"
 MIB = 1048576
 RFS = "documentMigration"
 WC = "workCoordination"
+MON = "fleetMonitor"
 CONTAINER = "bulk-loader"
-FLEET_CAPACITY_LABEL = "% (fleet capacity)"
 DOCS_PER_SECOND_UNIT = "docs/s"
 ATTEMPTS_PER_SECOND_UNIT = "attempts/s"
 PER_MINUTE_UNIT = "per min"
@@ -91,6 +89,14 @@ METRICS = {
     "bulkDocumentsFailed": ("count", "counter", RFS, ("failureClass",)),
     "rfsWorkerPhase": ("count", "gauge", RFS, ("phase", "tier")),
     "workItemsEscalated": ("count", "counter", RFS, ("tier",)),
+    "dirtyLeasesReleased": ("count", "counter", RFS, ("tier",)),
+    # fleetMonitor scope: the scheduler's per-sweep truth, emitted by rfsTierSweep.py.
+    "tierLeaseCap": ("count", "gauge", MON, ("tier",)),
+    "tierReplicasDesired": ("count", "gauge", MON, ("tier",)),
+    "tierBusyPods": ("count", "gauge", MON, ("tier",)),
+    "tierGhostLeases": ("count", "gauge", MON, ("tier",)),
+    "tierEligibleItems": ("count", "gauge", MON, ("tier",)),
+    "tierWaitingItems": ("count", "gauge", MON, ("tier",)),
     "bulkAttemptGap": ("milliseconds", "histogram", RFS, ()),
     "bulkAttemptsPerBatch": ("count", "histogram", RFS, ()),
     "bulkItemErrors": ("count", "counter", RFS, ("errorType", "retryable")),
@@ -159,20 +165,21 @@ class W:
         self.n += 1
         return f"{p}{self.n}"
 
-    def m(self, name, stat, period=None):
-        i = self._id("m")
-        lib = METRICS[name][2]
-        opts = {"id": i, "stat": stat, "visible": False, "region": R}
-        if period:
-            opts["period"] = period
-        self.rows.append([NS, name, "OTelLib", lib, "qualifier", Q, opts])
-        return i
+    def m(self, name, stat):
+        """One aggregated series for a metric with no attributes: a SEARCH across every qualifier
+        folded to a single line. Emission stays partitioned by the qualifier dimension; only the
+        dashboard view is global (per-resource dashboards can filter the same metrics later)."""
+        agg = {"Sum": "SUM", "SampleCount": "SUM", "Maximum": "MAX",
+               "Minimum": "MIN", "Average": "AVG"}[stat]
+        return self.e(f"{agg}({self.search(name, stat)})", "", visible=False)
 
     def search(self, name, stat, where=None):
+        # The qualifier dimension stays in the schema (it is on every emitted series) but carries
+        # no value filter, so the dashboard reads globally across deployments.
         _, _, lib, attrs = METRICS[name]
         dims = ",".join(["OTelLib", *sorted(attrs), "qualifier"])
         terms = "".join(f' {k}="{v}"' for k, v in (where or {}).items())
-        return f"SEARCH('{{{NS},{dims}}} MetricName=\"{name}\" OTelLib=\"{lib}\" qualifier=\"{Q}\"{terms}', '{stat}', 60)"
+        return f"SEARCH('{{{NS},{dims}}} MetricName=\"{name}\" OTelLib=\"{lib}\"{terms}', '{stat}', 60)"
 
     def e(self, expr, label, visible=True):
         i = self._id("e")
@@ -225,7 +232,7 @@ class Rate:
                 return [w.e(f"{q} / 60{scale}", self.cw_label or "")]
             return [w.e(f"SUM({q}) / 60{scale}", self.label)]
         s = w.m(self.name, "SampleCount" if METRICS[self.name][1] == "histogram" else "Sum")
-        return [w.e(f"FILL({s}, 0) / PERIOD({s}){scale}", self.label)]
+        return [w.e(f"FILL({s}, 0) / 60{scale}", self.label)]
 
 
 class TrafficBackedAggregateRate(Rate):
@@ -261,7 +268,7 @@ class HistogramSumRate:
 
     def cw(self, w):
         metric = w.m(self.name, "Sum")
-        expression = f"FILL({metric}, 0) / PERIOD({metric})"
+        expression = f"FILL({metric}, 0) / 60"
         if self.scale != 1:
             expression = f"{expression} / {self.scale}"
         return [w.e(expression, self.label)]
@@ -288,7 +295,7 @@ class Gauge:
             return []
         if self.agg == "sum":
             s = w.m(self.name, "Sum")
-            return [w.e(self._scaled(f"{s} / PERIOD({s})"), self.label)]
+            return [w.e(self._scaled(f"{s} / 60"), self.label)]
         stat = {"max": "Maximum", "min": "Minimum", "avg": "Average"}[self.agg]
         return [w.e(self._scaled(w.m(self.name, stat)), self.label)]
 
@@ -480,72 +487,84 @@ class LimitUtilizationBands:
         ]
 
 
-class ContainerUtilization:
-    """CPU or memory usage as a percentage of the RFS containers' configured limits."""
+def _cw_container_row(w, name, stat):
+    """One exact, node-summed [container, namespace] cadvisor row for the RFS bulk loader."""
+    i = w._id("m")
+    w.rows.append([NS, name, "container", CONTAINER, "namespace", "ma",
+                   {"id": i, "stat": stat, "visible": False, "region": R}])
+    return i
 
-    def __init__(self, what, agg):
-        self.what, self.agg = what, agg
+
+GIB = 1073741824
+
+
+def _cw_tier_row(w, name, stat, tier, resource=None):
+    """One exact per-tier row for the RFS bulk loader: cAdvisor summed per node, or kube-state-metrics."""
+    i = w._id("m")
+    dims = [NS, name, "container", CONTAINER, "namespace", "ma", "tier", str(tier)]
+    if resource:
+        dims += ["resource", resource]
+    w.rows.append(dims + [{"id": i, "stat": stat, "visible": False, "region": R}])
+    return i
+
+
+def _tier_pods(tier):
+    """Pod-name regex for a memory tier's workers (Deployment <session>-rfs-t<n>); workers without memory
+    scaling (<session>-rfs-<rs>-<pod>) count as tier 0, like the tier the workers report themselves."""
+    suffix = "-[a-z0-9]{1,10}-[a-z0-9]{5}"
+    pods = f".*-rfs-t{tier}{suffix}"
+    return pods + f"|.*-rfs{suffix}" if tier == 0 else pods
+
+
+class FleetUsedVsAllocated:
+    """RFS CPU (cores) or memory (GiB) in use, one stacked series per memory tier, with "allocated, unused" on
+    top so the top of the stack is everything allocated. Allocated counts only running workers (a pod waiting
+    for a node allocates nothing yet, and cAdvisor reports no usage for it either)."""
+
+    TIERS = list(range(6))
+
+    def __init__(self, what):
+        self.what = what
+        self.resource, self.scale = ("cpu", 1) if what == "cpu" else ("memory", GIB)
 
     def prom(self):
-        s = (f'{{job="otel-collector",exported_job=~"cadvisor|kubelet-cadvisor",namespace="$namespace",'
-             f'container="{CONTAINER}",container!="POD",image!=""}}')
-        if self.what == "cpu":
-            usage = f"max by (pod) (rate(container_cpu_usage_seconds_total{s}[{RI}]))"
-            quota = f"max by (pod) (container_spec_cpu_quota{s})"
-            period = f"max by (pod) (container_spec_cpu_period{s})"
-            limit = f"({quota}) / ({period})"
-        else:
-            usage = f"max by (pod) (container_memory_working_set_bytes{s})"
-            limit = f"max by (pod) (container_spec_memory_limit_bytes{s})"
-        if self.agg == "sum":
-            expression = f"100 * sum({usage}) / sum({limit})"
-            label = FLEET_CAPACITY_LABEL
-        else:
-            expression = f"100 * max(({usage}) / ({limit}))"
-            label = "% (hottest pod)"
-        return [(expression, label)]
+        cadvisor = (f'job="otel-collector",exported_job=~"cadvisor|kubelet-cadvisor",namespace="$namespace",'
+                    f'container="{CONTAINER}",container!="POD",image!=""')
+        ksm = f'namespace="$namespace",container="{CONTAINER}"'
+        scaled = "" if self.scale == 1 else f" / {self.scale}"
 
-    @staticmethod
-    def _cw_search(name, stat):
-        return (f"SEARCH('{{{NS},container,namespace,pod}} MetricName=\"{name}\" "
-                f"container=\"{CONTAINER}\" namespace=\"ma\" {RFS_SESSION}', '{stat}', 60)")
+        def used(pod_filter):
+            if self.what == "cpu":
+                return f"sum(max by (pod) (rate(container_cpu_usage_seconds_total{{{cadvisor}{pod_filter}}}[{RI}])))"
+            return f"sum(max by (pod) (container_memory_working_set_bytes{{{cadvisor}{pod_filter}}})){scaled}"
+
+        out = [(used(f',pod=~"{_tier_pods(tier)}"'), f"tier {tier} used") for tier in self.TIERS]
+        allocated = (f'sum(max by (namespace, pod) (kube_pod_container_resource_limits{{{ksm},resource="{self.resource}"}})'
+                     f' * on (namespace, pod) max by (namespace, pod) (kube_pod_container_status_running{{{ksm}}})){scaled}')
+        out.append((f"({allocated}) - ({used('')})", "allocated, unused"))
+        return out
 
     def cw(self, w):
-        if self.what == "cpu" and self.agg == "max":
-            # The EKS CloudWatch exporter aggregates CPU by node to avoid colliding pod datapoints. Grafana can
-            # still calculate the hottest pod from the unaggregated Prometheus copy.
-            return []
-
-        name = ("container_cpu_usage_seconds_total"
-                if self.what == "cpu" else "container_memory_working_set_bytes")
-        if self.what == "cpu":
-            # The collector intentionally aggregates this counter to [container, namespace] before EMF export.
-            # Keep it as an exact metric row: unlike the per-pod capacity metrics below, it has neither a pod
-            # dimension nor a run qualifier to use in a SEARCH expression.
-            usage = w._id("m")
-            w.rows.append([
-                NS, name, "container", CONTAINER, "namespace", "ma",
-                {"id": usage, "stat": "Sum", "visible": False, "region": R},
-            ])
-            quota = self._cw_search("container_spec_cpu_quota", "Average")
-            period = self._cw_search("container_spec_cpu_period", "Average")
-            # CPU quota is per pod while the CFS period is a common divisor. Summing both would cancel the pod
-            # count and leave one pod's limit; sum all quotas and divide by the average period for fleet capacity.
-            limit = f"SUM({quota}) / AVG({period})"
-            return [w.e(f"100 * ({usage} / PERIOD({usage})) / ({limit})", FLEET_CAPACITY_LABEL)]
-
-        stat = "Average" if self.agg == "sum" else "Maximum"
-        usage_search = self._cw_search(name, stat)
-        memory_limit = self._cw_search("container_spec_memory_limit_bytes", "Average")
-        if self.agg == "sum":
-            usage = f"SUM({usage_search})"
-            limit = f"SUM({memory_limit})"
-            label = FLEET_CAPACITY_LABEL
-        else:
-            usage = f"MAX({usage_search})"
-            limit = f"MAX({memory_limit})"
-            label = "% (hottest pod)"
-        return [w.e(f"IF(({limit}) > 0, 100 * ({usage}) / ({limit}))", label)]
+        used, allocated = [], []
+        for tier in self.TIERS:
+            running = _cw_tier_row(w, "kube_pod_container_status_running", "Average", tier)
+            containers = _cw_tier_row(w, "kube_pod_container_info", "Average", tier)
+            limits = _cw_tier_row(w, "kube_pod_container_resource_limits", "Average", tier, self.resource)
+            # A tier's workers all have the same limits, so limits / containers is one worker's limit.
+            allocated.append(w.e(f"IF({containers} > 0, {running} * {limits} / {containers} / {self.scale})",
+                                 "", visible=False))
+            if self.what == "cpu":
+                # cpu-seconds from delta counters: exact whatever the sample count.
+                usage = _cw_tier_row(w, "container_cpu_usage_seconds_by_tier", "Sum", tier)
+                used.append(w.e(f"{usage} / PERIOD({usage})", f"tier {tier} used"))
+            else:
+                # Each collector sums only its node, so: average bytes per worker (bytes and worker count
+                # summed over the same samples) x running workers.
+                total = _cw_tier_row(w, "container_memory_working_set_bytes_by_tier", "Sum", tier)
+                count = _cw_tier_row(w, "container_memory_working_set_count_by_tier", "Sum", tier)
+                used.append(w.e(f"IF({count} > 0, {running} * {total} / {count} / {self.scale})",
+                                f"tier {tier} used"))
+        return used + [w.e(f"SUM([{', '.join(allocated)}]) - SUM([{', '.join(used)}])", "allocated, unused")]
 
 
 class ContainerCpuThrottling:
@@ -559,17 +578,9 @@ class ContainerCpuThrottling:
         return [(f"100 * ({throttled}) / ({periods})", "% throttled periods")]
 
     def cw(self, w):
-        dimensions = f"{{{NS},container,namespace,pod}}"
-        common = f'container="{CONTAINER}" namespace="ma" {RFS_SESSION}'
-        throttled = (
-            f"SUM(SEARCH('{dimensions} MetricName=\"container_cpu_cfs_throttled_periods_total\" "
-            f"{common}', 'Sum', 60))"
-        )
-        periods = (
-            f"SUM(SEARCH('{dimensions} MetricName=\"container_cpu_cfs_periods_total\" "
-            f"{common}', 'Sum', 60))"
-        )
-        return [w.e(f"100 * ({throttled}) / ({periods})", "% throttled periods")]
+        throttled = _cw_container_row(w, "container_cpu_cfs_throttled_periods_total_sum", "Sum")
+        periods = _cw_container_row(w, "container_cpu_cfs_periods_total_sum", "Sum")
+        return [w.e(f"IF({periods} > 0, 100 * {throttled} / {periods})", "% throttled periods")]
 
 
 class Domain:
@@ -617,9 +628,14 @@ class WorkersByTier:
     TIERS = list(range(6))
 
     def prom(self):
-        exited = (f'max by (exported_instance, tier) ({prom_name("rfsWorkerPhase")}'
-                  f'{{otel_scope_name="{RFS}",phase="exited"}})')
-        return [(f"sum by (tier) (1 - {exited})", "tier {{tier}}")]
+        # One target per tier so the legend reads tier 0..N left to right (a "by (tier)" query
+        # returns series in no particular order).
+        out = []
+        for tier in self.TIERS:
+            exited = (f'max by (exported_instance) ({prom_name("rfsWorkerPhase")}'
+                      f'{{otel_scope_name="{RFS}",phase="exited",tier="{tier}"}})')
+            out.append((f"sum(1 - {exited})", f"tier {tier}"))
+        return out
 
     def cw(self, w):
         out = []
@@ -630,18 +646,24 @@ class WorkersByTier:
         return out
 
 
-class TierEscalations:
-    """Work items escalated to a higher memory tier per minute, labeled by the destination tier."""
+class TierGauge:
+    """One line per memory tier of a fleetMonitor per-sweep gauge: the scheduler's own truth
+    (caps, desired replicas, busy, ghosts, eligible, waiting). CloudWatch SEARCH schemas are
+    static, so a fixed small tier range is generated and absent tiers plot nothing."""
+
+    TIERS = list(range(6))
+
+    def __init__(self, name, label):
+        self.name, self.label = name, label
 
     def prom(self):
-        return [(
-            f'sum by (tier) (max by (exported_instance, tier) '
-            f'(rate({prom_name("workItemsEscalated")}{{otel_scope_name="{RFS}"}}[{RI}]))) * 60',
-            "to tier {{tier}}",
-        )]
+        return [(f'max({prom_name(self.name)}{{otel_scope_name="{MON}",tier="{tier}"}})',
+                 f"{self.label} t{tier}") for tier in self.TIERS]
 
     def cw(self, w):
-        return [w.e(w.search("workItemsEscalated", "Sum"), "escalated/min")]
+        return [w.e(f"AVG({w.search(self.name, 'Average', {'tier': tier})})",
+                    f"{self.label} t{tier}")
+                for tier in self.TIERS]
 
 # --- panels --------------------------------------------------------------------------------------------------
 
@@ -735,20 +757,6 @@ SECTIONS = [
               "succeed; a sustained nonzero value means migration work is being held for target recovery.",
               "docs", [Gauge("bulkDocsWaitingOnTarget", "Paused documents")]),
     ]),
-    ("Memory-tier scaling", False, [
-        Panel("Workers by memory tier",
-              "Live RFS worker processes per memory tier (memoryScaling feature). Tier 0 is the starting size; "
-              "higher tiers appear only after a shard OOMs and is escalated, and each tier's fleet tracks its "
-              "remaining work, so the stack shows both the escalation ladder and the demand-driven ramp-down. "
-              "With memoryScaling off every worker reports tier 0.",
-              "count", [WorkersByTier()], stacked=True),
-        Panel("Work items escalated per minute",
-              "Shards promoted to a higher memory tier after a witnessed OOM (exit 3 or OOMKilled), labeled by the "
-              "tier escalated to. Quiet during healthy runs; a brief burst is the expected signature of fat shards "
-              "climbing the ladder, while a sustained high rate across most of the workload suggests a leak-like "
-              "transform or an undersized starting tier.",
-              PER_MINUTE_UNIT, [TierEscalations()]),
-    ]),
     ("Throughput and request shape", False, [
         Panel("Document and bulk request bytes (MiB/s)",
               "Three different byte boundaries, shown as absolute rates. Migrated document source is the original "
@@ -760,13 +768,12 @@ SECTIONS = [
               MIB_PER_SECOND_UNIT, [Rate("pipelineBytesMigrated", "Migrated document source", scale=MIB),
                                     HistogramSumRate("bulkRequestBytes", "Uncompressed bulk NDJSON", scale=MIB),
                                     HistogramSumRate("bulkRequestSentBytes", "Bulk request body sent", scale=MIB)]),
-        Panel("RFS CPU utilization (%)",
-              "Bulk-loader CPU usage divided by its configured CPU limit. This panel and RFS memory are vertically "
-              "aligned under the request allowance panel so worker resource saturation can be compared with unused "
-              "allowance. Both dashboards show the fleet's share of total configured CPU; Grafana also shows the "
-              "hottest pod. CloudWatch cannot calculate the hottest pod because EKS aggregates CPU by node before "
-              "export.",
-              "percent", [ContainerUtilization("cpu", "sum"), ContainerUtilization("cpu", "max")]),
+        Panel("RFS CPU used vs allocated (cores)",
+              "CPU cores the RFS workers are using, stacked by memory tier, with the cores allocated to running "
+              "workers but unused stacked on top, so the top of the stack is all allocated CPU. A pod waiting for "
+              "a node allocates nothing until its container starts. A thin top band means the workers are "
+              "CPU-bound; a thick one means CPU to spare.",
+              "cores", [FleetUsedVsAllocated("cpu")], stacked=True),
         Panel("Bulk request size",
               "Mean documents per bulk request and mean KiB per request before and after compression. Falling request "
               "sizes can explain lower MiB/s even when request rate is steady; retries and batch splits can change "
@@ -789,10 +796,6 @@ SECTIONS = [
                   },
               }],
               min_interval="1m"),
-        Panel("RFS memory utilization (%)",
-              "Bulk-loader working-set memory divided by its configured memory limit: fleet capacity and hottest "
-              "pod. It is vertically aligned with RFS CPU and the request allowance panel above.",
-              "percent", [ContainerUtilization("mem", "sum"), ContainerUtilization("mem", "max")]),
     ]),
     ("Pipeline performance diagnosis", False, [
         Panel("Documents per second through pipeline stages",
@@ -911,6 +914,35 @@ SECTIONS = [
                   Gauge("pipelinePreparationConcurrency", "Preparation rails", "avg"),
                   Gauge("pipelinePreparationChunkDocuments", "Documents per preparation chunk", "avg"),
               ]),
+    ]),
+    ("Memory-tier scaling", False, [
+        Panel("Workers by memory tier",
+              "Live RFS worker processes per memory tier (memoryScaling feature). Tier 0 is the starting size; "
+              "higher tiers appear only after a shard runs out of memory and is moved up, and each tier's workers "
+              "track its remaining work, so the stack shows both the climb through tiers and the ramp-down as work "
+              "drains. With memoryScaling off every worker reports tier 0.",
+              "count", [WorkersByTier()], stacked=True),
+        Panel("Maximum work items in progress per tier",
+              "The most work items each tier may process at once, as last set by the fleet monitor. Workers check "
+              "this before taking a work item, so lowering it for one tier frees budget for another as that tier's "
+              "workers finish their current items. Zero parks a tier.",
+              "count", [TierGauge("tierLeaseCap", "max in progress")]),
+        Panel("Busy workers per tier",
+              "Running workers that hold a work item right now. The fleet monitor never removes a busy worker, so "
+              "this is the floor a tier's worker count can shrink to. The gap to the worker counts above is idle "
+              "capacity waiting to be released.",
+              "count", [TierGauge("tierBusyPods", "busy")], stacked=True),
+        Panel("Target worker count per tier",
+              "How many workers the fleet monitor last asked each tier to run. Above busy workers means the extra "
+              "workers are waiting to be released (or to start new work); below the live worker count means workers "
+              "are still being scheduled.",
+              "count", [TierGauge("tierReplicasDesired", "target")]),
+        Panel("Work items remaining per tier",
+              "Remaining is every unfinished work item at the tier; unassigned is the part no worker is processing "
+              "right now. Remaining reaching zero tier by tier is the run finishing; unassigned work while the tier "
+              "is at its maximum means the tier would use more workers if the budget allowed.",
+              "count", [TierGauge("tierEligibleItems", "remaining"),
+                        TierGauge("tierWaitingItems", "unassigned")]),
     ]),
     ("Target domain", True, [
         Panel("Target indexing rate and write queue",
@@ -1091,10 +1123,6 @@ CW_VARIABLES = [
      "defaultValue": "placeholder-name", "visible": True},
     {"type": "pattern", "pattern": "ACCOUNT_ID", "inputType": "input", "id": "ACCOUNT_ID", "label": "Account ID",
      "defaultValue": "placeholder-account-id", "visible": False},
-    {"type": "pattern", "pattern": "MA_QUALIFIER", "inputType": "input", "id": "MA_QUALIFIER",
-     "label": "Migration Qualifier", "defaultValue": "placeholder-qualifier", "visible": False},
-    {"type": "pattern", "pattern": "RFS_SESSION", "inputType": "input", "id": "RFS_SESSION",
-     "label": "RFS Session Name", "defaultValue": "placeholder-rfs-session", "visible": True},
 ]
 
 
@@ -1133,7 +1161,7 @@ GRAFANA_UNITS = {DOCS_PER_SECOND_UNIT: "suffix: docs/s", MIB_PER_SECOND_UNIT: "s
                  "min": "m", "count": "short", "short": "short", "ops": "ops", "percent": "percent", "docs": "short",
                  ATTEMPTS_PER_SECOND_UNIT: "suffix: attempts/s", "errors/s": "suffix: errors/s",
                  "ops/min": "suffix: /min", "ms": "ms", "GB": "suffix: GB", "docs / KiB": "short",
-                 "cores": "suffix: cores", "MiB": "suffix: MiB", "thousands of docs": "short",
+                 "cores": "suffix: cores", "MiB": "suffix: MiB", "GiB": "suffix: GiB", "thousands of docs": "short",
                  "tokens": "suffix: tokens", "connections": "suffix: connections",
                  "events (see legend)": "short"}
 
