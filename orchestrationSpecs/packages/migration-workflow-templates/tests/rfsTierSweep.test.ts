@@ -17,7 +17,7 @@ function compute(input: unknown): any {
 
 function tier(overrides: Record<string, unknown>) {
     return {
-        eligible: 0, waiting: 0, neverAttempted: 0, busyPods: 0,
+        eligible: 0, waiting: 0, neverAttempted: 0, busyPods: 0, ghostLeases: 0,
         deploymentExists: false, currentReplicas: 0,
         ...overrides,
     };
@@ -127,6 +127,48 @@ describe("rfsTierSweep allocation arithmetic", () => {
         expect(result.caps).toEqual({"0": 0, "1": 1});
     });
 
+    it("does not pin a pod for a lease whose holder pod is gone, but keeps its lease slot in the cap", () => {
+        // Replays run h's 22:24:01 sweep: tier 0's only incomplete item was leased by a pod the
+        // ReplicaSet had already deleted. Counting that holder as busy kept a replica alive and
+        // used up the cap, so the surviving tier-0 pod idled at "cap reached".
+        const result = compute({
+            maxTotalPods: 6,
+            tiers: [
+                tier({tier: 0, eligible: 1, waiting: 0, busyPods: 0, ghostLeases: 1,
+                      deploymentExists: true, currentReplicas: 2}),
+                tier({tier: 1, eligible: 0, deploymentExists: true, currentReplicas: 3}),
+                tier({tier: 2, eligible: 1, waiting: 1}),
+            ],
+        });
+        expect(result.replicas).toEqual({"0": 0, "1": 0, "2": 1});
+        expect(result.caps).toEqual({"0": 1, "1": 0, "2": 1});
+    });
+
+    it("funds a tier's waiting work around a ghost lease without counting the ghost as demand", () => {
+        const result = compute({
+            maxTotalPods: 10,
+            tiers: [tier({tier: 0, eligible: 3, waiting: 2, busyPods: 0, ghostLeases: 1,
+                          deploymentExists: true, currentReplicas: 3})],
+        });
+        // Two pods for the two waiting items; the cap leaves room for the ghost's lease too, so
+        // both pods can acquire while the ghost lease is still live.
+        expect(result.replicas).toEqual({"0": 2});
+        expect(result.caps).toEqual({"0": 3});
+    });
+
+    it("writes only the deletion-cost annotations that change", () => {
+        const result = compute({
+            maxTotalPods: 4,
+            tiers: [tier({tier: 0, eligible: 2, waiting: 0, busyPods: 2, deploymentExists: true,
+                          currentReplicas: 4})],
+            podsByTier: {"0": ["pod-a", "pod-b", "pod-c", "pod-d"]},
+            busyPodNames: ["pod-a", "pod-b"],
+            currentDeletionCosts: {"pod-a": "10000", "pod-b": "0", "pod-c": "0"},
+        });
+        // pod-a and pod-c already hold their target costs; pod-b just became busy and pod-d has none.
+        expect(result.podDeletionCosts).toEqual({"pod-b": "10000", "pod-d": "0"});
+    });
+
     it("annotates deletion costs only on shrinking tiers: busy pods high, idle pods low", () => {
         const result = compute({
             maxTotalPods: 4,
@@ -145,5 +187,58 @@ describe("rfsTierSweep allocation arithmetic", () => {
             "pod-a": "10000", "pod-b": "10000",
             "pod-c": "0", "pod-d": "0", "pod-e": "0",
         });
+    });
+});
+
+describe("kernel-OOM witness (compute_oom_evidence)", () => {
+    // A cgroup OOM group-kills the whole container, supervisor included, so the evidence must come
+    // from outside: the monitor matches the kubelet's OOMKilled window against the dirty lease's
+    // holder instance id (which begins with the dead container's start epoch) and annotates the pod.
+    const base = {
+        maxTotalPods: 4,
+        tiers: [tier({tier: 0, eligible: 1, busyPods: 0, ghostLeases: 1, deploymentExists: true})],
+    };
+
+    it("attributes the dirty lease whose instance epoch falls inside the dead container's lifetime", () => {
+        const result = compute({
+            ...base,
+            oomRestarts: {"bulk-loader-t0-abc": [1795582000, 1795582100]},
+            leaseHolderIds: [
+                "bulk-loader-t0-abc_1795582005-2",   // launched by the dead container
+                "bulk-loader-t0-abc_1795583000-1",   // the restarted container's own worker
+                "other-pod_1795582005-1",            // same epoch, different pod
+            ],
+        });
+        expect(result.oomEvidence).toEqual({"bulk-loader-t0-abc": "1795582005-2=OOMKilled"});
+    });
+
+    it("keeps existing evidence entries, skips already-known instances, and emits only changes", () => {
+        const result = compute({
+            ...base,
+            oomRestarts: {
+                "pod-x": [1795582000, 1795582100],
+                "pod-y": [1795582000, 1795582100],
+            },
+            leaseHolderIds: ["pod-x_1795582010-3", "pod-y_1795582010-1"],
+            currentEvidence: {
+                "pod-x": "1795570000-1=OOMKilled",         // older entry must survive
+                "pod-y": "1795582010-1=OOMKilled",         // already recorded: no patch
+            },
+        });
+        expect(result.oomEvidence).toEqual({
+            "pod-x": "1795570000-1=OOMKilled,1795582010-3=OOMKilled",
+        });
+    });
+
+    it("ignores unsupervised (uuid-style) worker ids and pods with no matching holder", () => {
+        const result = compute({
+            ...base,
+            oomRestarts: {"pod-x": [1795582000, 1795582100]},
+            leaseHolderIds: [
+                "pod-x_c0ffee00-1111-2222-3333-444455556666",  // uuid id: no epoch to match
+                "pod-x_1795590000-1",                           // started after the kill window
+            ],
+        });
+        expect(result.oomEvidence).toEqual({});
     });
 });
