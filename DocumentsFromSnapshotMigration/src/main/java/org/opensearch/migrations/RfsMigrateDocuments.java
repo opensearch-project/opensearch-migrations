@@ -968,7 +968,8 @@ public class RfsMigrateDocuments {
                     workerId,
                     arguments.workerMemoryTier,
                     DirtyLeaseSweeper.parsePredecessorCrashes(arguments.predecessorCrashes),
-                    context.makeEscalationRecorder());
+                    context.makeEscalationRecorder(),
+                    context.makeDirtyLeaseReleaseRecorder());
                 startupSweepDone.set(true);
             };
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {

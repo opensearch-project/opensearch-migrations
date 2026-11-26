@@ -218,6 +218,53 @@ def coordinator_search(cluster, index, body):
     return response.json()
 
 
+OTEL_SCOPE_NAME = "fleetMonitor"
+DEFAULT_METRICS_ENDPOINT = "http://otel-collector:4318/v1/metrics"
+
+
+def build_fleet_metrics_payload(tiers, allocation, now_ns):
+    """OTLP/JSON gauges for one sweep: the monitor's per-tier truth (cap, desired replicas, busy,
+    ghosts, eligible, waiting), dimensioned by tier like the worker metrics, so dashboards can
+    overlay what the scheduler decided on what the workers did. Pure; the caller posts it."""
+    per_tier = {
+        "tierLeaseCap": lambda state, tier: int(allocation["caps"].get(str(tier), 0)),
+        "tierReplicasDesired": lambda state, tier: int(allocation["replicas"].get(str(tier), 0)),
+        "tierBusyPods": lambda state, tier: int(state.get("busyPods", 0)),
+        "tierGhostLeases": lambda state, tier: int(state.get("ghostLeases", 0)),
+        "tierEligibleItems": lambda state, tier: int(state.get("eligible", 0)),
+        "tierWaitingItems": lambda state, tier: int(state.get("waiting", 0)),
+    }
+    metrics = []
+    for name, value_of in per_tier.items():
+        points = []
+        for state in tiers:
+            tier = int(state["tier"])
+            points.append({
+                "timeUnixNano": str(now_ns),
+                "asDouble": float(value_of(state, tier)),
+                "attributes": [{"key": "tier", "value": {"stringValue": str(tier)}}],
+            })
+        metrics.append({"name": name, "unit": "count", "gauge": {"dataPoints": points}})
+    return {"resourceMetrics": [{
+        "resource": {"attributes": []},
+        "scopeMetrics": [{"scope": {"name": OTEL_SCOPE_NAME}, "metrics": metrics}],
+    }]}
+
+
+def emit_fleet_metrics(tiers, allocation):
+    """Post the sweep's gauges through the same collector pipeline worker metrics ride (OTLP/HTTP;
+    the collector stamps the qualifier dimension). Metrics must never block scheduling."""
+    import requests
+    endpoint = os.environ.get("MONITOR_METRICS_ENDPOINT", DEFAULT_METRICS_ENDPOINT)
+    if not endpoint:
+        return
+    try:
+        payload = build_fleet_metrics_payload(tiers, allocation, time.time_ns())
+        requests.post(endpoint, json=payload, timeout=5).raise_for_status()
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Fleet metrics emission failed (%s); continuing the sweep", e)
+
+
 def shard_setup_complete(cluster, index):
     """Whether the shard_setup sentinel work item has completed. Until it has, the item counts are
     meaningless (work items don't exist yet), so the monitor must lay off: no caps, no trims, no
@@ -456,6 +503,7 @@ def main():
     result = compute_allocation(sweep_input)
     logger.info("Sweep input: %s", json.dumps(sweep_input, sort_keys=True))
     logger.info("Allocation: %s", json.dumps(result, sort_keys=True))
+    emit_fleet_metrics(tiers, result)
 
     # Publish the caps: the declarative allocation workers consume at every acquire boundary.
     publish_lease_caps(cluster, index, result["caps"])

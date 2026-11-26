@@ -75,17 +75,30 @@ public class DirtyLeaseSweeper {
         return workerId.substring(podNamePrefixOf(workerId).length());
     }
 
-    /**
-     * @param predecessorCrashes how recent predecessors in this container died, keyed by instance id
-     * @param onEscalation invoked with the destination tier for each escalation actually applied
-     *                     (metrics hook); may be null
-     */
     public static void runStartupSweep(
         OpenSearchWorkCoordinator coordinator,
         String workerId,
         int workerMemoryTier,
         Map<String, String> predecessorCrashes,
         IntConsumer onEscalation
+    ) throws IOException, InterruptedException {
+        runStartupSweep(coordinator, workerId, workerMemoryTier, predecessorCrashes, onEscalation, null);
+    }
+
+    /**
+     * @param predecessorCrashes how recent predecessors in this container died, keyed by instance id
+     * @param onEscalation invoked with the destination tier for each escalation actually applied
+     *                     (metrics hook); may be null
+     * @param onRelease invoked with the (unchanged) tier for each same-tier release actually applied
+     *                  (metrics hook); may be null
+     */
+    public static void runStartupSweep(
+        OpenSearchWorkCoordinator coordinator,
+        String workerId,
+        int workerMemoryTier,
+        Map<String, String> predecessorCrashes,
+        IntConsumer onEscalation,
+        IntConsumer onRelease
     ) throws IOException, InterruptedException {
         List<OpenSearchWorkCoordinator.DirtyLease> dirtyLeases;
         try {
@@ -123,6 +136,9 @@ public class DirtyLeaseSweeper {
             } else {
                 boolean applied = coordinator.releaseDirtyLease(
                     lease.getWorkItemId(), lease.getLeaseHolderId());
+                if (applied && onRelease != null) {
+                    onRelease.accept(workerMemoryTier);
+                }
                 log.atWarn().setMessage("No OOM evidence for {} held by {} (outcome={}); released at same tier: {}")
                     .addArgument(lease.getWorkItemId())
                     .addArgument(lease.getLeaseHolderId())

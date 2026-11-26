@@ -73,6 +73,10 @@ metrics:
         protocols:
           grpc:
             endpoint: 0.0.0.0:4317
+          # OTLP/JSON over HTTP for emitters without a gRPC stack (the python fleet monitor
+          # posts its per-sweep gauges here with plain requests).
+          http:
+            endpoint: 0.0.0.0:4318
       prometheus:
         config:
           scrape_configs:

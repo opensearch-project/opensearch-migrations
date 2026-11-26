@@ -61,6 +61,19 @@ public class BaseRootRfsContext extends RootOtelContext {
         return newTier -> counter.add(1, Attributes.of(MEMORY_TIER, Integer.toString(newTier)));
     }
 
+    public static final String DIRTY_LEASES_RELEASED = "dirtyLeasesReleased";
+
+    /**
+     * Counts dirty leases the startup sweep released at the SAME tier (a dead predecessor without OOM
+     * evidence — the non-escalating counterpart of {@link #WORK_ITEMS_ESCALATED}); the {@code tier}
+     * dimension is the tier the lease stayed at. Together the two counters chart every sweep decision.
+     */
+    public java.util.function.IntConsumer makeDirtyLeaseReleaseRecorder() {
+        var counter = getMeterProvider().get(scopeName).counterBuilder(DIRTY_LEASES_RELEASED)
+            .setUnit("count").build();
+        return tier -> counter.add(1, Attributes.of(MEMORY_TIER, Integer.toString(tier)));
+    }
+
     public BulkFlowInstruments makeBulkFlowInstruments(RetryBudget budget, AdaptiveLimit limit) {
         return new BulkFlowInstruments(getMeterProvider().get(scopeName), budget, limit);
     }
