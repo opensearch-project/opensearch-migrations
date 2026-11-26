@@ -86,6 +86,9 @@ def _environment_by_version(version: Version) -> dict[str, str]:
     elif version.flavor == opensearch:
         env["OPENSEARCH_INITIAL_ADMIN_PASSWORD"] = "SecurityIsDisabled123$%^"
         env["plugins.security.disabled"] = "true"
+        # The Performance Analyzer agent is not used by these tests and can fail
+        # nondeterministically while starting alongside OpenSearch.
+        env["DISABLE_PERFORMANCE_ANALYZER_AGENT_CLI"] = "true"
     return env
 
 
