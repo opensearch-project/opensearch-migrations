@@ -748,9 +748,12 @@ charts:
           name: argo-workflow-executor
 
   fluent-bit:
-    version: "0.51.0"
+    version: "0.58.3"
     repository: "https://fluent.github.io/helm-charts"
     values:
+      # Chart 0.58.3 defaults to 5.1.3; 5.2.0 has newer Debian security fixes. Keep in sync with the ECR manifest.
+      image:
+        tag: "5.2.0"
       resources:
         requests: { cpu: 50m, memory: 32Mi }
         limits:   { cpu: 200m, memory: 64Mi }

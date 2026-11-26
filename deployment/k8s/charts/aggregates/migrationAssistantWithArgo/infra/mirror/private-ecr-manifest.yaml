@@ -7,7 +7,7 @@ charts:
   - "cert-manager|1.17.4|https://charts.jetstack.io"
   - "strimzi-kafka-operator|0.50.1|https://strimzi.io/charts/"
   - "argo-workflows|1.0.5|https://argoproj.github.io/argo-helm"
-  - "fluent-bit|0.51.0|https://fluent.github.io/helm-charts"
+  - "fluent-bit|0.58.3|https://fluent.github.io/helm-charts"
   - "kube-prometheus-stack|93.10.0|https://prometheus-community.github.io/helm-charts"
   - "etcd-operator|0.4.2|oci://ghcr.io/aenix-io/charts"
   - "opentelemetry-operator|0.86.4|https://open-telemetry.github.io/opentelemetry-helm-charts"
@@ -48,7 +48,7 @@ images:
   - "quay.io/argoproj/argoexec:v4.0.3"
 
   # fluent-bit
-  - "cr.fluentbit.io/fluent/fluent-bit:4.0.7"
+  - "cr.fluentbit.io/fluent/fluent-bit:5.2.0"
   - "mirror.gcr.io/library/busybox:latest"
 
   # kube-prometheus-stack
