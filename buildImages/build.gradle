@@ -37,11 +37,7 @@ def getRepoNameIfPublishing = { Map cfg ->
     return publishedRepoByImageName[imageName]
 }
 
-// Pinned AL2023 release and base images (see gradle.properties) for reproducible image builds
-def al2023Releasever = rootProject.property("al2023Releasever").toString()
-def al2023Image = ptc.rewrite(rootProject.property("al2023Image").toString())
-
-// Jib can't run 'dnf upgrade', so the Jib images build on java_runtime_base
+// Jib can't run commands, so the Jib images build on java_runtime_base (Corretto on minimal AL2023)
 def javaRuntimeBase = [
         baseImageRegistryEndpoint: intermediateRegistry.hostUrl,
         baseImageGroup           : "migrations",
@@ -92,9 +88,12 @@ def buildKitProjects = [
                 contextDir: "TrafficCapture/dockerSolution/src/main/docker/javaRuntimeBase",
                 imageName:  "java_runtime_base",
                 imageTag:   "latest",
+                // Duplicates the Dockerfile ARG default only so the Jenkins ECR pull-through-cache rewrite
+                // (ptc.rewrite) can redirect the pull. Jenkins isn't used for these builds today and this path
+                // may be removed; keep in sync with the Dockerfile default (a dependency bot is expected to
+                // update both).
                 buildArgs: [
-                        BASE_IMAGE: ptc.rewrite(rootProject.property("al2023MinimalImage").toString()),
-                        AL2023_RELEASEVER: al2023Releasever,
+                        BASE_IMAGE: ptc.rewrite("public.ecr.aws/amazonlinux/amazonlinux:2023.12.20261120.0-minimal@sha256:75a2d4226d9b98c914d7eed878a03bef4f365ad548be5d28d464ccba504cec79"),
                 ]
         ],
         [
@@ -102,10 +101,13 @@ def buildKitProjects = [
                 contextDir: "TrafficCapture/dockerSolution/src/main/docker/elasticsearchTestConsole",
                 imageName:  "elasticsearch_test_console",
                 imageTag:   "latest",
+                // Duplicates the Dockerfile ARG default only so the Jenkins ECR pull-through-cache rewrite
+                // (ptc.rewrite) can redirect the pull. Jenkins isn't used for these builds today and this path
+                // may be removed; keep in sync with the Dockerfile default (a dependency bot is expected to
+                // update both).
                 buildArgs: [
-                        BUILDER_IMAGE: al2023Image,
-                        RUNTIME_IMAGE: al2023Image,
-                        AL2023_RELEASEVER: al2023Releasever,
+                        BUILDER_IMAGE: ptc.rewrite("docker.io/library/amazonlinux:2023.12.20261120.0@sha256:edd3297df7d444ab9a7896b763d5305d4bab57d2fb3943e831c1713b97d32d9d"),
+                        RUNTIME_IMAGE: ptc.rewrite("docker.io/library/amazonlinux:2023.12.20261120.0@sha256:edd3297df7d444ab9a7896b763d5305d4bab57d2fb3943e831c1713b97d32d9d"),
                 ]
         ],
         [

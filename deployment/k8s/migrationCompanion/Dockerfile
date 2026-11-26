@@ -1,10 +1,7 @@
-ARG BASE_IMAGE=docker.io/library/amazonlinux:2023
+# Pinned by release tag and digest
+ARG BASE_IMAGE=docker.io/library/amazonlinux:2023.12.20261120.0@sha256:edd3297df7d444ab9a7896b763d5305d4bab57d2fb3943e831c1713b97d32d9d
 
 FROM ${BASE_IMAGE}
-
-# Upgrade to the pinned AL2023 release (al2023Releasever in gradle.properties)
-ARG AL2023_RELEASEVER=2023.12.20261120
-RUN dnf upgrade -y --releasever=${AL2023_RELEASEVER} && dnf clean all && rm -rf /var/cache/dnf
 
 ARG MIGRATION_ASSISTANT_VERSION=0.0.0-dev
 

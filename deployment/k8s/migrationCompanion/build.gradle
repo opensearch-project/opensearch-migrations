@@ -28,9 +28,13 @@ def publishStyleProvider = providers.gradleProperty('publishStyle')
 
 def ptcEndpoint = rootProject.findProperty('pullThroughCacheEndpoint')?.toString() ?: ''
 def ptc = new PullThroughCacheHelper(ptcEndpoint)
+// Duplicates the Dockerfile ARG default only so the Jenkins ECR pull-through-cache rewrite
+// (ptc.rewrite) can redirect the pull. Jenkins isn't used for these builds today and this path
+// may be removed; keep in sync with the Dockerfile default (a dependency bot is expected to
+// update both).
 def baseImageProvider = providers.environmentVariable('MIGRATION_COMPANION_BASE_IMAGE')
         .orElse(providers.gradleProperty('migrationCompanionBaseImage'))
-        .orElse(ptc.rewrite(rootProject.property('al2023Image').toString()))
+        .orElse(ptc.rewrite('docker.io/library/amazonlinux:2023.12.20261120.0@sha256:edd3297df7d444ab9a7896b763d5305d4bab57d2fb3943e831c1713b97d32d9d'))
 
 def dockerContextDirProvider = layout.buildDirectory.dir('docker-context')
 def helmPackageDirProvider = rootProject.layout.projectDirectory.dir('deployment/k8s/build/helm-package')
@@ -77,8 +81,7 @@ def companionBuildKitConfig = [
         repoName            : publishStyleProvider.get() == 'separateRepos' ? separateRepoName : null,
         buildArgs           : [
                 BASE_IMAGE       : baseImageProvider.get(),
-                MIGRATION_ASSISTANT_VERSION: migrationAssistantVersionProvider.get(),
-                AL2023_RELEASEVER: rootProject.property('al2023Releasever').toString()
+                MIGRATION_ASSISTANT_VERSION: migrationAssistantVersionProvider.get()
         ],
         requiredDependencies: [
                 ':deployment:k8s:migrationCompanion:stageMigrationCompanionDockerContext'
