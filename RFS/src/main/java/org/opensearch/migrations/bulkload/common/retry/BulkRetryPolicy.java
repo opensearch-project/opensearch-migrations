@@ -6,6 +6,8 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.function.DoubleSupplier;
 
+import org.opensearch.migrations.bulkload.common.FatalErrors;
+
 import lombok.Getter;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
@@ -89,6 +91,7 @@ public class BulkRetryPolicy {
             signals.concatMap(signal -> {
                 // Reactor may reuse the signal, so read it now.
                 var failure = signal.failure();
+                FatalErrors.haltIfFatal(failure);
                 long retriesSoFar = signal.totalRetries();
                 var errorClass = BulkErrorClass.of(failure);
                 if (!errorClass.retryable()) {

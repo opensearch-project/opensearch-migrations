@@ -29,6 +29,7 @@ import org.opensearch.migrations.bulkload.common.AzureRepo;
 import org.opensearch.migrations.bulkload.common.CollectionRoutedTarget;
 import org.opensearch.migrations.bulkload.common.DeltaMode;
 import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
+import org.opensearch.migrations.bulkload.common.FatalErrors;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
 import org.opensearch.migrations.bulkload.common.FilterScheme;
 import org.opensearch.migrations.bulkload.common.GcsRepo;
@@ -98,6 +99,7 @@ import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.logging.log4j.LogManager;
 import org.slf4j.MDC;
+import reactor.core.publisher.Hooks;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3AsyncClient;
 
@@ -112,10 +114,13 @@ public class RfsMigrateDocuments {
     @SuppressWarnings("unused")
     private static AutoCloseable workerPhaseGauge;
     public static final int PROCESS_TIMED_OUT_EXIT_CODE = 2;
-    // Exit code 3 is deliberately unassigned: the JVM exits 3 on heap OOM via
-    // -XX:+ExitOnOutOfMemoryError, and the in-container supervisor records exit 3 as OOM evidence
-    // for the memory-tier escalation.  NO_WORK_LEFT therefore moved from 3 to 6 (script v3.2);
-    // nothing outside the container consumed the old value.
+    // Exit code 3 means out of memory: the JVM exits 3 on heap or metaspace OOM via
+    // -XX:+ExitOnOutOfMemoryError, and the fatal-error policy (FatalErrors, wired into the uncaught
+    // handler, Reactor hooks, and the HTTP/retry boundaries) does the same for OOMs thrown by library
+    // code. The in-container supervisor records exit 3 as OOM evidence for the memory-tier
+    // escalation.  NO_WORK_LEFT therefore moved from 3 to 6 (script v3.2); nothing outside the
+    // container consumed the old value.
+    public static final int OUT_OF_MEMORY_EXIT_CODE = FatalErrors.OUT_OF_MEMORY_EXIT_CODE;
     public static final int NO_WORK_AVAILABLE_EXIT_CODE = 4;
     // Keep harmonized with the metadata command's MigratorEvaluatorBase.SNAPSHOT_READ_FAILED_EXIT_CODE.
     public static final int SNAPSHOT_READ_FAILED_EXIT_CODE = 5;
@@ -124,6 +129,9 @@ public class RfsMigrateDocuments {
     // the re-checks while the pod stays Ready at a low pod-deletion-cost — exactly the pod a
     // monitor-driven scale-down should take.
     public static final int TIER_OVER_LEASE_CAP_EXIT_CODE = 7;
+    // A non-OOM java.lang.Error (LinkageError, AssertionError, ...): fail fast, but the sweep must
+    // release — never escalate — since a deterministic non-memory crash must not climb the ladder.
+    public static final int FATAL_ERROR_EXIT_CODE = FatalErrors.FATAL_ERROR_EXIT_CODE;
 
     // Arbitrary value, increasing from 5 to 15 seconds due to prevalence of clock skew exceptions
     // observed on production clusters during migrations
@@ -741,6 +749,16 @@ public class RfsMigrateDocuments {
     }
 
     public static void main(String[] args) throws Exception {
+        // -XX:+ExitOnOutOfMemoryError only covers OOMs the VM raises itself (heap, metaspace). Library
+        // code throws its own OutOfMemoryError, e.g. when the direct-memory limit is reached; any
+        // uncaught Error must end the process so the supervisor records it (exit 3 escalates, exit 8
+        // releases). Reactive failures travel the onError channel rather than the stack, so the same
+        // policy also guards dropped errors here and the HTTP/retry boundaries (see FatalErrors).
+        Thread.setDefaultUncaughtExceptionHandler(fatalErrorExitHandler(Runtime.getRuntime()::halt));
+        Hooks.onErrorDropped(error -> {
+            FatalErrors.haltIfFatal(error);
+            log.atWarn().setCause(error).setMessage("Dropped error (operator terminated before delivery)").log();
+        });
         System.err.println("Starting program with: " + String.join(" ", ArgLogUtils.getRedactedArgs(args, ArgNameConstants.CENSORED_ARGS)));
         System.setProperty("log4j2.shutdownHookEnabled", "false");
 
@@ -1272,6 +1290,25 @@ public class RfsMigrateDocuments {
             .addArgument(calculateTotalRetryWindowSeconds(completionRetryConfig))
             .log();
         return completionRetryConfig;
+    }
+
+    /**
+     * Halts on any uncaught {@link Error} — {@link #OUT_OF_MEMORY_EXIT_CODE} for an OutOfMemoryError
+     * anywhere in the cause chain, {@link #FATAL_ERROR_EXIT_CODE} for any other Error — and prints
+     * uncaught Exceptions like the JVM default.
+     */
+    static Thread.UncaughtExceptionHandler fatalErrorExitHandler(java.util.function.IntConsumer halt) {
+        return (thread, throwable) -> {
+            var exitCode = FatalErrors.exitCodeFor(throwable);
+            if (exitCode.isPresent()) {
+                System.err.println("Terminating with exit " + exitCode.getAsInt() + " due to " + throwable
+                    + " in thread " + thread.getName());
+                halt.accept(exitCode.getAsInt());
+                return;
+            }
+            System.err.print("Exception in thread \"" + thread.getName() + "\" ");
+            throwable.printStackTrace(System.err);
+        };
     }
 
     /** {@code <hostname>_<instanceId>}, with the supervisor's instance id when it provides one. */

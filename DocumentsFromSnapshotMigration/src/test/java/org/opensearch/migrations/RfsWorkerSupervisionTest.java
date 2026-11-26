@@ -1,5 +1,7 @@
 package org.opensearch.migrations;
 
+import java.util.ArrayList;
+
 import org.opensearch.migrations.jcommander.JsonCommandLineParser;
 
 import com.beust.jcommander.ParameterException;
@@ -7,11 +9,48 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 /**
- * The worker's side of the in-container supervision contract: the supervisor's per-launch arguments
- * parse after the inline JSON config, and its instance id becomes the worker id's suffix so crash
- * reports attribute to exactly the lease the worker held.
+ * The worker's side of the in-container supervision contract: Errors thrown by library code end the
+ * process (exit 3 for OOM so the sweep escalates; exit 8 for any other Error so the sweep releases),
+ * and the supervisor's instance id becomes the worker id's suffix so crash reports attribute to
+ * exactly the lease the worker held.
  */
 class RfsWorkerSupervisionTest {
+
+    @Test
+    void uncaughtLibraryOutOfMemoryErrorHaltsWithExitThree() {
+        var halts = new ArrayList<Integer>();
+        var handler = RfsMigrateDocuments.fatalErrorExitHandler(halts::add);
+        handler.uncaughtException(new Thread("reactor-http-nio-1"),
+            new OutOfMemoryError("Cannot reserve 8388608 bytes of direct buffer memory"));
+        Assertions.assertEquals(java.util.List.of(RfsMigrateDocuments.OUT_OF_MEMORY_EXIT_CODE), halts);
+        Assertions.assertEquals(3, RfsMigrateDocuments.OUT_OF_MEMORY_EXIT_CODE);
+    }
+
+    @Test
+    void wrappedOutOfMemoryErrorStillHaltsWithExitThree() {
+        var halts = new ArrayList<Integer>();
+        var handler = RfsMigrateDocuments.fatalErrorExitHandler(halts::add);
+        handler.uncaughtException(new Thread("worker"), new RuntimeException("request failed",
+            new OutOfMemoryError("Direct buffer memory")));
+        Assertions.assertEquals(java.util.List.of(RfsMigrateDocuments.OUT_OF_MEMORY_EXIT_CODE), halts);
+    }
+
+    @Test
+    void uncaughtNonMemoryErrorHaltsWithTheFatalErrorCode() {
+        var halts = new ArrayList<Integer>();
+        var handler = RfsMigrateDocuments.fatalErrorExitHandler(halts::add);
+        handler.uncaughtException(new Thread("worker"), new NoClassDefFoundError("gone"));
+        Assertions.assertEquals(java.util.List.of(RfsMigrateDocuments.FATAL_ERROR_EXIT_CODE), halts);
+        Assertions.assertEquals(8, RfsMigrateDocuments.FATAL_ERROR_EXIT_CODE);
+    }
+
+    @Test
+    void otherUncaughtExceptionsDoNotHalt() {
+        var halts = new ArrayList<Integer>();
+        var handler = RfsMigrateDocuments.fatalErrorExitHandler(halts::add);
+        handler.uncaughtException(new Thread("worker"), new IllegalStateException("not memory"));
+        Assertions.assertTrue(halts.isEmpty());
+    }
 
     @Test
     void instanceIdBecomesTheWorkerIdSuffix() {
