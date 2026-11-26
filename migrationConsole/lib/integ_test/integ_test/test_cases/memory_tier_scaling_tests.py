@@ -21,10 +21,12 @@ only run when selected explicitly via --test_ids.
 import json
 import logging
 import os
+import re
 import time
 import uuid
 
 from kubernetes import client
+from kubernetes.client.rest import ApiException
 from kubernetes.stream import stream as k8s_stream
 
 from console_link.workflow.commands.crd_utils import CRD_GROUP, CRD_VERSION
@@ -566,3 +568,81 @@ class Test0094MemoryTierLadder(MemoryTierTestBase):
         assert any(0 in active and any(t > 0 for t in active)
                    for active in self.tier_observations), \
             f"tiers never ran in parallel: {self.tier_observations}"
+
+
+CRASH_EVIDENCE_ANNOTATION = "migrations.opensearch.org/rfs-predecessor-crashes"
+# The worker sweep's escalation log line: "Predecessor <id> died of OOM (<reason>) holding <item>;
+# escalate to tier >= <n> applied".
+ESCALATION_LOG_RE = re.compile(r"died of OOM \((\w+)\) holding (\S+); escalate to tier >= (\d+) applied")
+# A heap larger than every tier's container: the JVM never refuses the memory-hog allocation, so the
+# container exceeds its cgroup limit and the kernel kills it. (MaxRAMPercentage can't do this: it is
+# capped at 100, and a heap capped at the container limit refuses the allocation, giving exit 3.)
+KERNEL_OOM_JVM_ARGS = "-Xmx8g"
+
+
+class Test0095MemoryTierKernelOomWitness(Test0094MemoryTierLadder):
+    """(f) Kernel-OOM witness: the Test0094 ladder with KERNEL_OOM_JVM_ARGS, so every OOM is a kernel
+    (cgroup) kill of the whole container, supervisor included, and nothing in the container can record
+    why it died. Escalation then depends on the fleet monitor seeing the kubelet's OOMKilled record,
+    annotating the pod with the dead launch's instance id, the downward-API file carrying that to the
+    restarted supervisor, and the next worker's sweep escalating with OOMKilled as the reason."""
+
+    def __init__(self, user_args: MATestUserArguments):
+        super().__init__(user_args)
+        self.description = "Memory-tier scaling: the ladder escalated only through kernel-OOM witness evidence."
+        self.oom_killed_pods = set()
+        self.witness_annotations = {}
+        self.escalations = set()  # (reason, work item, destination tier)
+
+    def prepare_workflow_snapshot_and_migration_config(self):
+        super().prepare_workflow_snapshot_and_migration_config()
+        config = self.workflow_snapshot_and_migration_config[0]["migrations"][0]["documentBackfillConfig"]
+        config["jvmArgs"] = KERNEL_OOM_JVM_ARGS
+
+    def observe_tiers(self):
+        deployments = super().observe_tiers()
+        self.observe_kernel_oom_witness()
+        return deployments
+
+    def observe_kernel_oom_witness(self):
+        pods = self.core.list_namespaced_pod(self.namespace, label_selector=COMPONENT_SELECTOR).items
+        for pod in pods:
+            name = pod.metadata.name
+            for status in (pod.status.container_statuses or []) if pod.status else []:
+                terminated = status.last_state.terminated if status.last_state else None
+                if status.name == BULK_LOADER_CONTAINER and terminated and terminated.reason == "OOMKilled":
+                    self.oom_killed_pods.add(name)
+            annotation = (pod.metadata.annotations or {}).get(CRASH_EVIDENCE_ANNOTATION)
+            if annotation:
+                self.witness_annotations[name] = annotation
+            # The escalating sweep runs in the container after a kill, which a later kill makes the
+            # previous one, so read both.
+            for previous in (False, True):
+                try:
+                    logs = self.core.read_namespaced_pod_log(
+                        name, self.namespace, container=BULK_LOADER_CONTAINER, previous=previous, tail_lines=2000)
+                except ApiException:
+                    continue
+                for match in ESCALATION_LOG_RE.finditer(logs):
+                    self.escalations.add((match.group(1), match.group(2), int(match.group(3))))
+
+    def verify_clusters(self):
+        super().verify_clusters()
+        logger.info("Kernel-OOM witness: OOMKilled pods %s; annotations %s; escalations %s",
+                    sorted(self.oom_killed_pods), self.witness_annotations, sorted(self.escalations))
+        assert self.oom_killed_pods, \
+            f"no worker was OOM-killed by the kernel; is {KERNEL_OOM_JVM_ARGS} reaching the workers?"
+        annotated = self.oom_killed_pods & set(self.witness_annotations)
+        assert annotated, \
+            f"the monitor annotated none of the OOM-killed pods {sorted(self.oom_killed_pods)}"
+        for pod, annotation in self.witness_annotations.items():
+            outcomes = {entry.split("=", 1)[-1] for entry in annotation.split(",") if entry}
+            assert outcomes == {"OOMKilled"}, f"{pod}: unexpected witness evidence {annotation!r}"
+        assert self.escalations, "no escalation was observed in worker logs"
+        reasons = {reason for reason, _, _ in self.escalations}
+        # The heap never refuses an allocation, so a heap OOM (exit 3) means the override didn't apply
+        # and the witness wasn't what moved the work.
+        assert reasons == {"OOMKilled"}, \
+            f"escalations not driven by kernel-OOM evidence: {sorted(self.escalations)}"
+        assert {1, 2} <= {tier for _, _, tier in self.escalations}, \
+            f"expected witness-driven escalations into tiers 1 and 2: {sorted(self.escalations)}"
