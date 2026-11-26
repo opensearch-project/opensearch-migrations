@@ -949,6 +949,9 @@ charts:
           requests: { cpu: 50m, memory: 128Mi }
           limits:   { cpu: 250m, memory: 256Mi }
       kube-state-metrics:
+        # Exactly one: the CloudWatch collector scrapes kube-state-metrics only from the node it runs on
+        # (valuesEks.yaml, ksm-cloudwatch), so a second unsharded replica would double every RFS fleet total.
+        replicas: 1
         # kubelet_volume_stats_* identifies a PVC only by namespace/name. Export
         # these Strimzi labels so PromQL can join the volume series to the PVC
         # identity instead of treating every data-* claim as Kafka.
