@@ -20,6 +20,7 @@ only run when selected explicitly via --test_ids.
 
 import json
 import logging
+import os
 import time
 import uuid
 
@@ -56,8 +57,16 @@ function main(context) {
   // immediately (unlike lazy string ropes), so a worker whose tier cannot hold the index's
   // weight OOMs on the first document, every time. Chunked to stay under Java's max array size.
   var weights = JSON.parse(context.get("indexRetainedMiBJson"));
+  // Optional per-document delay so dashboards get runs long enough to read: a busy-wait, since
+  // the sandboxed JS has no sleep. The worker's CPU limit bounds the burn.
+  var delayMs = 0;
+  try { delayMs = parseInt(context.get("perDocDelayMs")) || 0; } catch (e) {}
   return (documents) => {
     for (const doc of documents) {
+      if (delayMs > 0) {
+        var end = Date.now() + delayMs;
+        while (Date.now() < end) {}
+      }
       var operation = doc.get("operation");
       var indexName = operation ? operation.get("_index") : null;
       var mib = indexName ? weights[indexName] : null;
@@ -79,13 +88,14 @@ function main(context) {
 """
 
 
-def _memory_hog_transform(index_retained_mib: dict) -> dict:
+def _memory_hog_transform(index_retained_mib: dict, per_doc_delay_ms: int = 0) -> dict:
+    bindings = {"indexRetainedMiBJson": json.dumps(index_retained_mib)}
+    if per_doc_delay_ms:
+        bindings["perDocDelayMs"] = str(per_doc_delay_ms)
     return {
         "JsonJSTransformerProvider": {
             "initializationScript": MEMORY_HOG_TRANSFORM_SCRIPT,
-            "bindingsObject": json.dumps({
-                "indexRetainedMiBJson": json.dumps(index_retained_mib),
-            }),
+            "bindingsObject": json.dumps(bindings),
         }
     }
 
@@ -175,6 +185,11 @@ class MemoryTierTestBase(MATestBase):
                 "limits": {"cpu": "1000m", "memory": TIER0_MEMORY, "ephemeral-storage": "5Gi"},
             },
         }
+        # Extra worker JVM options for profiling a run, e.g. Native Memory Tracking:
+        #   MEMTIER_EXTRA_JVM_ARGS="-XX:NativeMemoryTracking=summary -XX:+UnlockDiagnosticVMOptions
+        #   -XX:+PrintNMTStatistics"
+        if os.environ.get("MEMTIER_EXTRA_JVM_ARGS"):
+            config["jvmArgs"] = os.environ["MEMTIER_EXTRA_JVM_ARGS"]
         if with_transform:
             config["docTransformerConfigBase64"] = convert_to_b64(
                 [_memory_hog_transform({self.heavy_index: HEAVY_RETAINED_MIB})])
@@ -478,24 +493,32 @@ class Test0093MemoryScalingOffIsUnchanged(MemoryTierTestBase):
         self.verify_ordinary_indices_on_target()
 
 
-LADDER_DOCS = 50          # docs per dummy index; memory comes from the transform, not the data
+LADDER_INDICES = 30        # one 1-shard index per work item; enough for several tier-0 rounds
+LADDER_DOCS = 90           # with the 1s per-doc delay, each shard runs ~1.5 minutes
+LADDER_DOC_DELAY_MS = 1000  # per-document busy-wait so dashboards get readable runs
+LADDER_TIER1_COUNT = 6     # discovered at random times, so tier 1 activates in waves
+LADDER_TIER2_COUNT = 2
 TIER1_RETAINED_MIB = 1300  # one allocation: overflows tier-0 heap (~1120MiB), fits tier 1 (~2240MiB)
 TIER2_RETAINED_MIB = 2600  # one allocation: overflows tier-1 heap, fits tier 2 (~4480MiB)
 
 
 class Test0094MemoryTierLadder(MemoryTierTestBase):
-    """(e) Diversity ladder: ten small dummy indices (50 tiny docs each) created on an in-test
-    source cluster, blown up by per-index transform weights so different indices land on
-    different memory tiers — six stay at tier 0, two land at tier 1 (1300MiB single allocation),
-    two climb to tier 2 (2600MiB). Everything is created inside the test: no external
-    snapshot, no bucket access, runs anywhere the full (with-clusters) tests run."""
+    """(e) Diversity ladder, sized for dashboard observation: thirty small dummy indices (one
+    shard, 90 tiny docs each) created on an in-test source cluster. A per-document 1s delay makes
+    every worker run ~1.5 minutes per shard, and per-index transform weights land six indices on
+    tier 1 (1300MiB single allocation) and two on tier 2 (2600MiB), leaving twenty-two at tier 0.
+    Acquisition order is random, so the heavy indices are discovered (and escalate) at scattered
+    times across the ~10-20 minute run, giving the dashboards a varied fleet history to read
+    (deliberately not asserted: the shape depends on discovery timing). Everything is created inside
+    the test: no external snapshot, no bucket access, runs anywhere the full (with-clusters) tests run."""
 
     def __init__(self, user_args: MATestUserArguments):
-        super().__init__(user_args, "Memory-tier scaling: ten dummy indices spread across three tiers.")
+        super().__init__(user_args, "Memory-tier scaling: thirty dummy indices spread across three tiers.")
         suffix = self.heavy_index.rsplit("memtier-heavy-", 1)[-1]
-        self.ladder_indices = [f"memtier-{i:02d}-{suffix}" for i in range(10)]
-        self.tier1_indices = self.ladder_indices[6:8]
-        self.tier2_indices = self.ladder_indices[8:10]
+        self.ladder_indices = [f"memtier-{i:02d}-{suffix}" for i in range(LADDER_INDICES)]
+        self.tier2_indices = self.ladder_indices[-LADDER_TIER2_COUNT:]
+        heavy = self.ladder_indices[-(LADDER_TIER1_COUNT + LADDER_TIER2_COUNT):]
+        self.tier1_indices = heavy[:LADDER_TIER1_COUNT]
 
     def prepare_clusters(self):
         for index in self.ladder_indices:
@@ -512,7 +535,8 @@ class Test0094MemoryTierLadder(MemoryTierTestBase):
         config["maxTotalPods"] = 6
         weights = {index: TIER1_RETAINED_MIB for index in self.tier1_indices}
         weights.update({index: TIER2_RETAINED_MIB for index in self.tier2_indices})
-        config["docTransformerConfigBase64"] = convert_to_b64([_memory_hog_transform(weights)])
+        config["docTransformerConfigBase64"] = convert_to_b64(
+            [_memory_hog_transform(weights, per_doc_delay_ms=LADDER_DOC_DELAY_MS)])
         self.workflow_snapshot_and_migration_config = [{
             "migrations": [{"documentBackfillConfig": config}]
         }]
