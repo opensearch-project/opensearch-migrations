@@ -37,5 +37,19 @@
     "cdk": "2.1145.0",
     "globals": "^17.13.0",
     "source-map-support": "^0.5.21"
+  },
+  "overrides": {
+    "@jest/reporters": {
+      "glob": "^14.0.2"
+    },
+    "jest-config": {
+      "glob": "^14.0.2"
+    },
+    "jest-runtime": {
+      "glob": "^14.0.2"
+    },
+    "test-exclude": {
+      "glob": "^14.0.2"
+    }
   }
 }

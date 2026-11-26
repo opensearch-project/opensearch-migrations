@@ -60,6 +60,22 @@
     "initialize-workflow-state": "npm run dev-initialize-workflow-state -- "
   },
   "overrides": {
-    "uuid": "11.1.1"
+    "uuid": "11.1.1",
+    "@jest/reporters": {
+      "glob": "^14.0.2"
+    },
+    "archiver-utils": {
+      "glob": "^14.0.2"
+    },
+    "jest-config": {
+      "glob": "^14.0.2"
+    },
+    "jest-runtime": {
+      "glob": "^14.0.2"
+    },
+    "test-exclude": {
+      "glob": "^14.0.2",
+      "minimatch": "^11.0.1"
+    }
   }
 }

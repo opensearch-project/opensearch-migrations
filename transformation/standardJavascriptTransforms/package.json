@@ -32,6 +32,19 @@
   },
   "overrides": {
     "uuid": "11.1.1",
-    "qs": "6.15.2"
+    "qs": "6.16.2",
+    "@jest/reporters": {
+      "glob": "^14.0.2"
+    },
+    "jest-config": {
+      "glob": "^14.0.2"
+    },
+    "jest-runtime": {
+      "glob": "^14.0.2"
+    },
+    "test-exclude": {
+      "glob": "^14.0.2",
+      "minimatch": "^11.0.1"
+    }
   }
 }
