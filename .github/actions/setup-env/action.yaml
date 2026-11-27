@@ -9,6 +9,10 @@ inputs:
     description: 'Gradle cache read-only mode (no save)'
     required: false
     default: 'true'
+  gradle-wrapper-download:
+    description: 'Download the Gradle wrapper distribution, with retries, before the job first runs ./gradlew'
+    required: false
+    default: 'false'
 runs:
   using: "composite"
   steps:
@@ -21,6 +25,24 @@ runs:
       with:
         cache-disabled: ${{ inputs.gradle-cache-enabled != 'true' }}
         cache-read-only: ${{ inputs.gradle-cache-read-only }}
+
+    # The wrapper tries the distribution download once, so a single read timeout, connection reset,
+    # or HTTP 5xx from services.gradle.org fails the job. Jobs often start on a cold Gradle cache.
+    - name: Download Gradle wrapper distribution
+      if: inputs.gradle-wrapper-download == 'true'
+      shell: bash
+      run: |
+        for attempt in 1 2 3 4; do
+          if ./gradlew --version --no-daemon; then
+            exit 0
+          fi
+          if [ "$attempt" -lt 4 ]; then
+            echo "::warning::Gradle wrapper distribution download failed (attempt $attempt of 4); retrying in $((attempt * 15))s"
+            sleep $((attempt * 15))
+          fi
+        done
+        echo "::error::Gradle wrapper distribution download failed after 4 attempts"
+        exit 1
 
     - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
       with:
