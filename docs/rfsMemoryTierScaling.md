@@ -6,61 +6,34 @@
 
 ## Objective
 
-When an RFS worker is killed by an out-of-memory condition while migrating a shard, escalate
-that shard's work item so the current fleet stops retrying it, and run the escalated shard on a
-fleet with more memory. Escalation is **eager (greedy)**: as soon as an escalated shard sits
-unclaimed at a higher tier, pod budget shifts to run it there while the remaining lower-tier work
-continues in parallel — tiers are not sequential passes (lockstep passes were considered and
-dropped: they add idle bubbles at every pass tail and chop deep chains across barrier waits for
-no pod-hour savings, since every item must be attempted at tiers 0..T anyway). Memory grows
-geometrically per tier from a user-configured starting size, by a user-configured factor
-(default 2), up to a user-configured maximum. If shards still fail at the maximum, the migration
-fails with a report naming which indices completed and which did not.
+Retry a shard that runs out of memory on a larger worker while the rest of the fleet keeps
+migrating. `memoryScaling` defines a geometric progression from the starting memory request to
+`maxMemory`. The monitor can fund a higher tier as soon as it has work. Waiting for an entire
+lower tier to drain would delay long-running shards at every tier boundary. If the largest
+worker still runs out of memory, the migration reports the affected indices and shards.
 
-Secondary objectives shaped the design:
+Three constraints shape this design. Escalation requires positive OOM evidence, since increasing
+memory for a native bug or a poison document wastes capacity. Evidence must survive a container
+restart and identify the launch that held the lease. Finally, `maxTotalPods` limits concurrent
+workers across tiers to control target load. Each worker receives its tier as an integer and
+can process shards without inspecting its memory allocation.
 
-- The RFS image must never inspect its own memory. It receives one opaque integer (its tier) and
-  otherwise stays memory-unaware, keeping it eligible to become distroless.
-- Non-memory crashes must never climb the memory ladder. A fleet-wide crasher (native bug, poison
-  document) at 2×, 4×, 8× memory would multiply the run's cost for nothing, so a tier bump
-  requires positive OOM evidence.
-- Crash detection must not depend on winning races against restarts or polling windows. Losing
-  evidence to a node crash is acceptable; losing it to timing is not.
-- Pod count is the throughput budget. The user's constraint is load on the target cluster, which
-  is per-pod and memory-independent, so the fleet-wide cap is a **total pod count across all
-  tiers**, and no tier may run more pods than it has work for.
+## Background
 
-## Background: the pieces this builds on
-
-- **Work coordination.** Work items are docs in `.migrations_working_state_<session>` on the
-  coordinator cluster. Fields: `expiration` (epoch seconds, 0 = unclaimed), `leaseHolderId`,
-  `completedAt`, `successor_items`, `acquisitionLeaseExponent` / `nextAcquisitionLeaseExponent`,
-  `scriptVersion`, `creatorId`, `committed_metrics`. Acquisition is a server-side atomic
-  `_update_by_query` over "expired and not completed" with a painless script that stamps the
-  lease (`OpenSearchWorkCoordinator`).
-- **Worker identity.** `workerId = <podName>_<fresh-UUID-per-JVM>` (`ProcessHelpers`). The pod
-  name is stable across container restarts; the UUID is unique per process. Both halves are
-  load-bearing here (§ "Dirty-lease sweep") — do not make the id stable per pod: it would break
-  `getAssignedWorkItemUnsafe`'s exactly-one-lease-per-holder assumption and make a predecessor's
-  lease indistinguishable from the current process's.
-- **Fleet runtime.** The production path (`fullMigration.ts` → `setupAndRunBulkLoad`) creates one
-  RFS `Deployment` via an Argo resource template and waits on the `SnapshotMigration` CR. A
-  per-minute monitor CronJob ([rfsCronJobMonitor.md](rfsCronJobMonitor.md)) polls
-  `console backfill status --deep-check`, commits CR status, and tears down the runtime at
-  completion. It runs as `argo-workflow-executor`, which already holds pod read and deployment
-  create/patch/delete RBAC.
-- **OOM behavior today.** The JVM runs with `-XX:MaxRAMPercentage=80.0 -XX:+ExitOnOutOfMemoryError`.
-  Heap OOM exits the JVM with code **3** (verified empirically), which collides with
-  `NO_WORK_LEFT_EXIT_CODE = 3`. A cgroup kill surfaces as `OOMKilled`/137. Either way the
-  container dies, kubelet restarts it in place (Deployments mandate `restartPolicy: Always`),
-  the dead process's lease sits until expiry, and the shard is retried with a doubled lease —
-  memory never grows, so a too-big shard OOM-loops forever. `MaxRAMPercentage` means heap scales
-  automatically with the container memory limit; no per-tier JVM args are needed (the existing
-  schema warning against setting `-Xmx` in `jvmArgs` applies).
-- **Console deep-check.** Classifies shards purely by `completedAt` + `expiration`
-  (`backfill_rfs.py`); completion is `completed >= total`. It never reads `leaseHolderId`, but
-  any item that is incomplete yet ineligible would today be miscounted as `shard_waiting` —
-  hence the status changes in § "Console and CR status".
+- **Work coordination.** In `.migrations_working_state_<session>`, `expiration` (epoch seconds,
+  zero when unclaimed), `leaseHolderId` and `completedAt` govern ownership. Acquisition uses an
+  atomic `_update_by_query`. `successor_items` links continuations and the acquisition lease
+  exponents control retry duration. Extending a lease alone cannot help a shard that needs more RAM.
+- **Worker identity.** The pod name survives a container restart. Each JVM appends a fresh UUID
+  or a supervisor-issued launch ID. `getAssignedWorkItemUnsafe` relies on each holder identifying
+  a single launch and its lease.
+- **Heap sizing.** `-XX:MaxRAMPercentage=80.0` scales the heap with the container limit. Keep
+  `-Xmx` out of `jvmArgs` to preserve this behavior. `-XX:+ExitOnOutOfMemoryError` produces exit
+  3 for heap OOM. The supervisor also handles cgroup kills and library-raised OOMs below.
+- **Fleet runtime.** Argo creates the worker Deployment and waits on the `SnapshotMigration` CR.
+  The per-minute monitor runs `console backfill status --deep-check`, commits status, and removes
+  the runtime at completion. Its `argo-workflow-executor` service account can read pods and manage
+  Deployments. [RFS monitor lifecycle](rfsCronJobMonitor.md)
 
 ## Design overview
 
@@ -73,38 +46,18 @@ Secondary objectives shaped the design:
 | Scheduler | monitor CronJob | per-sweep fleet sizing, tier activation/reactivation, budget arbitration, terminal status |
 | Policy author | Argo workflow / config processor | render the per-tier manifests and the tier table once, up front |
 
-A shard that OOMs flows through the system like this:
-
-1. Worker holding item `I` at tier `n` dies of memory: heap/metaspace OOM or a library-raised
-   `OutOfMemoryError` → exit 3 (a bare 137 such as `kill -9` is NOT OOM evidence). Its lease on
-   `I` survives — hard kills bypass shutdown hooks, and that is the evidence.
-2. The supervisor records `<instanceId>=3` and relaunches the worker immediately; the container
-   never exits, so the pod never leaves Ready. (For the rare kernel OOM that kills the whole
-   container, the monitor records `<instanceId>=OOMKilled` on the pod instead and the restarted
-   supervisor waits bounded for that evidence — see "Kernel-OOM witness".)
-3. The new worker's startup sweep finds the dirty lease (pod-name prefix, different instance id),
-   looks its holder up in the predecessor crashes, sees OOM, and executes the
-   escalate: `requiredMemoryTier = max(current, n+1)`, lease cleared, lease exponent restored.
-4. The same process (and the rest of the tier-`n` fleet) keeps draining other tier-`n` work.
-   Workers that find no eligible work at their tier exit with distinct non-zero codes; the
-   supervisor sleeps briefly and retries, with the pod Ready and cheap to delete.
-5. The monitor's next sweep sees eligible work at tier `n+1` with no fleet, creates (or scales)
-   `<session>-rfs-t<n+1>` from the pre-rendered manifest, and trims idle lower-tier pods to fund
-   it — never touching a pod that holds a lease.
-6. When every item is complete, the monitor commits `Completed` as today. If the only incomplete
-   items require a tier beyond the configured maximum and nothing is in progress, it commits
-   `Failed` with a per-index rollup.
+The [orchestration diagrams](#orchestration) trace one shard from its first OOM to completion on
+another tier. The supervisor records the crash, the next worker changes the shard's required
+tier, and the monitor allocates a worker that can acquire it.
 
 ## Work-item schema additions
 
-The coordination **`scriptVersion` bumps 3.1 → 3.2**. The version exists to outright reject
-old clients: every script throws on a document at any other version, so a client from a
-different deployment can never operate on this session's documents. Upgrading a live migration
-is not supported.
+Coordination scripts require `scriptVersion` 3.2, up from 3.1, and reject documents from a
+different version. Finish existing migrations before upgrading.
 
 | Field | Written by | Meaning |
 | --- | --- | --- |
-| `requiredMemoryTier` (int, absent ⇒ 0) | escalation script | minimum fleet tier that may acquire this item |
+| `requiredMemoryTier` (int, absent ⇒ 0) | escalation script | exact tier whose workers may acquire this item |
 | `leaseAcquiredAt` (epoch seconds) | acquire scripts | when the current lease was taken (diagnostics; crash attribution itself is by the holder's instance id, not time) |
 | `leaseAbandoned` (bool, absent ⇒ false) | deliberate-abandon path | lease was left to expire on purpose; the sweep must not treat it as a crash. **Cleared atomically by the next acquisition** (and by the escalation/release scripts) — a sticky flag would permanently mask later hard crashes on the same item |
 
@@ -198,100 +151,43 @@ Properties:
   `RfsMigrateDocuments.flushFailedDocumentStreamBeforeComplete`) runs live pre-exit code; it
   gains one write setting `leaseAbandoned: true` so the sweep skips it.
 
-### Acquire protocol: exact tier + yield
+### Acquire protocol
 
-Exact-tier matching keeps 7 GB work off 256 GB pods. The yield rule exists because pods re-employ
-themselves at acquire time faster than any monitor sweep: without it, a saturated lower tier never
-frees budget for a higher one. Yield is evaluated on **every acquisition attempt**, so it covers
-both "same container grabs the next shard" and "fresh pod appears inside the sweep window".
+A worker checks its tier at every item boundary. This keeps small shards on small workers and
+lets a saturated lower tier release capacity while its workers finish their current shards.
 
-The **published caps** are how the monitor talks to the workers: a `maxLeases: {tier: cap}`
-field that the monitor rewrites each sweep on the `shard_setup` sentinel work item (which every
-status/work query already excludes, so the caps need no document or index of their own) and that
-every worker reads at each acquisition attempt. A missing sentinel, field, or tier entry means
-"no cap". Details under "Declarative per-tier lease caps" below.
+1. A `_search` counts incomplete items by `requiredMemoryTier`, including the waiting count
+   (`expiration < now`) within each tier. Live leases at the worker's tier equal that tier's
+   total minus its waiting count. The response's overall hit count tells the worker whether the
+   migration has drained.
+2. If any work remains, the worker reads `maxLeases[myTier]` from the session's `shard_setup`
+   document. The monitor publishes all tier caps there each sweep. A missing document, field,
+   or tier entry leaves that tier uncapped.
+3. The worker applies the first matching rule below. A successful acquisition uses the existing
+   atomic `_update_by_query` with an exact-tier clause and random ordering, followed by a search
+   for the lease it won.
 
-An acquire attempt is up to three cluster requests; everything between them — including the
-decision itself — runs in the worker:
+| Condition | Action |
+| --- | --- |
+| No incomplete items anywhere | Exit 6 (drained) |
+| Own tier has a cap and its live leases meet or exceed it | Exit 7 (yield) |
+| Own tier has waiting work | Attempt acquisition |
+| All remaining work is leased or belongs to another tier | Exit 4 (idle) |
 
-```
-each acquire attempt:
+New items can omit `requiredMemoryTier`. Tier 0 therefore matches either an explicit zero or a
+missing field, and the aggregation uses `"missing": 0`. Other tiers match their integer value.
 
-  request 1 — CENSUS: one _search, counting done cluster-side, no documents returned.
-      Matches every incomplete item (has expiration, no completedAt) and asks the cluster to
-      group them by requiredMemoryTier and return a count per group (a "terms aggregation" —
-      OpenSearch's GROUP BY ... COUNT(*); "missing": 0 counts items without the field as
-      tier 0). Nested inside each group, a filter sub-aggregation also counts how many of that
-      group are WAITING (expiration < now, i.e. unclaimed).
-      The worker then computes, for its own tier only:
-          leased[myTier] = group total − waiting[myTier]        (the "split" — subtraction,
-                                                                 done in the worker)
-      and reads totalIncomplete from the response's overall hit count.
+A cap reduction takes effect as workers finish. For example, reducing tier 0 from 24 leases
+to 21 lets three workers yield at item boundaries. Two workers can both acquire as the count
+crosses a cap. The next finisher observes the excess and yields. A monitor outage leaves the
+last published caps in effect until another sweep updates them.
 
-  request 2 — CAPS: one GET of the shard_setup document (skipped if request 1 says drained).
-      shard_setup is the session-wide setup-gate sentinel: exactly ONE document per migration
-      session (fixed id "shard_setup" in .migrations_working_state_<session>), shared by all
-      tiers. The monitor writes the whole caps map onto it (maxLeases: {"0": 21, "1": 2, ...});
-      every worker GETs this same document and picks out maxLeases[myTier]; absent ⇒ no cap.
-
-  decision — worker-local, a pure function over the two responses:
-      totalIncomplete == 0                         → exit 6  NO_WORK_LEFT (drained)
-      leased[myTier] >= cap[myTier]                → exit 7  OVER_CAP (idle; monitor reclaims)
-      waiting[myTier] > 0                          → proceed to request 3
-      else (exists, but other-tier or all leased)  → exit 4  NO_WORK_AVAILABLE
-
-  request 3 — ACQUIRE: the atomic _update_by_query scoped to my tier (random_score retained),
-      followed by the pre-existing _search that fetches the item just won.
-```
-
-- **Tier-0 matching must treat a missing field as tier 0.** A `term requiredMemoryTier == 0`
-  clause matches nothing on docs that never gained the field (all initially-created items), which
-  would make the entire initial workload unacquirable. Tier-0 workers acquire with
-  `should: [term requiredMemoryTier == 0, must_not exists requiredMemoryTier]`; tiers > 0 use the
-  plain term clause; every agg over the field sets `"missing": 0`.
-- **Declarative per-tier lease caps.** The monitor publishes **state, not orders**: a
-  `maxLeases: {tier: cap}` field on the `shard_setup` sentinel (already excluded from every
-  status/work query, so the caps need no document or index of their own), rewritten each sweep.
-  The caps *are* the allocation (`Σ caps ≤ maxTotalPods`, assigned per the precedence rules
-  below). The mechanism's properties:
-  - **No herding.** A worker idles only when its **own tier's** live-lease count meets its own
-    cap — never because work exists at another tier — so one escalated shard can never idle the
-    rest of the fleet.
-  - **Preemption-free reclamation.** Lowering `cap[0]` from 24 to 21 drains exactly the excess
-    as workers hit item boundaries (the only preemption-free moment), never mid-shard.
-  - **Stale-safe without TTLs.** Caps are read-only for workers and are not orders that must
-    expire: a dead monitor leaves at worst a tier running slightly under capacity until the
-    next sweep rewrites them.
-  - **Approximate, self-correcting convergence.** Two workers racing at `cap − 1` can both
-    acquire; the next finisher at that tier sees over-cap and idles.
-- The agg pre-check + scoped acquire replaces any fetch-then-reject shape: acquisition is a
-  server-side atomic update, so "inspecting" an item would already have leased it.
-- **Cost:** the precheck adds one terms-agg search plus one sentinel GET per acquisition
-  attempt, against a coordination index of at most a few thousand small documents — negligible
-  next to the `_update_by_query` + follow-up search the acquisition already performs. It runs on
-  every attempt by design (yield must be re-evaluated at each item boundary).
-- **Why the yield decision can't live inside the atomic acquire itself.** The painless script in
-  `_update_by_query` evaluates one document with only `ctx._source` in scope — no aggregations,
-  no sibling lookups — so per-document predicates (the tier match) belong in the query, but both
-  fleet-level questions ("does a higher tier have waiting work?", "how many live leases does my
-  tier hold vs. its cap?") are cross-document and unanswerable there. A sort-tier-descending +
-  noop-on-mismatch shape would also hinge on under-specified `_update_by_query` sort/noop/max_docs
-  semantics across ES 6.8 and OS 1–3 — and if it worked, it would make every lower-tier worker
-  yield whenever any higher tier had waiting work, letting one escalated shard idle the entire
-  fleet. The cap check deliberately needs no atomicity (see convergence note above); only the
-  lease write does, and it has it.
-- Races are benign because nothing preempts: a worker that grabs one last item just as an
-  escalation lands above it simply finishes that shard and yields on its next attempt.
-- Why higher tiers are funded first: a shard that split N times is a sequential chain of work
-  items that only one pod at a time can advance, so its remaining length is irreducible
-  wall-clock — and the migration finishes only when the longest such chain does. Higher tiers
-  hold exactly those chains, the allocation precedence funds them first, and the never-preempt
-  floor (§ below) keeps each chain's one pod running continuously.
-
-Moving the acquire loop fully into java (replacing the `runJavaWithClasspathWithRepeat.sh`
-exit-0 restart loop) is the companion change that removes the image's last shell dependency for
-distroless; with it, yield becomes an in-process capped sleep instead of an exit code. It is not
-required for this feature.
+The census and cap read add at most two requests to the existing lease update and readback.
+The Painless update script sees only its own document, so it cannot count peer leases. Fetching
+an item to inspect its tier after acquisition would already have leased it. Sorting higher tiers
+first and treating mismatches as no-ops would depend on `_update_by_query` sort and `max_docs`
+behavior across ES 6.8 and OpenSearch 1–3. It could also make an entire lower tier yield for a
+single escalated shard. Per-tier caps allow the remaining workers to continue.
 
 ## In-container supervisor
 
@@ -345,13 +241,10 @@ witness is the component that already watches the fleet:
    does (e.g. the container was SIGKILLed by something other than the kernel, where no OOMKilled
    record exists), launching with no evidence is the correct outcome — release at the same tier.
 
-The monitor **still never mutates work items**: there is exactly one writer path for coordinator
-mutations (a worker's startup sweep, in the battle-tested java client). The monitor only
-annotates pods, which it already does for deletion costs. Degradation is safe in both directions:
-monitor down → kernel-OOM items retry at the same tier with growing restart backoff until it
-returns (JVM-raised OOMs — the dominant path, since heap is 80 % of the budget — never involve
-the monitor); evidence late → one same-tier retry, self-correcting because restart backoff grows
-past the witness latency.
+The monitor writes the pod annotation and the fleet caps on `shard_setup`. Workers own changes
+to individual shards' leases and required tiers. If the monitor is unavailable or the annotation
+arrives after the bounded wait, the worker releases the shard for a same-tier retry. JVM-raised
+OOMs use the supervisor's local evidence and can escalate while the monitor is unavailable.
 
 Outside k8s (docker/local), there is no monitor: the supervisor's cgroup `oom_kill`-counter check
 on a 137 is the kernel-OOM witness there (single-process kills; without `oom.group` the wrapper
@@ -371,16 +264,11 @@ optional hardening since the write degrades gracefully to a no-op without the ca
 
 ### One Deployment per tier
 
-A Deployment has one pod template and tiers differ in `resources.memory` and
-`RFS_WORKER_MEMORY_TIER`, so each tier gets its own Deployment `<session>-rfs-t<n>` (plus PDB).
-The tier label must appear in the **immutable `spec.selector`**, the pod-template labels, and
-each PDB's selector — not just on metadata. Today's selector is component + migration UID only
-(`workloadSelectorLabels`); copying that shape across tier Deployments would give multiple
-controllers overlapping selectors, which Kubernetes explicitly warns causes them to fight over
-each other's pods. The monitor and console must select RFS runtime objects by **label, not fixed
-name** (today's single `RFS_DEPLOYMENT_NAME` plumbing in the monitor teardown and the console's
-worker-count lookup changes to label selectors; component + UID without tier selects the whole
-set, adding the tier label selects one fleet).
+Each tier needs its own Deployment (`<session>-rfs-t<n>`) and PodDisruptionBudget because its
+pod template sets a different memory quantity and `RFS_WORKER_MEMORY_TIER`. Include the tier in
+the immutable Deployment selector, pod labels and PDB selector so controllers have disjoint
+sets of pods. The monitor selects the whole fleet by component and migration UID. The console
+reads each configured tier's Deployment by name when it builds worker counts.
 
 ### Budget and allocation (monitor, every sweep)
 
@@ -436,7 +324,7 @@ rests on `pod-deletion-cost`:
    changed) immediately before each scale patch, with a short pause so the ReplicaSet's cache
    sees the costs before choosing victims.
 2. An idle (over-cap / no-work) worker is a sleeping supervisor, not a crash-looping container —
-   its pod stays Ready with a low deletion cost, so it is exactly the pod a scale-down takes.
+   its pod stays Ready with a low deletion cost, so the ReplicaSet prefers it for scale-down.
 
 Residual race: a pod judged idle grabs work in the instant before deletion → SIGTERM → existing
 clean-shutdown hook checkpoints or releases → cost ≈ one lease round-trip. The inverse
@@ -460,55 +348,23 @@ granularity; the in-java acquire loop removes it later.
 
 ## Orchestration
 
-- **Workflow = policy author.** At setup it publishes the complete per-tier Deployment manifests
-  into a ConfigMap, alongside `maxTotalPods`. The manifests are
-  **derived, not re-rendered**: `renderRfsTierPolicy.sh` reads the LIVE tier-0 Deployment + PDB
-  and transforms them per tier (`deriveRfsTierManifest.jq`: name, tier label in
-  selector/labels, the precomputed memory quantity, tier env, replicas 0), so the stored
-  manifests can never drift from the shape that actually runs. The tier table is **precomputed
-  in the TypeScript config processor** (`resolveMemoryScalingTierTable`) —
-  `[start, start×f, start×f², …, max]` (last entry clamped to exactly
-  `maxMemory`) — so neither Argo expressions nor bash ever do quantity arithmetic. The workflow
-  then proceeds exactly as today: apply monitor CronJob, create the tier-0 runtime, wait on the
-  CR, tear down. No per-tier workflow steps, no recursion: tier lifecycle is continuous
-  reconciliation and lives in the monitor.
-- **Monitor = scheduler.** The sweep logic above, plus terminal status:
-  - all items complete → `Completed` / `CompletedWithErrors` exactly as today (failed-document
-    stream still decides the latter; see [failedDocumentStream.md](failedDocumentStream.md));
-  - incomplete items exist, all have `requiredMemoryTier` > max tier, nothing in progress →
-    `Failed`, with the per-index rollup (below) in the CR status/message. The classification is
-    computed by the console deep check (the existing classifier role); the monitor commits the
-    phase. **`Failed` must join
-    the terminal set everywhere** or the parent workflow hangs: the monitor's
-    completion check (`rfsMonitorCronJob.sh`, which today loops on anything other than
-    `Completed`/`CompletedWithErrors`) treats it as terminal and runs the same
-    commit-and-teardown path, and `waitIndefinitelyForSnapshotMigration`
-    (`resourceManagement.ts`) recognizes it and fails the waiting workflow step so the failure
-    propagates instead of waiting forever.
-- **No manual approvals, by design.** Escalation never waits on a human: once the user has
-  stated the acceptable range (`maxMemory`, `maxTotalPods`), asking again per tier is a wasted
-  interaction, and worst-case spend is already bounded by `maxTotalPods × maxMemory`. Aggregate
-  cost control belongs to **nodepool constraints** (Karpenter/EKS Auto Mode instance-type and
-  capacity limits): they throttle how much actually schedules, can be changed out from under a
-  running migration, and are therefore easily reversible — escalated pods just sit `Pending`
-  (visible as `workers.pending` in status) until capacity is allowed. Spend *rate* tracks fleet
-  composition, a continuous quantity watched by alarms on the per-tier fleet panels ("Metrics
-  and dashboards"), not gated at first instance. The distribution-shaped concern (most of the
-  workload escalating — a leak rather than fat shards) is the escalation-storm guard in Future
-  work.
+1. The config processor computes `[start, start × factor, …, maxMemory]`, clamping the last tier
+   to the exact maximum. This keeps Kubernetes quantity arithmetic in `resolveMemoryScalingTierTable`.
+2. The workflow installs the monitor and creates tier 0 at the full pod budget. Once tier 0 exists,
+   `renderRfsTierPolicy.sh` reads its live Deployment and PDB. `deriveRfsTierManifest.jq` changes
+   the name, tier selectors and labels, memory, environment and initial replicas for each higher
+   tier. The workflow stores those manifests and `maxTotalPods` in the policy ConfigMap and waits
+   on the `SnapshotMigration` CR. The CR owns the runtime objects.
+3. The monitor creates higher tiers from the policy when they first have work, reconciles replicas,
+   and commits terminal status before teardown. A `CompletedWithErrors` backfill retains its
+   failed-document details under a `Completed` CR phase. When only above-maximum shards remain
+   and none are in progress, the console produces a per-index rollup and the monitor commits
+   `Failed`. The workflow waiter propagates that failure. [Failed document stream](failedDocumentStream.md)
 
-### How the workflow, the CronJob, and the tier Deployments relate
-
-The workflow touches the RFS Deployments exactly once — it creates tier 0 at setup. From then on
-the monitor CronJob is the only thing that creates, scales, or deletes RFS Deployments; the
-workflow just waits on the SnapshotMigration CR, which the monitor eventually drives to a
-terminal phase. Every runtime object carries an ownerReference to the SnapshotMigration CR.
-
-Every tier shares one Deployment shape, defined once: the workflow's template renders tier 0,
-and `renderTierPolicy` derives the tier-1..N manifests *from the live tier-0 object* (rename,
-tier label, memory quantity, replicas 0) into the ConfigMap. So the two "create" arrows below
-are the same manifest with two instantiators — the workflow stamps out tier 0 at setup; the
-monitor stamps out any higher tier from the ConfigMap the moment that tier first has work.
+The configured memory range and pod budget authorize escalation throughout the run. Nodepool
+instance-type and capacity limits determine what can actually schedule. An operator can adjust
+those limits during a run and see unschedulable pods in `workers.pending`. EC2 spend depends on
+the nodes provisioned and their runtime. A fleet-wide escalation storm is discussed in Future work.
 
 ```mermaid
 flowchart TB
@@ -520,7 +376,7 @@ flowchart TB
         CO["createRfsCoordinator
         (optional dedicated StatefulSet)"]
         T0["create tier-0 Deployment + PDB
-        (replicas = 1 bootstrap)"]
+        (full pod budget)"]
         RP["renderTierPolicy"]
         WAIT["waitIndefinitelyForSnapshotMigration
         (succeeds on Completed, fails on Failed/Error)"]
@@ -556,8 +412,7 @@ flowchart TB
     requiredMemoryTier, or release), read caps, acquire, complete" --> COORD
 ```
 
-And one shard's escalation over time — note the workflow never reappears between setup and the
-terminal commit; the loop runs entirely between the pods, the coordinator, and the monitor:
+One shard's escalation while the workflow waits on the CR follows below.
 
 ```mermaid
 sequenceDiagram
@@ -569,7 +424,7 @@ sequenceDiagram
     participant T1 as tier-1 pod
 
     W->>M: create CronJob
-    W->>T0: create tier-0 Deployment (replicas 1)
+    W->>T0: create tier-0 Deployment (full pod budget)
     W->>SM: wait on status.phase
     Note over W: workflow is now passive until the terminal commit
 
@@ -582,13 +437,13 @@ sequenceDiagram
     M->>C: sweep: eligible tier-1 work, no tier-1 fleet
     M->>C: write caps {0: n-1, 1: 1}
     M->>T1: create SESSION-rfs-t1 from ConfigMap manifest
-    Note over T0: a tier-0 worker finishing its item sees its tier over cap<br/>→ exit 7 → supervisor sleeps, pod Ready at low deletion cost<br/>→ monitor's scale patch trims exactly that pod
+    Note over T0: a tier-0 worker finishing its item sees its tier over cap<br/>→ exit 7 → supervisor sleeps, pod Ready at low deletion cost<br/>→ ReplicaSet prefers this idle pod on scale-down
 
     T1->>C: acquire the escalated shard (exact tier match)
     T1->>C: complete work item
 
     M->>C: sweep: nothing incomplete anywhere
-    M->>SM: commit Completed (or Failed + rollup if shards exceed maxMemory)
+    M->>SM: commit Completed
     M->>T0: delete RFS Deployments/PDBs by label, tier ConfigMap
     M->>M: delete own CronJob
     SM-->>W: waiter unblocks → parent workflow proceeds (or fails on Failed)
@@ -615,19 +470,16 @@ Constraints and operational notes:
   per-tier replicas every sweep from `maxTotalPods`, so a direct replica patch would be
   overwritten within a minute. The supported knob is the `maxTotalPods` config value.
 
-Each tier's manifest sets `requests.memory` **and** `limits.memory` to the same tier value
-(preserving Guaranteed QoS, matching today's defaults where requests == limits); the schema
-permits unequal values in general, but this feature locks them — heap sizing follows the limit
-while scheduling follows the request, and letting them diverge per tier would make "the tier's
-memory" ambiguous. CPU carries over unchanged from the base `resources`.
+Each tier sets `requests.memory` and `limits.memory` to the same value so scheduling and heap
+sizing use the same memory budget. CPU requests and limits carry over from the base `resources`.
 
-With `memoryScaling` absent, nothing changes: one deployment, today's names, today's status JSON
-byte-for-byte, no acquire-query additions exercised (absent `requiredMemoryTier` matches no
-range/term clause). Scope is the k8s/Argo path; the ECS path is untouched.
+With `memoryScaling` absent, the Kubernetes workflow uses the original Deployment name, pod
+configuration and console status shape. Workers use tier 0. The acquisition census accepts
+items with a missing tier, and the absence of published caps leaves acquisition unlimited.
 
 ## Console and CR status
 
-New fields appear **only when `memoryScaling` is configured**:
+The console includes the following fields when `memoryScaling` is configured.
 
 - `shard_awaiting_memory` — incomplete items whose tier exceeds every active fleet's tier.
   `shard_waiting` keeps its exact current meaning (eligible-and-unclaimed), so existing
@@ -636,8 +488,9 @@ New fields appear **only when `memoryScaling` is configured**:
   unschedulable" (no node fits the new size; Karpenter/EKS Auto Mode usually self-heals) is
   distinguishable from "running".
 - `memory_scaling: {tiers: [...], active: [{tier, replicas, busy}], ...}` for observability.
-- Terminal `Failed` carries the rollup, aggregated per index (work items for successors need the
-  plaintext `indexName` field added at creation, or the console decodes the base64url `_id`):
+- Terminal `Failed` carries the rollup, aggregated per index (successors share their original shard number, so a
+  completed parent with a failed successor still counts as one incomplete shard. For older items
+  without `indexName`, the console decodes the base64url `_id`):
 
 ```json
 {
@@ -674,12 +527,14 @@ Use the OOM evidence and the shard's `requiredMemoryTier` to investigate an esca
 On EKS the resource sampler lists running bulk-loader containers every 15 seconds and reads CPU
 and working set from the kubelets hosting them. It matches the pod UID, container, and sample time
 before summing by tier. CloudWatch plots the mean of each minute’s successful censuses. A worker
-observed during one of four censuses contributes one quarter of that observation to the minute.
+observed in one of four successful censuses contributes one quarter of its observation to that minute.
 An empty census contributes zero. During partial coverage the colored bands sum only the workers
 with fresh readings. A failed pod list contributes no observation. The sampling panel shows how
 many censuses succeeded and how many workers were awaiting each measurement. Resource series begin
 at rollout, and new tiers appear when first observed. For a self-managed target, set
 `metrics.cloudWatch.showManagedTargetDomain` to `false` to hide the managed-service panels.
+Grafana computes CPU independently from the rate of `container_cpu_usage_seconds_total`, joined
+with the running pod and its tier.
 
 ### Investigating a move to a higher tier
 
@@ -721,7 +576,7 @@ because the monitor already holds both sides of the truth — leases and pods:
   anywhere in a cause chain → 3, other Errors → 8, exceptions pass through); escalation script
   guards and idempotence; acquire protocol decision table (drain / yield / acquire / idle); tier
   inheritance on successors; exit codes.
-- **Supervisor (shell, against the real image):** exit-code policy matrix, crash-list trimming
+- **Supervisor checks against the real image:** exit-code policy matrix, crash-list trimming
   and per-launch CLI args, ledger persistence across a simulated group kill, bounded evidence
   wait with early exit, sweep-only on SIGTERM, feature-off loop unchanged.
 - **Unit (console):** new classification buckets; gating (feature-off output byte-identical);
@@ -729,11 +584,11 @@ because the monitor already holds both sides of the truth — leases and pods:
 - **Templates (jest, orchestrationSpecs):** per-tier manifest rendering (state/evidence volumes,
   no sidecar), tier-table computation and clamping, monitor arithmetic fixtures (allocation,
   ghost leases, deletion costs, kernel-OOM witness matching), feature-off no-op.
-- **Integration:** LocalStack/k8s test that migrates a snapshot containing one shard whose
-  documents exceed a deliberately tiny tier-0 memory limit; assert the escalation, tier-1 fleet
-  creation, completion, and status JSON shape. A second variant with a non-OOM crash (kill -9
-  the worker, producing exit 137 without a rise in the cgroup's oom_kill counter — deliberately
-  not OOM evidence) asserting *no* tier bump and immediate lease recovery.
+- **Integration.** Cases 0090–0095 cover escalation to completion, exhaustion with a per-index
+  failure report, a bare SIGKILL (137) that releases at the same tier, the ordinary single
+  Deployment, a multi-tier migration, and the kernel-OOM witness. A transformer makes a
+  deterministic allocation on the first document of each weighted index to force the intended
+  heap OOM. These cases run on explicit selection. [Integration cases](../migrationConsole/lib/integ_test/integ_test/test_cases/memory_tier_scaling_tests.py)
 
 ## Future work (deliberately out of v1)
 
@@ -742,7 +597,7 @@ because the monitor already holds both sides of the truth — leases and pods:
   floor plus greedy tier-descending budget already covers chain continuity.
 - **Live `maxTotalPods` override.** Today the budget is a config value; surfacing a runtime
   override through the monitor (so `backfill scale` could work again) is future work.
-- **In-java acquire loop** (end of "Acquire protocol"): folds the supervisor's relaunch loop into
+- **In-Java acquire loop** folds the supervisor's relaunch loop into
   the JVM (one process takes item after item) and turns yield into an in-process capped sleep;
   also removes the yielded-pod resumption lag. The shell supervisor must remain for crash
   isolation — a JVM that OOMed cannot be trusted to continue — but would launch far less often.
