@@ -4,6 +4,7 @@ import {
     ARGO_RFS_OPTIONS,
     DENORMALIZED_REPO_CONFIG,
     DEFAULT_KAFKA_TOPIC_SPEC_OVERRIDES,
+    DEFAULT_OTEL_METRICS_COLLECTOR_ENDPOINT,
     OVERALL_MIGRATION_CONFIG,
     REPO_CONFIG,
     SOURCE_CLUSTER_REPOS_RECORD, USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG,
@@ -575,6 +576,8 @@ function prepareDocumentBackfillConfig(
     const generatedConfig = lowerTransformPipeline(documentTransforms, fileSourceRegistry);
     return ARGO_RFS_OPTIONS.parse({
         ...rest,
+        ...(memoryScaling && rest.otelMetricsCollectorEndpoint === DEFAULT_OTEL_METRICS_COLLECTOR_ENDPOINT
+            ? {otelMetricsCollectorEndpoint: "http://otel-collector-local:4317"} : {}),
         logLevels: {
             root: rest.logLevels?.root ?? "info",
             bulkRequestTrace: rest.logLevels?.bulkRequestTrace ?? "off",

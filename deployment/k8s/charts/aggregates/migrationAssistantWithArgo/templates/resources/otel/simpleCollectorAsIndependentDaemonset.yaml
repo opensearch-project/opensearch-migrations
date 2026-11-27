@@ -97,6 +97,22 @@ spec:
     - name: prometheus
       port: 8889
       targetPort: prometheus
+---
+# Tier workers export cumulative counters. Keep each pod on a single delta converter for its
+# lifetime. During a collector restart the gRPC exporter reconnects on the same node.
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-collector-local
+  namespace: {{ .Release.Namespace }}
+spec:
+  internalTrafficPolicy: Local
+  selector:
+    app: otel-collector
+  ports:
+    - name: otlp-grpc
+      port: 4317
+      targetPort: otlp-grpc
 {{- if .Values.metrics.serviceMonitor.enabled }}
 ---
 # ServiceMonitor CRD comes from kube-prometheus-stack, which is installed by the

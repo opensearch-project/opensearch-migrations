@@ -104,6 +104,19 @@ async function transformAndResolve(config: z.infer<typeof OVERALL_MIGRATION_CONF
 }
 
 describe("resolved migration resources", () => {
+    it.each([
+        [{}, "http://otel-collector-local:4317"],
+        [{otelMetricsCollectorEndpoint: "http://custom:4317"}, "http://custom:4317"],
+        [{otelMetricsExportEnabled: false}, ""],
+    ] as const)("routes tiered worker metrics with options %j", async (options, expected) => {
+        const config = sampleConfig();
+        Object.assign(config.snapshotMigrationConfigs![0].perSnapshotConfig.snap1[0].documentBackfillConfig!,
+            {memoryScaling: {maxMemory: "32Gi"}}, options);
+        const {singleResource} = await transformAndResolve(config);
+        expect(singleResource("SnapshotMigration").parameters.documentBackfillOtelMetricsCollectorEndpoint)
+            .toBe(expected);
+    });
+
     it("extracts resolved resource parameters from transformed workflow config", async () => {
         const workflowConfig = await new MigrationConfigTransformer().processFromObject(sampleConfig());
         const resolvedMigrationResources = buildResolvedMigrationResources(workflowConfig, "workflow-a");
