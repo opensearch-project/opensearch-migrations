@@ -1,3 +1,4 @@
+import copy
 import pytest
 import unittest
 import requests
@@ -20,6 +21,10 @@ from .metric_operations import assert_metrics_present
 logger = logging.getLogger(__name__)
 ops = DefaultOperationsLibrary()
 
+# These tests run in the docker-compose environment, where the console's source cluster is the capture proxy.
+# This is the proxy's backend cluster (its --destinationUri in docker-compose.yml), reached without the proxy.
+DIRECT_SOURCE_ENDPOINT = "https://elasticsearch:9200"
+
 
 @pytest.fixture(scope="class")
 def setup_replayer(request):
@@ -38,8 +43,15 @@ def setup_replayer(request):
     target_con_result: ConnectionResult = connection_check(target_cluster)
     assert target_con_result.connection_established is True
 
-    # Clear Cluster
-    clear_cluster(source_cluster)
+    # Clear the clusters directly, so the cleanup isn't captured by the proxy and replayed onto the target. The
+    # replayer keeps request order only within a connection, so a replayed clear can land after the first test's
+    # requests and delete the index it just created. full_tests.py's initialize fixture clears its clusters
+    # directly for the same reason.
+    direct_source_cluster = copy.copy(source_cluster)
+    direct_source_cluster.endpoint = DIRECT_SOURCE_ENDPOINT
+    direct_source_con_result: ConnectionResult = connection_check(direct_source_cluster)
+    assert direct_source_con_result.connection_established is True
+    clear_cluster(direct_source_cluster)
     clear_cluster(target_cluster)
 
     logger.info("Starting replayer...")
