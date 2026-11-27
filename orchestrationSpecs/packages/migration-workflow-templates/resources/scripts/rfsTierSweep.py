@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
 """RFS memory-tier fleet scheduler: one monitor sweep.
 
-The monitor publishes STATE, not orders: each sweep recomputes the per-tier pod allocation from
-coordinator truth and publishes it as per-tier lease caps (the maxLeases field on the
-shard_setup sentinel work item). Workers are read-only consumers that
-idle only when their OWN tier's live-lease count meets its cap, so herding is impossible by
-construction, and a dead monitor leaves at worst a tier running slightly under capacity.
+Each sweep publishes per-tier lease caps in shard_setup.maxLeases. Workers finish their
+current shard before yielding at their own tier's cap. If the monitor stops, workers keep
+using the most recently published caps.
 
 Allocation precedence (highest wins when the budget cannot satisfy all three):
   1. busy floor      — never set a tier's allocation below its lease-holding pods (inviolable)
@@ -47,7 +45,6 @@ OOM_MATCH_SKEW_SECONDS = 10
 # The per-tier caps live as a field ON the shard_setup sentinel work item: every status/work
 # query already excludes that document, so the caps need no index of their own.
 SHARD_SETUP_DOC_ID = "shard_setup"
-WORKING_STATE_BASENAME = ".migrations_working_state"
 CRD_GROUP = "migrations.opensearch.org"
 CRD_VERSION = "v1alpha1"
 
@@ -140,7 +137,7 @@ def compute_allocation(sweep_input):
     # Higher-tier demand first: escalated shards are revealed-long chains whose remaining
     # length is irreducible wall-clock, so budget funds them before lower-tier breadth.
     ghosts = {int(state["tier"]): int(state.get("ghostLeases", 0)) for state in tiers}
-    for state in sorted(tiers, key=lambda t: -int(t["tier"])):
+    for state in reversed(tiers):
         tier = int(state["tier"])
         eligible = max(0, int(state.get("eligible", 0)) - ghosts[tier])
         want = min(eligible, alloc[tier] + remaining)
@@ -158,18 +155,11 @@ def compute_allocation(sweep_input):
                 remaining -= 1
             break
 
-    create = []
-    replicas = {}
-    for state in tiers:
-        tier = int(state["tier"])
-        replicas[tier] = alloc[tier]
-        if alloc[tier] > 0 and not state.get("deploymentExists"):
-            create.append(tier)
-
+    missing_tiers = (int(state["tier"]) for state in tiers if not state.get("deploymentExists"))
     return {
         "caps": {str(t): alloc[t] + ghosts[t] for t in alloc},
-        "replicas": {str(t): replicas[t] for t in replicas},
-        "create": create,
+        "replicas": {str(t): count for t, count in alloc.items()},
+        "create": [tier for tier in missing_tiers if alloc[tier] > 0],
     }
 
 
@@ -207,10 +197,6 @@ def load_policy(core, namespace, configmap_name):
     return policy, manifests
 
 
-def working_state_index(session_name):
-    return WORKING_STATE_BASENAME + (("_" + session_name) if session_name else "")
-
-
 def coordinator_search(cluster, index, body):
     from console_link.models.cluster import HttpMethod
     response = cluster.call_api(f"/{index}/_search", method=HttpMethod.POST,
@@ -223,9 +209,7 @@ DEFAULT_METRICS_ENDPOINT = "http://otel-collector:4318/v1/metrics"
 
 
 def build_fleet_metrics_payload(tiers, allocation, migration_uid, now_ns):
-    """OTLP/JSON gauges for one sweep: the monitor's per-tier truth (cap, desired replicas, busy,
-    ghosts, eligible, waiting), dimensioned by tier like the worker metrics, so dashboards can
-    overlay what the scheduler decided on what the workers did. Pure; the caller posts it."""
+    """OTLP/JSON gauges for investigating one scheduler decision by migration and tier."""
     per_tier = {
         "tierLeaseCap": lambda state, tier: int(allocation["caps"].get(str(tier), 0)),
         "tierReplicasDesired": lambda state, tier: int(allocation["replicas"].get(str(tier), 0)),
@@ -286,6 +270,7 @@ def shard_setup_complete(cluster, index):
 
 
 def gather_coordinator_state(cluster, index, tier_count):
+    from console_link.models.backfill_rfs import live_lease_holders_by_tier
     now = int(time.time())
     body = {
         "size": 0,
@@ -307,9 +292,6 @@ def gather_coordinator_state(cluster, index, tier_count):
     agg = coordinator_search(cluster, index, body)
     tiers = {t: {"tier": t, "eligible": 0, "waiting": 0, "neverAttempted": 0}
              for t in range(tier_count)}
-    total_incomplete = agg.get("hits", {}).get("total", {})
-    if isinstance(total_incomplete, dict):
-        total_incomplete = total_incomplete.get("value", 0)
     for bucket in agg.get("aggregations", {}).get("byTier", {}).get("buckets", []):
         tier = int(bucket["key"])
         entry = tiers.setdefault(tier, {"tier": tier, "eligible": 0, "waiting": 0,
@@ -320,25 +302,10 @@ def gather_coordinator_state(cluster, index, tier_count):
 
     # Who holds each live lease, by tier. Whether each holder is a running pod is decided against
     # the k8s pod list (see resolve_lease_holders): a lease names its pod, not whether it exists.
-    leases_body = {
-        "size": 1000,
-        "_source": ["leaseHolderId", "requiredMemoryTier"],
-        "query": {"bool": {
-            "must": [{"range": {"expiration": {"gte": now}}}],
-            "must_not": [{"exists": {"field": "completedAt"}}],
-        }},
-    }
-    leases = coordinator_search(cluster, index, leases_body)
-    lease_holders_by_tier = {}
-    for hit in leases.get("hits", {}).get("hits", []):
-        source = hit.get("_source", {})
-        holder = source.get("leaseHolderId")
-        if not holder:
-            continue
-        tier = int(source.get("requiredMemoryTier", 0) or 0)
-        lease_holders_by_tier.setdefault(tier, []).append(holder)
+    lease_holders_by_tier = live_lease_holders_by_tier(cluster, index, now)
+    for tier in lease_holders_by_tier:
         tiers.setdefault(tier, {"tier": tier, "eligible": 0, "waiting": 0, "neverAttempted": 0})
-    return sorted(tiers.values(), key=lambda t: t["tier"]), int(total_incomplete), lease_holders_by_tier
+    return sorted(tiers.values(), key=lambda t: t["tier"]), lease_holders_by_tier
 
 
 def resolve_lease_holders(tiers, lease_holders_by_tier, running_pod_names):
@@ -411,6 +378,7 @@ def main():
     # ── apply mode ────────────────────────────────────────────────────────────
     from kubernetes import client, config
     from console_link.environment import Environment
+    from console_link.models.backfill_rfs import working_state_index
 
     config.load_incluster_config()
     core = client.CoreV1Api()
@@ -442,7 +410,7 @@ def main():
             logger.info("shard_setup has not completed; laying off (no caps, trims, or creates) "
                         "until work items exist")
             return 0
-        tiers, total_incomplete, lease_holders_by_tier = gather_coordinator_state(
+        tiers, lease_holders_by_tier = gather_coordinator_state(
             cluster, index, len(tier_table))
     except Exception as e:  # noqa: BLE001
         logger.info("Coordinator state unavailable (%s); skipping tier sweep", e)
@@ -526,7 +494,7 @@ def main():
         tier = state["tier"]
         desired = result["replicas"].get(str(tier), 0)
         if tier in deployment_by_tier:
-            current = deployment_by_tier[tier].spec.replicas or 0
+            current = state["currentReplicas"]
             if current != desired:
                 apps.patch_namespaced_deployment_scale(
                     deployment_by_tier[tier].metadata.name, namespace,
@@ -541,7 +509,6 @@ def main():
         if dep_manifest is None:
             logger.warning("No rendered manifest for tier %s; cannot create its fleet", tier)
             continue
-        dep_manifest = json.loads(json.dumps(dep_manifest))
         dep_manifest["spec"]["replicas"] = result["replicas"][str(tier)]
         try:
             apps.create_namespaced_deployment(namespace, dep_manifest)

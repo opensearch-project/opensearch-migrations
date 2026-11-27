@@ -171,6 +171,44 @@ def test_index_name_decodes_base64url_ids_when_plaintext_is_absent():
     assert _shard_number_of_hit({"_id": "shard_setup"}) is None
 
 
+def test_live_leases_cover_every_page_before_scale_down(requests_mock):
+    cluster = create_valid_cluster()
+    index = ".migrations_working_state_run"
+    start = requests_mock.post(f"{cluster.endpoint}/{index}/_search?scroll=1m", json={
+        "_scroll_id": "first", "hits": {"hits": [
+            {"_source": {"leaseHolderId": f"pod-{n}_launch"}} for n in range(1000)
+        ]},
+    })
+    requests_mock.post(f"{cluster.endpoint}/_search/scroll", [
+        {"json": {"_scroll_id": "next", "hits": {"hits": [
+            {"_source": {"leaseHolderId": "last-pod_launch", "requiredMemoryTier": 1}},
+        ]}}},
+        {"json": {"_scroll_id": "last", "hits": {"hits": []}}},
+    ])
+    cleanup = requests_mock.delete(f"{cluster.endpoint}/_search/scroll")
+
+    holders = backfill_rfs.live_lease_holders_by_tier(cluster, index, now=123)
+
+    assert len(holders[0]) == 1000
+    assert holders[1] == ["last-pod_launch"]
+    assert start.last_request.json()["query"]["bool"]["must"] == [{"range": {"expiration": {"gte": 123}}}]
+    assert cleanup.last_request.json() == {"scroll_id": "last"}
+
+
+def test_live_lease_read_rejects_partial_results(requests_mock):
+    cluster = create_valid_cluster()
+    requests_mock.post(f"{cluster.endpoint}/work/_search?scroll=1m", json={
+        "_scroll_id": "first", "hits": {"hits": [{"_source": {"leaseHolderId": "pod-0_launch"}}]},
+    })
+    requests_mock.post(f"{cluster.endpoint}/_search/scroll", json={
+        "_scroll_id": "partial", "_shards": {"failed": 1}, "hits": {"hits": []},
+    })
+    cleanup = requests_mock.delete(f"{cluster.endpoint}/_search/scroll")
+    with pytest.raises(RuntimeError, match="Incomplete search response"):
+        backfill_rfs.live_lease_holders_by_tier(cluster, "work", now=123)
+    assert cleanup.last_request.json() == {"scroll_id": "partial"}
+
+
 def test_compute_failed_rollup_classifies_terminal_state(mocker):
     cluster = create_valid_cluster()
     now = int(datetime.now(timezone.utc).timestamp())
@@ -183,19 +221,19 @@ def test_compute_failed_rollup_classifies_terminal_state(mocker):
 
     # Not terminal while a live lease exists (in progress).
     mocker.patch.object(backfill_rfs, "parse_query_response", return_value=0)
-    mocker.patch.object(backfill_rfs, "_fetch_hits", return_value=[
+    pages = mocker.patch.object(cluster, "scroll_hit_pages", return_value=[[
         {"_id": f"{heavy}__3__0", "_source": {"requiredMemoryTier": 3, "expiration": now + 500}},
-    ])
+    ]])
     assert compute_failed_rollup(cluster, ".migrations_working_state", 2) is None
 
-    # Terminal: all incomplete items exceed the ladder and nothing is in progress.
-    mocker.patch.object(backfill_rfs, "_fetch_hits", return_value=[
-        {"_id": f"{heavy}__3__0", "_source": {"requiredMemoryTier": 3, "expiration": 0}},
-        {"_id": f"{heavy}__7__100", "_source": {"indexName": "logs-2024-02",
-                                                "requiredMemoryTier": 4, "expiration": 0}},
-    ])
-    mocker.patch.object(backfill_rfs, "_completed_shard_counts",
-                        return_value={"logs-2024-01": 4, "orders": 2, "logs-2024-02": 14})
+    # A completed parent for shard 7 and its failed successor count as one incomplete shard.
+    pages.return_value = [
+        [{"_id": f"{heavy}__{n}__0", "_source": {"completedAt": now}} for n in range(16) if n != 3],
+        [{"_id": f"{heavy}__3__0", "_source": {"requiredMemoryTier": 3, "expiration": 0}},
+         {"_id": f"{heavy}__7__100", "_source": {"indexName": "logs-2024-02", "requiredMemoryTier": 4}},
+         {"_id": "b3JkZXJz__0__0", "_source": {"completedAt": now}},
+         {"_id": "id__0__0", "_source": {"indexName": "logs-2024-01", "completedAt": now}}],
+    ]
     rollup = compute_failed_rollup(cluster, ".migrations_working_state", 2)
     assert rollup == {
         "succeeded": ["logs-2024-01", "orders"],
