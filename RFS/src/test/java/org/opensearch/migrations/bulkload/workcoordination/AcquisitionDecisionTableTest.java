@@ -33,13 +33,13 @@ class AcquisitionDecisionTableTest {
             // Own-tier cap reached: idle even though waiting work exists at this tier.
             Arguments.of(10L, 4L, 5L, 5L, AcquisitionPrecheckResult.LEASE_CAP_REACHED),
             Arguments.of(10L, 4L, 6L, 5L, AcquisitionPrecheckResult.LEASE_CAP_REACHED),
-            // Manual-approval gate: an unapproved tier's cap is 0 — never acquire.
+            // A tier allocated zero slots yields even when its first shard is waiting.
             Arguments.of(10L, 4L, 0L, 0L, AcquisitionPrecheckResult.LEASE_CAP_REACHED),
 
             // Under cap with waiting work: acquire.
             Arguments.of(10L, 4L, 4L, 5L, AcquisitionPrecheckResult.ACQUIRE),
             Arguments.of(10L, 1L, 0L, 1L, AcquisitionPrecheckResult.ACQUIRE),
-            // No published cap (feature off / control index absent / dead monitor): unlimited.
+            // A missing cap entry leaves acquisition unlimited.
             Arguments.of(10L, 4L, 1000L, null, AcquisitionPrecheckResult.ACQUIRE),
 
             // Work exists but none eligible here: other-tier work, or all of my tier leased.

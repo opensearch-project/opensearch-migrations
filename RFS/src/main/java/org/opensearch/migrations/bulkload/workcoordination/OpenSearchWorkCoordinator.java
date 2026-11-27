@@ -142,8 +142,8 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
             + "        throw new IllegalArgumentException(\\\"scriptVersion mismatch.  Not all participants are using the same script: sourceVersion=\\\" + ctx._source.scriptVersion);"
             + "      } ";
     /**
-     * Fields written on every successful acquisition: when the lease was taken (used by the
-     * dirty-lease sweep to attribute crash verdicts to the right lease) and the atomic clear of
+     * Fields written on every successful acquisition: when the lease was taken (for diagnostics
+     * and the monitor's count of never-attempted items) and the atomic clear of
      * {@link #LEASE_ABANDONED_FIELD_NAME} (a sticky flag would permanently mask later hard
      * crashes on the same item).
      */
@@ -176,14 +176,14 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
     public static final int CREATED_RESPONSE_CODE = 201;
     public static final int CONFLICT_RESPONSE_CODE = 409;
 
-    public static final String QUERY_INCOMPLETE_EXPIRED_ITEMS_STR = "    \"query\": {\n"
+    private static final String QUERY_INCOMPLETE_EXPIRED_ITEMS_TEMPLATE = "    \"query\": {\n"
         + "      \"bool\": {"
         + "        \"must\": ["
         + "          {"
         + "            \"range\": {"
         + "              \"" + EXPIRATION_FIELD_NAME + "\": { \"lt\": " + OLD_EXPIRATION_THRESHOLD_TEMPLATE + " }"
         + "            }"
-        + "          }"
+        + "          }%s"
         + "        ],"
         + "        \"must_not\": ["
         + "          { \"exists\":"
@@ -192,6 +192,9 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
         + "        ]"
         + "      }"
         + "    }";
+
+    public static final String QUERY_INCOMPLETE_EXPIRED_ITEMS_STR =
+        QUERY_INCOMPLETE_EXPIRED_ITEMS_TEMPLATE.formatted("");
 
     /**
      * Exact-tier matching clause for acquisition queries.  Tier 0 must treat a missing
@@ -213,23 +216,7 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
 
     /** {@link #QUERY_INCOMPLETE_EXPIRED_ITEMS_STR} scoped to the worker's exact memory tier. */
     static String queryIncompleteExpiredItemsForTierStr(int workerTier) {
-        return "    \"query\": {\n"
-            + "      \"bool\": {"
-            + "        \"must\": ["
-            + "          {"
-            + "            \"range\": {"
-            + "              \"" + EXPIRATION_FIELD_NAME + "\": { \"lt\": " + OLD_EXPIRATION_THRESHOLD_TEMPLATE + " }"
-            + "            }"
-            + "          },"
-            + tierMatchClauseJson(workerTier)
-            + "        ],"
-            + "        \"must_not\": ["
-            + "          { \"exists\":"
-            + "            { \"field\": \"" + COMPLETED_AT_FIELD_NAME + "\"}"
-            + "          }"
-            + "        ]"
-            + "      }"
-            + "    }";
+        return QUERY_INCOMPLETE_EXPIRED_ITEMS_TEMPLATE.formatted("," + tierMatchClauseJson(workerTier));
     }
 
     /**
@@ -505,32 +492,30 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
         }
     }
 
+    /** Include the plaintext name on shard work items so operators can query it without decoding the ID. */
+    private String indexNameJsonField(String workItemId) throws IOException {
+        try {
+            var item = IWorkCoordinator.WorkItemAndDuration.WorkItem.valueFromWorkItemString(workItemId);
+            if (item.getShardNumber() != null) {
+                return "\"" + INDEX_NAME_FIELD_NAME + "\": " + objectMapper.writeValueAsString(item.getIndexName()) + ", ";
+            }
+        } catch (IllegalArgumentException e) {
+            // Legacy and synthetic IDs may omit an encoded index name.
+        }
+        return "";
+    }
+
     AbstractedHttpClient.AbstractHttpResponse createOrUpdateLeaseForDocument(
         String workItemId,
         long expirationWindowSeconds
     ) throws IOException {
-        // Store the plaintext index name alongside the lease metadata so operators can audit
-        // the work-coordination index without having to reverse the id encoding.  The id itself
-        // encodes the index name as base64url so indices whose names contain the SEPARATOR
-        // ('__') serialize cleanly (see opensearch-project/opensearch-migrations#2880).
-        String indexNameField = "";
-        try {
-            var parsed = IWorkCoordinator.WorkItemAndDuration.WorkItem.valueFromWorkItemString(workItemId);
-            if (parsed.getShardNumber() != null) {
-                indexNameField = "    \"" + INDEX_NAME_FIELD_NAME + "\": "
-                    + objectMapper.writeValueAsString(parsed.getIndexName()) + ",\n";
-            }
-        } catch (IllegalArgumentException e) {
-            // Not a decodable work-item id (e.g. the shard_setup sentinel or a legacy/test id);
-            // fall through without recording a plaintext indexName.
-        }
         // the notion of 'now' isn't supported with painless scripts
         // https://www.elastic.co/guide/en/elasticsearch/painless/current/painless-datetime.html#_datetime_now
         final var upsertLeaseBodyTemplate = "{\n"
             + "  \"scripted_upsert\": true,\n"
             + "  \"upsert\": {\n"
             + "    \"scriptVersion\": \"" + SCRIPT_VERSION_TEMPLATE + "\",\n"
-            + indexNameField
+            + indexNameJsonField(workItemId)
             + "    \"" + EXPIRATION_FIELD_NAME + "\": 0,\n"
             + "    \"creatorId\": \"" + WORKER_ID_TEMPLATE + "\",\n"
             + "    \"nextAcquisitionLeaseExponent\": 0\n"
@@ -1205,7 +1190,7 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
      *
      * @param capOrNull the published cap for this tier, or null when no cap exists
      *                  (feature off, or the monitor hasn't written one) —
-     *                  treated as unlimited so a dead monitor can never idle a fleet.
+     *                  treated as unlimited. The last published cap persists across a monitor outage.
      */
     public static AcquisitionPrecheckResult decideAcquisition(TierWorkCensus census, Long capOrNull) {
         if (census.getTotalIncomplete() == 0) {
@@ -1273,8 +1258,7 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
      * {@link #MAX_LEASES_FIELD_NAME} field of the {@code shard_setup} sentinel document — chosen
      * because every existing status/work query already excludes that document, so the caps need
      * no index of their own.  Workers are read-only consumers.  Returns null (no cap) when the
-     * document, field, or tier entry is absent — a cap is state, not an order, so staleness or
-     * absence degrades to "unlimited", never to idling.
+     * document, field, or tier entry is absent.
      */
     Long readLeaseCapForTier() throws IOException {
         var response = httpClient.makeJsonRequest(
@@ -1305,7 +1289,7 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
 
     /**
      * A work item whose lease is live but was taken by a dead predecessor process in this pod
-     * (same pod-name prefix, different per-process UUID).  Found by the startup sweep.
+     * (same pod-name prefix, different launch ID).  Found by the startup sweep.
      */
     @Getter
     @AllArgsConstructor
@@ -1325,7 +1309,7 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
      * kill.  Returns an empty list when the coordination index doesn't exist yet (first start).
      *
      * <p>The {@code ownWorkerId} exclusion is an invariant, not a live filter: the startup sweep
-     * runs before this process acquires anything and the id's UUID is minted per JVM, so it can
+     * runs before this process acquires anything and the holder ID is unique per JVM, so it can
      * never match today.  It keeps the sweep safe if it is ever re-run mid-process (e.g. once the
      * acquire loop moves into java) — without it such a sweep could release its own live lease.
      */
@@ -1337,11 +1321,11 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
             + "  \"bool\": {"
             + "    \"must\": ["
             + "      { \"prefix\": { \"" + LEASE_HOLDER_ID_FIELD_NAME + "\": "
-            +              toJsonString(podNamePrefix) + " } },"
+            +              objectMapper.writeValueAsString(podNamePrefix) + " } },"
             + "      { \"range\": { \"" + EXPIRATION_FIELD_NAME + "\": { \"gt\": " + timestampEpochSeconds + " } } }"
             + "    ],"
             + "    \"must_not\": ["
-            + "      { \"term\": { \"" + LEASE_HOLDER_ID_FIELD_NAME + "\": " + toJsonString(ownWorkerId) + " } },"
+            + "      { \"term\": { \"" + LEASE_HOLDER_ID_FIELD_NAME + "\": " + objectMapper.writeValueAsString(ownWorkerId) + " } },"
             + "      { \"exists\": { \"field\": \"" + COMPLETED_AT_FIELD_NAME + "\" } },"
             + "      { \"term\": { \"" + LEASE_ABANDONED_FIELD_NAME + "\": true } }"
             + "    ]"
@@ -1368,14 +1352,6 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
                 source.path(REQUIRED_MEMORY_TIER_FIELD_NAME).asInt(0)));
         }
         return results;
-    }
-
-    private String toJsonString(String value) {
-        try {
-            return objectMapper.writeValueAsString(value);
-        } catch (IOException e) {
-            throw Lombok.sneakyThrow(e);
-        }
     }
 
     /**
@@ -1419,10 +1395,10 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
             + "  \"script\": {\n"
             + "    \"lang\": \"painless\",\n"
             + "    \"params\": { \n"
-            + "      \"observedLeaseHolderId\": " + toJsonString(observedLeaseHolderId) + ",\n"
+            + "      \"observedLeaseHolderId\": " + objectMapper.writeValueAsString(observedLeaseHolderId)
             + (newRequiredTierOrNull == null ? ""
-                : "      \"newRequiredTier\": " + newRequiredTierOrNull + ",\n")
-            + "      \"unused\": 0\n"
+                : ",\n      \"newRequiredTier\": " + newRequiredTierOrNull)
+            + "\n"
             + "    },\n"
             + "    \"source\": \""
             + VERSION_CHECK_SCRIPT
@@ -1665,29 +1641,14 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
         String tierField = workerMemoryTier > 0
             ? "\"" + REQUIRED_MEMORY_TIER_FIELD_NAME + "\":" + workerMemoryTier + ", "
             : "";
-        String workItemBodyTemplate = "{\"nextAcquisitionLeaseExponent\":" + nextAcquisitionLeaseExponent + ", \"scriptVersion\":\"" + SCRIPT_VERSION_TEMPLATE + "\", " +
-            tierField +
-            "\"creatorId\":\"" + WORKER_ID_TEMPLATE + "\", \"" + EXPIRATION_FIELD_NAME + "\":0 }";
-        String workItemBody = workItemBodyTemplate.replace(SCRIPT_VERSION_TEMPLATE, SCRIPT_VERSION).replace(WORKER_ID_TEMPLATE, workerId);
+        String commonFields = "\"nextAcquisitionLeaseExponent\":" + nextAcquisitionLeaseExponent
+            + ", \"scriptVersion\":\"" + SCRIPT_VERSION + "\", " + tierField
+            + "\"creatorId\":" + objectMapper.writeValueAsString(workerId) + ", \"" + EXPIRATION_FIELD_NAME + "\":0";
 
         StringBuilder body = new StringBuilder();
         for (var workItemId : workItemIds) {
-            body.append("{\"create\":{\"_id\":\"").append(workItemId).append("\"}}\n");
-            // Record the plaintext index name alongside each successor (mirrors
-            // createOrUpdateLeaseForDocument) so per-index status rollups don't have to
-            // reverse the base64url id encoding.
-            var successorBody = workItemBody;
-            try {
-                var parsed = IWorkCoordinator.WorkItemAndDuration.WorkItem.valueFromWorkItemString(workItemId);
-                if (parsed.getShardNumber() != null) {
-                    successorBody = workItemBody.substring(0, workItemBody.lastIndexOf('}'))
-                        + ", \"" + INDEX_NAME_FIELD_NAME + "\": "
-                        + objectMapper.writeValueAsString(parsed.getIndexName()) + "}";
-                }
-            } catch (IllegalArgumentException e) {
-                // Not a decodable work-item id; keep the plain body.
-            }
-            body.append(successorBody).append("\n");
+            body.append("{\"create\":{\"_id\":").append(objectMapper.writeValueAsString(workItemId)).append("}}\n");
+            body.append('{').append(indexNameJsonField(workItemId)).append(commonFields).append("}\n");
         }
         log.atInfo().setMessage("Calling createUnassignedWorkItemsIfNonexistent with workItemIds {}")
                 .addArgument(String.join(", ", workItemIds)).log();

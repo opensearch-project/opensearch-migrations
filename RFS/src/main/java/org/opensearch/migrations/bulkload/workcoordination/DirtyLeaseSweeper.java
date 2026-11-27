@@ -75,22 +75,10 @@ public class DirtyLeaseSweeper {
         return workerId.substring(podNamePrefixOf(workerId).length());
     }
 
-    public static void runStartupSweep(
-        OpenSearchWorkCoordinator coordinator,
-        String workerId,
-        int workerMemoryTier,
-        Map<String, String> predecessorCrashes,
-        IntConsumer onEscalation
-    ) throws IOException, InterruptedException {
-        runStartupSweep(coordinator, workerId, workerMemoryTier, predecessorCrashes, onEscalation, null);
-    }
-
     /**
      * @param predecessorCrashes how recent predecessors in this container died, keyed by instance id
      * @param onEscalation invoked with the destination tier for each escalation actually applied
-     *                     (metrics hook); may be null
      * @param onRelease invoked with the (unchanged) tier for each same-tier release actually applied
-     *                  (metrics hook); may be null
      */
     public static void runStartupSweep(
         OpenSearchWorkCoordinator coordinator,
@@ -117,35 +105,46 @@ public class DirtyLeaseSweeper {
         log.atWarn().setMessage("Dirty-lease sweep found {} live lease(s) from dead predecessor(s) in this pod: {}")
             .addArgument(dirtyLeases.size()).addArgument(dirtyLeases).log();
         for (var lease : dirtyLeases) {
-            var outcome = Optional.ofNullable(
-                predecessorCrashes.get(instanceIdOf(lease.getLeaseHolderId())));
-            if (classify(outcome) == Disposition.ESCALATE) {
-                int newTier = workerMemoryTier + 1;
-                boolean applied = coordinator.escalateWorkItem(
-                    lease.getWorkItemId(), lease.getLeaseHolderId(), newTier);
-                if (applied && onEscalation != null) {
-                    onEscalation.accept(newTier);
-                }
-                log.atWarn().setMessage("Predecessor {} died of OOM ({}) holding {}; escalate to tier >= {} {}")
-                    .addArgument(lease.getLeaseHolderId())
-                    .addArgument(outcome.orElse(null))
-                    .addArgument(lease.getWorkItemId())
-                    .addArgument(newTier)
-                    .addArgument(applied ? "applied" : "no-op (lease moved or item completed)")
-                    .log();
-            } else {
-                boolean applied = coordinator.releaseDirtyLease(
-                    lease.getWorkItemId(), lease.getLeaseHolderId());
-                if (applied && onRelease != null) {
-                    onRelease.accept(workerMemoryTier);
-                }
-                log.atWarn().setMessage("No OOM evidence for {} held by {} (outcome={}); released at same tier: {}")
-                    .addArgument(lease.getWorkItemId())
-                    .addArgument(lease.getLeaseHolderId())
-                    .addArgument(outcome.orElse("unknown"))
-                    .addArgument(applied ? "applied" : "no-op (lease moved or item completed)")
-                    .log();
+            recoverLease(coordinator, workerMemoryTier, predecessorCrashes, onEscalation, onRelease, lease);
+        }
+    }
+
+    private static void recoverLease(
+        OpenSearchWorkCoordinator coordinator,
+        int workerMemoryTier,
+        Map<String, String> predecessorCrashes,
+        IntConsumer onEscalation,
+        IntConsumer onRelease,
+        OpenSearchWorkCoordinator.DirtyLease lease
+    ) throws IOException, InterruptedException {
+        var outcome = Optional.ofNullable(
+            predecessorCrashes.get(instanceIdOf(lease.getLeaseHolderId())));
+        if (classify(outcome) == Disposition.ESCALATE) {
+            int newTier = workerMemoryTier + 1;
+            boolean applied = coordinator.escalateWorkItem(
+                lease.getWorkItemId(), lease.getLeaseHolderId(), newTier);
+            if (applied) {
+                onEscalation.accept(newTier);
             }
+            log.atWarn().setMessage("Predecessor {} died of OOM ({}) holding {}; escalate to tier >= {} {}")
+                .addArgument(lease.getLeaseHolderId())
+                .addArgument(outcome.orElse(null))
+                .addArgument(lease.getWorkItemId())
+                .addArgument(newTier)
+                .addArgument(applied ? "applied" : "no-op (lease moved or item completed)")
+                .log();
+        } else {
+            boolean applied = coordinator.releaseDirtyLease(
+                lease.getWorkItemId(), lease.getLeaseHolderId());
+            if (applied) {
+                onRelease.accept(workerMemoryTier);
+            }
+            log.atWarn().setMessage("No OOM evidence for {} held by {} (outcome={}); released at same tier: {}")
+                .addArgument(lease.getWorkItemId())
+                .addArgument(lease.getLeaseHolderId())
+                .addArgument(outcome.orElse("unknown"))
+                .addArgument(applied ? "applied" : "no-op (lease moved or item completed)")
+                .log();
         }
     }
 }

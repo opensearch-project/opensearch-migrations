@@ -1,6 +1,7 @@
 package org.opensearch.migrations.bulkload.workcoordination;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
@@ -232,7 +233,7 @@ public class WorkCoordinatorMemoryTierTest {
             worker.createUnassignedWorkItem(workId("idx", 0, 0), context::createUnassignedWorkContext);
             worker.createUnassignedWorkItem(workId("idx", 1, 0), context::createUnassignedWorkContext);
 
-            // Cap 0 for tier 0 (the manual-approval shape): the worker idles with the cap outcome.
+            // When the monitor allocates all slots elsewhere, this worker yields.
             publishLeaseCaps(worker, "{\"0\": 0}");
             var capped = worker.acquireNextWorkItem(Duration.ofMinutes(10), context::createAcquireNextItemContext);
             Assertions.assertInstanceOf(IWorkCoordinator.LeaseCapReached.class, capped);
@@ -347,7 +348,11 @@ public class WorkCoordinatorMemoryTierTest {
                 DirtyLeaseSweeper.instanceIdOf(oomHolder), "3",
                 DirtyLeaseSweeper.instanceIdOf(crashHolder), "1",
                 DirtyLeaseSweeper.instanceIdOf(abandonedHolder), "3");
-            DirtyLeaseSweeper.runStartupSweep(successor, "pod1_new-uuid", 0, crashes, null);
+            var escalations = new ArrayList<Integer>();
+            var releases = new ArrayList<Integer>();
+            DirtyLeaseSweeper.runStartupSweep(successor, "pod1_new-uuid", 0, crashes, escalations::add, releases::add);
+            Assertions.assertEquals(List.of(1), escalations);
+            Assertions.assertEquals(List.of(0), releases);
 
             var oomDoc = workItemSource(oomItem);
             Assertions.assertEquals(0, oomDoc.path("expiration").asLong(), "OOM item lease must be cleared");
@@ -376,7 +381,10 @@ public class WorkCoordinatorMemoryTierTest {
             var itemId = acquired.getWorkItem().toString();
             try (var podmate = factory.get(httpClient, 3600, "pod2_new-uuid")) {
                 podmate.setWorkerMemoryTier(1);
-                DirtyLeaseSweeper.runStartupSweep(podmate, "pod2_new-uuid", 1, Map.of("some-other-id", "3"), null);
+                var releases = new ArrayList<Integer>();
+                DirtyLeaseSweeper.runStartupSweep(podmate, "pod2_new-uuid", 1, Map.of("some-other-id", "3"),
+                    tier -> Assertions.fail("Unexpected escalation to tier " + tier), releases::add);
+                Assertions.assertEquals(List.of(1), releases);
             }
             var doc = workItemSource(itemId);
             Assertions.assertEquals(0, doc.path("expiration").asLong(), "lease recovered immediately");

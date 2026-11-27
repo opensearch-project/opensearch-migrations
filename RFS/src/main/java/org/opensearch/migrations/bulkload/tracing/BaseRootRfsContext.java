@@ -1,5 +1,7 @@
 package org.opensearch.migrations.bulkload.tracing;
 
+import java.util.function.IntConsumer;
+
 import org.opensearch.migrations.bulkload.common.retry.AdaptiveLimit;
 import org.opensearch.migrations.bulkload.common.retry.RetryBudget;
 import org.opensearch.migrations.tracing.IContextTracker;
@@ -25,10 +27,6 @@ public class BaseRootRfsContext extends RootOtelContext {
         deltaStreamInstruments = RfsContexts.DeltaStreamContext.makeMetrics(meter);
     }
 
-    /**
-     * Instruments for one target's bulk flow control, with gauges reading {@code budget} and {@code limit} (either
-     * may be null). Create once per process and target.
-     */
     public static final String WORKER_PHASE = "rfsWorkerPhase";
     public static final String WORK_ITEMS_ESCALATED = "workItemsEscalated";
     public static final AttributeKey<String> PHASE = AttributeKey.stringKey("phase");
@@ -55,10 +53,8 @@ public class BaseRootRfsContext extends RootOtelContext {
      * Counts work items this worker escalated to a higher memory tier after an OOM verdict; the {@code tier}
      * dimension is the tier escalated TO, so dashboards can chart the climb per level.
      */
-    public java.util.function.IntConsumer makeEscalationRecorder() {
-        var counter = getMeterProvider().get(scopeName).counterBuilder(WORK_ITEMS_ESCALATED)
-            .setUnit("count").build();
-        return newTier -> counter.add(1, Attributes.of(MEMORY_TIER, Integer.toString(newTier)));
+    public IntConsumer makeEscalationRecorder() {
+        return makeTierCounter(WORK_ITEMS_ESCALATED);
     }
 
     public static final String DIRTY_LEASES_RELEASED = "dirtyLeasesReleased";
@@ -68,12 +64,20 @@ public class BaseRootRfsContext extends RootOtelContext {
      * evidence — the non-escalating counterpart of {@link #WORK_ITEMS_ESCALATED}); the {@code tier}
      * dimension is the tier the lease stayed at. Together the two counters chart every sweep decision.
      */
-    public java.util.function.IntConsumer makeDirtyLeaseReleaseRecorder() {
-        var counter = getMeterProvider().get(scopeName).counterBuilder(DIRTY_LEASES_RELEASED)
+    public IntConsumer makeDirtyLeaseReleaseRecorder() {
+        return makeTierCounter(DIRTY_LEASES_RELEASED);
+    }
+
+    private IntConsumer makeTierCounter(String metricName) {
+        var counter = getMeterProvider().get(scopeName).counterBuilder(metricName)
             .setUnit("count").build();
         return tier -> counter.add(1, Attributes.of(MEMORY_TIER, Integer.toString(tier)));
     }
 
+    /**
+     * Instruments for one target's bulk flow control, with gauges reading {@code budget} and {@code limit} (either
+     * may be null). Create once per process and target.
+     */
     public BulkFlowInstruments makeBulkFlowInstruments(RetryBudget budget, AdaptiveLimit limit) {
         return new BulkFlowInstruments(getMeterProvider().get(scopeName), budget, limit);
     }

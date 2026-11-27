@@ -269,18 +269,11 @@ public class JsonCommandLineParser {
      * parameter collects every occurrence; an unknown name keeps its value as text so validation
      * reports it.
      */
-    private ObjectNode buildOverlayNode(String[] extraArgs, String commandName) throws ReflectiveOperationException {
-        Map<String, FieldInfo> parameters = new HashMap<>();
-        for (Object obj : mainObjects) {
-            parameters.putAll(buildParameterMap(obj, obj.getClass()));
-        }
-        if (commandName != null) {
-            Object commandObj = commandObjects.get(commandName);
-            parameters.putAll(buildParameterMap(commandObj, commandObj.getClass()));
-        }
+    private ObjectNode buildOverlayNode(String[] extraArgs, Map<String, FieldInfo> parameters) {
+        var args = new ArrayDeque<>(Arrays.asList(extraArgs));
         var overlay = objectMapper.createObjectNode();
-        for (int i = 0; i < extraArgs.length; i++) {
-            String arg = extraArgs[i];
+        while (!args.isEmpty()) {
+            String arg = args.removeFirst();
             if (!arg.startsWith("-")) {
                 throw new IllegalArgumentException(
                     "Invalid arguments: expected a --name argument after the JSON content, but got '" + arg + "'");
@@ -288,18 +281,19 @@ public class JsonCommandLineParser {
             String name = arg.replaceAll("^-+", "");
             FieldInfo fieldInfo = parameters.get(name);
             Class<?> type = fieldInfo == null ? String.class : fieldInfo.field.getType();
-            String next = i + 1 < extraArgs.length ? extraArgs[i + 1] : null;
+            String next = args.peekFirst();
             if (type == boolean.class || type == Boolean.class) {
                 boolean explicit = "true".equalsIgnoreCase(next) || "false".equalsIgnoreCase(next);
-                overlay.put(name, explicit ? Boolean.parseBoolean(extraArgs[++i]) : true);
+                String value = explicit ? args.removeFirst() : "true";
+                overlay.put(name, Boolean.parseBoolean(value));
             } else if (next == null || next.startsWith("-")) {
                 throw new IllegalArgumentException("Invalid arguments: " + arg + " requires a value");
             } else if (List.class.isAssignableFrom(type)) {
                 JsonNode existing = overlay.get(name);
                 var values = existing instanceof ArrayNode array ? array : overlay.putArray(name);
-                values.add(extraArgs[++i]);
+                values.add(args.removeFirst());
             } else {
-                overlay.put(name, extraArgs[++i]);
+                overlay.put(name, args.removeFirst());
             }
         }
         return overlay;
@@ -308,49 +302,28 @@ public class JsonCommandLineParser {
     private void parseJson(OuterParsedArgs parsedArgs) throws JsonProcessingException, ReflectiveOperationException
     {
 
-        JsonNode rootNode = objectMapper.readTree(parsedArgs.jsonContent);
-
-        // Build combined parameter map from ALL objects that will be populated
-        validateAllKeysAreParameters(parsedArgs.commandName, rootNode);
-
-        for (Object obj : mainObjects) {
-            populateFromJson(objectMapper, obj, rootNode);
-        }
-
+        var targets = new ArrayList<>(mainObjects);
         if (parsedArgs.commandName != null) {
-            Object commandObj = commandObjects.get(parsedArgs.commandName);
-            populateFromJson(objectMapper, commandObj, rootNode);
-
+            targets.add(commandObjects.get(parsedArgs.commandName));
+        }
+        Map<String, FieldInfo> parameters = new HashMap<>();
+        for (Object target : targets) {
+            parameters.putAll(buildParameterMap(target, target.getClass()));
+        }
+        applyJsonParameters(objectMapper.readTree(parsedArgs.jsonContent), targets, parameters.keySet());
+        if (parsedArgs.commandName != null) {
             Field parsedCommandField = JCommander.class.getDeclaredField("parsedCommand");
             parsedCommandField.setAccessible(true);
             parsedCommandField.set(jCommander, parsedArgs.commandName);
         }
-
         if (parsedArgs.extraArgs.length > 0) {
-            // Explicit command-line arguments overlay the JSON document's values.
-            ObjectNode overlay = buildOverlayNode(parsedArgs.extraArgs, parsedArgs.commandName);
-            validateAllKeysAreParameters(parsedArgs.commandName, overlay);
-            for (Object obj : mainObjects) {
-                populateFromJson(objectMapper, obj, overlay);
-            }
-            if (parsedArgs.commandName != null) {
-                populateFromJson(objectMapper, commandObjects.get(parsedArgs.commandName), overlay);
-            }
+            applyJsonParameters(buildOverlayNode(parsedArgs.extraArgs, parameters), targets, parameters.keySet());
         }
     }
 
-    private void validateAllKeysAreParameters(String commandName, JsonNode rootNode)
-        throws ReflectiveOperationException
+    private void applyJsonParameters(JsonNode rootNode, List<Object> targets, Set<String> allParameters)
+        throws ReflectiveOperationException, JsonProcessingException
     {
-        var allParameters = new HashSet<>();
-        for (Object obj : mainObjects) {
-            allParameters.addAll(buildParameterMap(obj, obj.getClass()).keySet());
-        }
-        if (commandName != null) {
-            Object commandObj = commandObjects.get(commandName);
-            allParameters.addAll(buildParameterMap(commandObj, commandObj.getClass()).keySet());
-        }
-
         var unrecognizedKeys = new ArrayList<>();
         var jsonKeys = rootNode.fieldNames();
         while (jsonKeys.hasNext()) {
@@ -363,6 +336,9 @@ public class JsonCommandLineParser {
         if (!unrecognizedKeys.isEmpty()) {
             throw new IllegalArgumentException(
                 "Unrecognized parameter(s) in JSON: " + unrecognizedKeys + ". " + "Valid parameters: " + allParameters);
+        }
+        for (Object target : targets) {
+            populateFromJson(objectMapper, target, rootNode);
         }
     }
 
