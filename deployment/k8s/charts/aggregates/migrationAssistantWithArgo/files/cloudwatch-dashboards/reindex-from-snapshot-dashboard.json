@@ -39,7 +39,7 @@
             "width": 24,
             "height": 2,
             "properties": {
-                "markdown": "**Reading the fleet charts.** Compare migration throughput with CPU consumed and memory working set by tier. The colored bands show measured usage. The gray band shows how much of each running worker’s limit lies above its measured usage, including the full limit of workers awaiting a reading. EC2 cost depends on node size and runtime. CloudWatch averages the successful fleet snapshots each minute (up to four). An idle fleet reads zero. A gray baseline on application charts identifies an idle fleet or zero reported samples while containers were running. See RFS/docs/BULK_TRAFFIC_CONTROL.md for pipeline controls.",
+                "markdown": "**Migration progress.** Source processed includes recorded failures. Failed documents are final outcomes. Retries can produce several item errors for one document.  \n**Worker resources.** Colored bands show measured usage by tier. Gray fills the remaining container limit, including workers awaiting a reading. CloudWatch averages up to four fleet snapshots per minute. An idle fleet reads zero. Gray baselines on application charts mark an idle fleet or missing application samples.",
                 "background": "transparent"
             }
         },
@@ -50,7 +50,7 @@
             "width": 24,
             "height": 1,
             "properties": {
-                "markdown": "## Operator overview",
+                "markdown": "## Migration overview",
                 "background": "transparent"
             }
         },
@@ -61,7 +61,7 @@
             "width": 8,
             "height": 1,
             "properties": {
-                "markdown": "### Migration results",
+                "markdown": "### Migration progress",
                 "background": "transparent"
             }
         },
@@ -94,7 +94,7 @@
             "width": 8,
             "height": 6,
             "properties": {
-                "title": "Documents migrated per second",
+                "title": "Source documents processed per second",
                 "view": "timeSeries",
                 "stacked": false,
                 "region": "REGION",
@@ -113,7 +113,7 @@
                     [
                         {
                             "expression": "FILL(e1, 0) / 60",
-                            "label": "Documents/s",
+                            "label": "Source processed",
                             "id": "e2",
                             "visible": true,
                             "region": "REGION"
@@ -341,7 +341,7 @@
             "width": 8,
             "height": 6,
             "properties": {
-                "title": "Documents requiring manual action (per minute)",
+                "title": "Failed documents per minute",
                 "view": "timeSeries",
                 "stacked": true,
                 "region": "REGION",
@@ -351,7 +351,7 @@
                     [
                         {
                             "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,failureClass,qualifier} MetricName=\"bulkDocumentsFailed\" OTelLib=\"documentMigration\" failureClass=\"NON_RETRYABLE\"', 'Sum', 60)) / 60 * 60",
-                            "label": "Cannot be retried",
+                            "label": "Non-retryable error",
                             "id": "e1",
                             "visible": true,
                             "region": "REGION"
@@ -360,7 +360,7 @@
                     [
                         {
                             "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,failureClass,qualifier} MetricName=\"bulkDocumentsFailed\" OTelLib=\"documentMigration\" failureClass=\"RETRYABLE_EXHAUSTED\"', 'Sum', 60)) / 60 * 60",
-                            "label": "Retries exhausted",
+                            "label": "Retry limit reached",
                             "id": "e2",
                             "visible": true,
                             "region": "REGION"
@@ -590,7 +590,7 @@
             "width": 8,
             "height": 6,
             "properties": {
-                "title": "Documents sent vs migrated per second",
+                "title": "Source progress and target sends (docs/s)",
                 "view": "timeSeries",
                 "stacked": false,
                 "region": "REGION",
@@ -627,7 +627,7 @@
                     [
                         {
                             "expression": "FILL(e3, 0) / 60",
-                            "label": "Migrated",
+                            "label": "Source processed",
                             "id": "e4",
                             "visible": true,
                             "region": "REGION"
@@ -894,7 +894,7 @@
                     [
                         {
                             "expression": "FILL(e1, 0) / 60 * 9.53674e-07",
-                            "label": "Migrated document source",
+                            "label": "Processed source bytes",
                             "id": "e2",
                             "visible": true,
                             "region": "REGION"
@@ -1602,7 +1602,7 @@
             "width": 24,
             "height": 1,
             "properties": {
-                "markdown": "## Pipeline performance diagnosis",
+                "markdown": "## Target health and response",
                 "background": "transparent"
             }
         },
@@ -1610,6 +1610,930 @@
             "type": "metric",
             "x": 0,
             "y": 36,
+            "width": 8,
+            "height": 6,
+            "properties": {
+                "title": "Bulk request duration seen by RFS (s)",
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "REGION",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,outcome,qualifier} MetricName=\"bulkAttemptDuration\" OTelLib=\"documentMigration\"', 'Sum', 60)) / SUM(SEARCH('{OpenSearchMigrations,OTelLib,outcome,qualifier} MetricName=\"bulkAttemptDuration\" OTelLib=\"documentMigration\"', 'SampleCount', 60)) / 1000",
+                            "label": "Mean",
+                            "id": "e1",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetWorkers\" namespace=\"placeholder-namespace\"', 'Sum', 60))",
+                            "label": "",
+                            "id": "e2",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF(FILL(e2, -1) == 0, 0)",
+                            "label": "Fleet idle",
+                            "id": "e3",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#879596"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF((FILL(e2, -1) > 0) AND (FILL(DATAPOINT_COUNT([e1]), 0) == 0), 0)",
+                            "label": "Zero reported samples",
+                            "id": "e4",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#60676D"
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "s",
+                        "showUnits": false,
+                        "min": 0
+                    }
+                }
+            }
+        },
+        {
+            "type": "metric",
+            "x": 8,
+            "y": 36,
+            "width": 8,
+            "height": 6,
+            "properties": {
+                "title": "Target-unavailable document attempts per minute",
+                "view": "timeSeries",
+                "stacked": true,
+                "region": "REGION",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        {
+                            "expression": "REMOVE_EMPTY(SEARCH('{OpenSearchMigrations,OTelLib,reason,qualifier} MetricName=\"bulkDocsTargetUnavailable\" OTelLib=\"documentMigration\"', 'Sum', 60) / 60 * 60)",
+                            "label": "",
+                            "id": "e1",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetWorkers\" namespace=\"placeholder-namespace\"', 'Sum', 60))",
+                            "label": "",
+                            "id": "e2",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF(FILL(e2, -1) == 0, 0)",
+                            "label": "Fleet idle",
+                            "id": "e3",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#879596"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF((FILL(e2, -1) > 0) AND (FILL(DATAPOINT_COUNT([e1]), 0) == 0), 0)",
+                            "label": "Zero reported samples",
+                            "id": "e4",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#60676D"
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "per min",
+                        "showUnits": false,
+                        "min": 0
+                    }
+                }
+            }
+        },
+        {
+            "type": "metric",
+            "x": 16,
+            "y": 36,
+            "width": 8,
+            "height": 6,
+            "properties": {
+                "title": "Target indexing rate and write queue",
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "REGION",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        "AWS/ES",
+                        "IndexingRate",
+                        "DomainName",
+                        "TC_DOMAIN_NAME",
+                        "ClientId",
+                        "ACCOUNT_ID",
+                        {
+                            "id": "m1",
+                            "stat": "Sum",
+                            "visible": true,
+                            "region": "REGION",
+                            "label": "Indexing rate (fleet ops/min)",
+                            "period": 60
+                        }
+                    ],
+                    [
+                        "AWS/ES",
+                        "ThreadpoolWriteQueue",
+                        "DomainName",
+                        "TC_DOMAIN_NAME",
+                        "ClientId",
+                        "ACCOUNT_ID",
+                        {
+                            "id": "m2",
+                            "stat": "Maximum",
+                            "visible": true,
+                            "region": "REGION",
+                            "label": "Write queue (max)",
+                            "period": 60,
+                            "yAxis": "right"
+                        }
+                    ],
+                    [
+                        "AWS/ES",
+                        "ThreadpoolWriteRejected",
+                        "DomainName",
+                        "TC_DOMAIN_NAME",
+                        "ClientId",
+                        "ACCOUNT_ID",
+                        {
+                            "id": "m3",
+                            "stat": "Sum",
+                            "visible": true,
+                            "region": "REGION",
+                            "label": "Write rejected",
+                            "period": 60,
+                            "yAxis": "right"
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "ops/min",
+                        "showUnits": false,
+                        "min": 0
+                    },
+                    "right": {
+                        "label": "count",
+                        "showUnits": false,
+                        "min": 0
+                    }
+                }
+            }
+        },
+        {
+            "type": "metric",
+            "x": 0,
+            "y": 42,
+            "width": 8,
+            "height": 6,
+            "properties": {
+                "title": "Target CPU and JVM pressure (%)",
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "REGION",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        "AWS/ES",
+                        "CPUUtilization",
+                        "DomainName",
+                        "TC_DOMAIN_NAME",
+                        "ClientId",
+                        "ACCOUNT_ID",
+                        {
+                            "id": "m1",
+                            "stat": "Maximum",
+                            "visible": true,
+                            "region": "REGION",
+                            "label": "CPU (max node)",
+                            "period": 60
+                        }
+                    ],
+                    [
+                        "AWS/ES",
+                        "JVMMemoryPressure",
+                        "DomainName",
+                        "TC_DOMAIN_NAME",
+                        "ClientId",
+                        "ACCOUNT_ID",
+                        {
+                            "id": "m2",
+                            "stat": "Maximum",
+                            "visible": true,
+                            "region": "REGION",
+                            "label": "JVM pressure (max node)",
+                            "period": 60
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "percent",
+                        "showUnits": false,
+                        "min": 0
+                    }
+                }
+            }
+        },
+        {
+            "type": "metric",
+            "x": 8,
+            "y": 42,
+            "width": 8,
+            "height": 6,
+            "properties": {
+                "title": "Target latency and HTTP status codes (all clients)",
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "REGION",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        "AWS/ES",
+                        "IndexingLatency",
+                        "DomainName",
+                        "TC_DOMAIN_NAME",
+                        "ClientId",
+                        "ACCOUNT_ID",
+                        {
+                            "id": "m1",
+                            "stat": "Average",
+                            "visible": true,
+                            "region": "REGION",
+                            "label": "Indexing latency (ms)",
+                            "period": 60
+                        }
+                    ],
+                    [
+                        "AWS/ES",
+                        "4xx",
+                        "DomainName",
+                        "TC_DOMAIN_NAME",
+                        "ClientId",
+                        "ACCOUNT_ID",
+                        {
+                            "id": "m2",
+                            "stat": "Sum",
+                            "visible": true,
+                            "region": "REGION",
+                            "label": "4xx",
+                            "period": 60,
+                            "yAxis": "right"
+                        }
+                    ],
+                    [
+                        "AWS/ES",
+                        "5xx",
+                        "DomainName",
+                        "TC_DOMAIN_NAME",
+                        "ClientId",
+                        "ACCOUNT_ID",
+                        {
+                            "id": "m3",
+                            "stat": "Sum",
+                            "visible": true,
+                            "region": "REGION",
+                            "label": "5xx",
+                            "period": 60,
+                            "yAxis": "right"
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "ms",
+                        "showUnits": false,
+                        "min": 0
+                    },
+                    "right": {
+                        "label": "per min",
+                        "showUnits": false,
+                        "min": 0
+                    }
+                }
+            }
+        },
+        {
+            "type": "metric",
+            "x": 16,
+            "y": 42,
+            "width": 8,
+            "height": 6,
+            "properties": {
+                "title": "Target searchable documents (thousands) and used space (GB)",
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "REGION",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        "AWS/ES",
+                        "SearchableDocuments",
+                        "DomainName",
+                        "TC_DOMAIN_NAME",
+                        "ClientId",
+                        "ACCOUNT_ID",
+                        {
+                            "id": "m1",
+                            "stat": "Maximum",
+                            "visible": false,
+                            "region": "REGION",
+                            "label": "Searchable docs (k)",
+                            "period": 60
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "m1 / 1000",
+                            "label": "Searchable docs (k)",
+                            "id": "e2",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        "AWS/ES",
+                        "ClusterUsedSpace",
+                        "DomainName",
+                        "TC_DOMAIN_NAME",
+                        "ClientId",
+                        "ACCOUNT_ID",
+                        {
+                            "id": "m3",
+                            "stat": "Maximum",
+                            "visible": false,
+                            "region": "REGION",
+                            "label": "Used space (GB)",
+                            "period": 60
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "m3 / 1024",
+                            "label": "Used space (GB)",
+                            "id": "e4",
+                            "visible": true,
+                            "region": "REGION",
+                            "yAxis": "right"
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "thousands of docs",
+                        "showUnits": false,
+                        "min": 0
+                    },
+                    "right": {
+                        "label": "GB",
+                        "showUnits": false,
+                        "min": 0
+                    }
+                }
+            }
+        },
+        {
+            "type": "metric",
+            "x": 0,
+            "y": 48,
+            "width": 8,
+            "height": 6,
+            "properties": {
+                "title": "Target EBS throttling",
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "REGION",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        "AWS/ES",
+                        "ThroughputThrottle",
+                        "DomainName",
+                        "TC_DOMAIN_NAME",
+                        "ClientId",
+                        "ACCOUNT_ID",
+                        {
+                            "id": "m1",
+                            "stat": "Maximum",
+                            "visible": true,
+                            "region": "REGION",
+                            "label": "Throughput throttled",
+                            "period": 60
+                        }
+                    ],
+                    [
+                        "AWS/ES",
+                        "IopsThrottle",
+                        "DomainName",
+                        "TC_DOMAIN_NAME",
+                        "ClientId",
+                        "ACCOUNT_ID",
+                        {
+                            "id": "m2",
+                            "stat": "Maximum",
+                            "visible": true,
+                            "region": "REGION",
+                            "label": "IOPS throttled",
+                            "period": 60
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "0 or 1",
+                        "showUnits": false,
+                        "min": 0
+                    }
+                }
+            }
+        },
+        {
+            "type": "text",
+            "x": 0,
+            "y": 54,
+            "width": 24,
+            "height": 1,
+            "properties": {
+                "markdown": "## Retries and document failures",
+                "background": "transparent"
+            }
+        },
+        {
+            "type": "metric",
+            "x": 0,
+            "y": 55,
+            "width": 8,
+            "height": 6,
+            "properties": {
+                "title": "Delay between retries for each batch (s)",
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "REGION",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,qualifier} MetricName=\"bulkAttemptGap\" OTelLib=\"documentMigration\"', 'Sum', 60))",
+                            "label": "",
+                            "id": "e1",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,qualifier} MetricName=\"bulkAttemptGap\" OTelLib=\"documentMigration\"', 'SampleCount', 60))",
+                            "label": "",
+                            "id": "e2",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "e1 / e2 / 1000",
+                            "label": "Mean",
+                            "id": "e3",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "(SUM(SEARCH('{OpenSearchMigrations,OTelLib,qualifier} MetricName=\"bulkAttemptGap\" OTelLib=\"documentMigration\"', 'SampleCount', 60)) + 0 * SUM(SEARCH('{OpenSearchMigrations,OTelLib,phase,tier,qualifier} MetricName=\"rfsWorkerPhase\" OTelLib=\"documentMigration\"', 'Sum', 60))) / 60 * 60",
+                            "label": "Observed retries/min",
+                            "id": "e4",
+                            "visible": true,
+                            "region": "REGION",
+                            "yAxis": "right"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetWorkers\" namespace=\"placeholder-namespace\"', 'Sum', 60))",
+                            "label": "",
+                            "id": "e5",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF(FILL(e5, -1) == 0, 0)",
+                            "label": "Fleet idle",
+                            "id": "e6",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#879596"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF((FILL(e5, -1) > 0) AND (FILL(DATAPOINT_COUNT([e3,e4]), 0) == 0), 0)",
+                            "label": "Zero reported samples",
+                            "id": "e7",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#60676D"
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "s",
+                        "showUnits": false,
+                        "min": 0
+                    },
+                    "right": {
+                        "label": "per min",
+                        "showUnits": false,
+                        "min": 0
+                    }
+                }
+            }
+        },
+        {
+            "type": "metric",
+            "x": 8,
+            "y": 55,
+            "width": 8,
+            "height": 6,
+            "properties": {
+                "title": "Batch completion time and oldest unfinished batch (s)",
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "REGION",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,qualifier} MetricName=\"bulkBatchAge\" OTelLib=\"documentMigration\"', 'Sum', 60))",
+                            "label": "",
+                            "id": "e1",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,qualifier} MetricName=\"bulkBatchAge\" OTelLib=\"documentMigration\"', 'SampleCount', 60))",
+                            "label": "",
+                            "id": "e2",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "e1 / e2 / 1000",
+                            "label": "Mean completion time",
+                            "id": "e3",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "MAX(SEARCH('{OpenSearchMigrations,OTelLib,qualifier} MetricName=\"bulkOldestOpenBatchAge\" OTelLib=\"documentMigration\"', 'Maximum', 60))",
+                            "label": "",
+                            "id": "e4",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "e4 / 1000",
+                            "label": "Oldest unfinished (highest worker)",
+                            "id": "e5",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetWorkers\" namespace=\"placeholder-namespace\"', 'Sum', 60))",
+                            "label": "",
+                            "id": "e6",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF(FILL(e6, -1) == 0, 0)",
+                            "label": "Fleet idle",
+                            "id": "e7",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#879596"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF((FILL(e6, -1) > 0) AND (FILL(DATAPOINT_COUNT([e3,e5]), 0) == 0), 0)",
+                            "label": "Zero reported samples",
+                            "id": "e8",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#60676D"
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "s",
+                        "showUnits": false,
+                        "min": 0
+                    }
+                }
+            }
+        },
+        {
+            "type": "metric",
+            "x": 16,
+            "y": 55,
+            "width": 8,
+            "height": 6,
+            "properties": {
+                "title": "Retry budget tokens and exhaustion",
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "REGION",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        {
+                            "expression": "MIN(SEARCH('{OpenSearchMigrations,OTelLib,qualifier} MetricName=\"retryBudgetTokens\" OTelLib=\"documentMigration\"', 'Minimum', 60))",
+                            "label": "",
+                            "id": "e1",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "e1",
+                            "label": "Lowest worker",
+                            "id": "e2",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "MAX(SEARCH('{OpenSearchMigrations,OTelLib,qualifier} MetricName=\"retryBudgetTokens\" OTelLib=\"documentMigration\"', 'Maximum', 60))",
+                            "label": "",
+                            "id": "e3",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "e3",
+                            "label": "Highest worker",
+                            "id": "e4",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,qualifier} MetricName=\"retryBudgetEmpty\" OTelLib=\"documentMigration\"', 'Sum', 60))",
+                            "label": "",
+                            "id": "e5",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "FILL(e5, 0) / 60 * 60",
+                            "label": "Ran out per minute",
+                            "id": "e6",
+                            "visible": true,
+                            "region": "REGION",
+                            "yAxis": "right"
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "tokens",
+                        "showUnits": false,
+                        "min": 0
+                    },
+                    "right": {
+                        "label": "per min",
+                        "showUnits": false,
+                        "min": 0
+                    }
+                }
+            }
+        },
+        {
+            "type": "metric",
+            "x": 0,
+            "y": 61,
+            "width": 8,
+            "height": 6,
+            "properties": {
+                "title": "Why documents reached the retry limit (docs/min)",
+                "view": "timeSeries",
+                "stacked": true,
+                "region": "REGION",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,reason,qualifier} MetricName=\"bulkDocsGaveUp\" OTelLib=\"documentMigration\" reason=\"no_response\"', 'Sum', 60)) / 60 * 60",
+                            "label": "Response timed out",
+                            "id": "e1",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,reason,qualifier} MetricName=\"bulkDocsGaveUp\" OTelLib=\"documentMigration\" reason=\"item_failures\"', 'Sum', 60)) / 60 * 60",
+                            "label": "Repeated item error",
+                            "id": "e2",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,reason,qualifier} MetricName=\"bulkDocsGaveUp\" OTelLib=\"documentMigration\" reason=\"unknown_failures\"', 'Sum', 60)) / 60 * 60",
+                            "label": "Unexpected HTTP status",
+                            "id": "e3",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetWorkers\" namespace=\"placeholder-namespace\"', 'Sum', 60))",
+                            "label": "",
+                            "id": "e4",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF(FILL(e4, -1) == 0, 0)",
+                            "label": "Fleet idle",
+                            "id": "e5",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#879596"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF((FILL(e4, -1) > 0) AND (FILL(DATAPOINT_COUNT([e1,e2,e3]), 0) == 0), 0)",
+                            "label": "Zero reported samples",
+                            "id": "e6",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#60676D"
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "per min",
+                        "showUnits": false,
+                        "min": 0
+                    }
+                }
+            }
+        },
+        {
+            "type": "metric",
+            "x": 8,
+            "y": 61,
+            "width": 8,
+            "height": 6,
+            "properties": {
+                "title": "Item errors returned by the target (errors/s)",
+                "view": "timeSeries",
+                "stacked": true,
+                "region": "REGION",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        {
+                            "expression": "(SUM(SEARCH('{OpenSearchMigrations,OTelLib,errorType,retryable,qualifier} MetricName=\"bulkItemErrors\" OTelLib=\"documentMigration\" retryable=\"true\"', 'Sum', 60)) + 0 * SUM(SEARCH('{OpenSearchMigrations,OTelLib,attempt,outcome,qualifier} MetricName=\"bulkAttempts\" OTelLib=\"documentMigration\"', 'Sum', 60))) / 60",
+                            "label": "Retryable",
+                            "id": "e1",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "(SUM(SEARCH('{OpenSearchMigrations,OTelLib,errorType,retryable,qualifier} MetricName=\"bulkItemErrors\" OTelLib=\"documentMigration\" retryable=\"false\"', 'Sum', 60)) + 0 * SUM(SEARCH('{OpenSearchMigrations,OTelLib,attempt,outcome,qualifier} MetricName=\"bulkAttempts\" OTelLib=\"documentMigration\"', 'Sum', 60))) / 60",
+                            "label": "Non-retryable",
+                            "id": "e2",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetWorkers\" namespace=\"placeholder-namespace\"', 'Sum', 60))",
+                            "label": "",
+                            "id": "e3",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF(FILL(e3, -1) == 0, 0)",
+                            "label": "Fleet idle",
+                            "id": "e4",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#879596"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF((FILL(e3, -1) > 0) AND (FILL(SUM(SEARCH('{OpenSearchMigrations,OTelLib,attempt,outcome,qualifier} MetricName=\"bulkAttempts\" OTelLib=\"documentMigration\"', 'Sum', 60)), 0) == 0), 0)",
+                            "label": "No reported bulk attempts",
+                            "id": "e5",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#60676D"
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "errors/s",
+                        "showUnits": false,
+                        "min": 0
+                    }
+                }
+            }
+        },
+        {
+            "type": "text",
+            "x": 0,
+            "y": 67,
+            "width": 24,
+            "height": 1,
+            "properties": {
+                "markdown": "## Worker pipeline bottlenecks",
+                "background": "transparent"
+            }
+        },
+        {
+            "type": "metric",
+            "x": 0,
+            "y": 68,
             "width": 8,
             "height": 6,
             "properties": {
@@ -1725,7 +2649,7 @@
         {
             "type": "metric",
             "x": 8,
-            "y": 36,
+            "y": 68,
             "width": 8,
             "height": 6,
             "properties": {
@@ -1832,7 +2756,7 @@
         {
             "type": "metric",
             "x": 16,
-            "y": 36,
+            "y": 68,
             "width": 8,
             "height": 6,
             "properties": {
@@ -1966,7 +2890,7 @@
         {
             "type": "metric",
             "x": 0,
-            "y": 42,
+            "y": 74,
             "width": 8,
             "height": 6,
             "properties": {
@@ -2064,7 +2988,7 @@
         {
             "type": "metric",
             "x": 8,
-            "y": 42,
+            "y": 74,
             "width": 8,
             "height": 6,
             "properties": {
@@ -2171,7 +3095,7 @@
         {
             "type": "metric",
             "x": 16,
-            "y": 42,
+            "y": 74,
             "width": 8,
             "height": 6,
             "properties": {
@@ -2314,7 +3238,7 @@
         {
             "type": "metric",
             "x": 0,
-            "y": 48,
+            "y": 80,
             "width": 8,
             "height": 6,
             "properties": {
@@ -2412,7 +3336,7 @@
         {
             "type": "metric",
             "x": 8,
-            "y": 48,
+            "y": 80,
             "width": 8,
             "height": 6,
             "properties": {
@@ -2537,7 +3461,7 @@
         {
             "type": "metric",
             "x": 16,
-            "y": 48,
+            "y": 80,
             "width": 8,
             "height": 6,
             "properties": {
@@ -2644,7 +3568,7 @@
         {
             "type": "metric",
             "x": 0,
-            "y": 54,
+            "y": 86,
             "width": 8,
             "height": 6,
             "properties": {
@@ -2734,7 +3658,7 @@
         {
             "type": "metric",
             "x": 8,
-            "y": 54,
+            "y": 86,
             "width": 8,
             "height": 6,
             "properties": {
@@ -2877,7 +3801,7 @@
         {
             "type": "metric",
             "x": 16,
-            "y": 54,
+            "y": 86,
             "width": 8,
             "height": 6,
             "properties": {
@@ -2940,879 +3864,18 @@
         {
             "type": "text",
             "x": 0,
-            "y": 60,
+            "y": 92,
             "width": 24,
             "height": 1,
             "properties": {
-                "markdown": "## Target domain",
+                "markdown": "## Flow-control internals",
                 "background": "transparent"
             }
         },
         {
             "type": "metric",
-            "x": 0,
-            "y": 61,
-            "width": 8,
-            "height": 6,
-            "properties": {
-                "title": "Target indexing rate and write queue",
-                "view": "timeSeries",
-                "stacked": false,
-                "region": "REGION",
-                "period": 60,
-                "stat": "Sum",
-                "metrics": [
-                    [
-                        "AWS/ES",
-                        "IndexingRate",
-                        "DomainName",
-                        "TC_DOMAIN_NAME",
-                        "ClientId",
-                        "ACCOUNT_ID",
-                        {
-                            "id": "m1",
-                            "stat": "Sum",
-                            "visible": true,
-                            "region": "REGION",
-                            "label": "Indexing rate (fleet ops/min)",
-                            "period": 60
-                        }
-                    ],
-                    [
-                        "AWS/ES",
-                        "ThreadpoolWriteQueue",
-                        "DomainName",
-                        "TC_DOMAIN_NAME",
-                        "ClientId",
-                        "ACCOUNT_ID",
-                        {
-                            "id": "m2",
-                            "stat": "Maximum",
-                            "visible": true,
-                            "region": "REGION",
-                            "label": "Write queue (max)",
-                            "period": 60,
-                            "yAxis": "right"
-                        }
-                    ],
-                    [
-                        "AWS/ES",
-                        "ThreadpoolWriteRejected",
-                        "DomainName",
-                        "TC_DOMAIN_NAME",
-                        "ClientId",
-                        "ACCOUNT_ID",
-                        {
-                            "id": "m3",
-                            "stat": "Sum",
-                            "visible": true,
-                            "region": "REGION",
-                            "label": "Write rejected",
-                            "period": 60,
-                            "yAxis": "right"
-                        }
-                    ]
-                ],
-                "yAxis": {
-                    "left": {
-                        "label": "ops/min",
-                        "showUnits": false,
-                        "min": 0
-                    },
-                    "right": {
-                        "label": "count",
-                        "showUnits": false,
-                        "min": 0
-                    }
-                }
-            }
-        },
-        {
-            "type": "metric",
-            "x": 8,
-            "y": 61,
-            "width": 8,
-            "height": 6,
-            "properties": {
-                "title": "Target CPU and JVM pressure (%)",
-                "view": "timeSeries",
-                "stacked": false,
-                "region": "REGION",
-                "period": 60,
-                "stat": "Sum",
-                "metrics": [
-                    [
-                        "AWS/ES",
-                        "CPUUtilization",
-                        "DomainName",
-                        "TC_DOMAIN_NAME",
-                        "ClientId",
-                        "ACCOUNT_ID",
-                        {
-                            "id": "m1",
-                            "stat": "Maximum",
-                            "visible": true,
-                            "region": "REGION",
-                            "label": "CPU (max node)",
-                            "period": 60
-                        }
-                    ],
-                    [
-                        "AWS/ES",
-                        "JVMMemoryPressure",
-                        "DomainName",
-                        "TC_DOMAIN_NAME",
-                        "ClientId",
-                        "ACCOUNT_ID",
-                        {
-                            "id": "m2",
-                            "stat": "Maximum",
-                            "visible": true,
-                            "region": "REGION",
-                            "label": "JVM pressure (max node)",
-                            "period": 60
-                        }
-                    ]
-                ],
-                "yAxis": {
-                    "left": {
-                        "label": "percent",
-                        "showUnits": false,
-                        "min": 0
-                    }
-                }
-            }
-        },
-        {
-            "type": "metric",
-            "x": 16,
-            "y": 61,
-            "width": 8,
-            "height": 6,
-            "properties": {
-                "title": "Target latency and HTTP status codes (all clients)",
-                "view": "timeSeries",
-                "stacked": false,
-                "region": "REGION",
-                "period": 60,
-                "stat": "Sum",
-                "metrics": [
-                    [
-                        "AWS/ES",
-                        "IndexingLatency",
-                        "DomainName",
-                        "TC_DOMAIN_NAME",
-                        "ClientId",
-                        "ACCOUNT_ID",
-                        {
-                            "id": "m1",
-                            "stat": "Average",
-                            "visible": true,
-                            "region": "REGION",
-                            "label": "Indexing latency (ms)",
-                            "period": 60
-                        }
-                    ],
-                    [
-                        "AWS/ES",
-                        "4xx",
-                        "DomainName",
-                        "TC_DOMAIN_NAME",
-                        "ClientId",
-                        "ACCOUNT_ID",
-                        {
-                            "id": "m2",
-                            "stat": "Sum",
-                            "visible": true,
-                            "region": "REGION",
-                            "label": "4xx",
-                            "period": 60,
-                            "yAxis": "right"
-                        }
-                    ],
-                    [
-                        "AWS/ES",
-                        "5xx",
-                        "DomainName",
-                        "TC_DOMAIN_NAME",
-                        "ClientId",
-                        "ACCOUNT_ID",
-                        {
-                            "id": "m3",
-                            "stat": "Sum",
-                            "visible": true,
-                            "region": "REGION",
-                            "label": "5xx",
-                            "period": 60,
-                            "yAxis": "right"
-                        }
-                    ]
-                ],
-                "yAxis": {
-                    "left": {
-                        "label": "ms",
-                        "showUnits": false,
-                        "min": 0
-                    },
-                    "right": {
-                        "label": "per min",
-                        "showUnits": false,
-                        "min": 0
-                    }
-                }
-            }
-        },
-        {
-            "type": "metric",
-            "x": 0,
-            "y": 67,
-            "width": 8,
-            "height": 6,
-            "properties": {
-                "title": "Target searchable documents (thousands) and used space (GB)",
-                "view": "timeSeries",
-                "stacked": false,
-                "region": "REGION",
-                "period": 60,
-                "stat": "Sum",
-                "metrics": [
-                    [
-                        "AWS/ES",
-                        "SearchableDocuments",
-                        "DomainName",
-                        "TC_DOMAIN_NAME",
-                        "ClientId",
-                        "ACCOUNT_ID",
-                        {
-                            "id": "m1",
-                            "stat": "Maximum",
-                            "visible": false,
-                            "region": "REGION",
-                            "label": "Searchable docs (k)",
-                            "period": 60
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "m1 / 1000",
-                            "label": "Searchable docs (k)",
-                            "id": "e2",
-                            "visible": true,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        "AWS/ES",
-                        "ClusterUsedSpace",
-                        "DomainName",
-                        "TC_DOMAIN_NAME",
-                        "ClientId",
-                        "ACCOUNT_ID",
-                        {
-                            "id": "m3",
-                            "stat": "Maximum",
-                            "visible": false,
-                            "region": "REGION",
-                            "label": "Used space (GB)",
-                            "period": 60
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "m3 / 1024",
-                            "label": "Used space (GB)",
-                            "id": "e4",
-                            "visible": true,
-                            "region": "REGION",
-                            "yAxis": "right"
-                        }
-                    ]
-                ],
-                "yAxis": {
-                    "left": {
-                        "label": "thousands of docs",
-                        "showUnits": false,
-                        "min": 0
-                    },
-                    "right": {
-                        "label": "GB",
-                        "showUnits": false,
-                        "min": 0
-                    }
-                }
-            }
-        },
-        {
-            "type": "text",
-            "x": 0,
-            "y": 73,
-            "width": 24,
-            "height": 1,
-            "properties": {
-                "markdown": "## Retry and recovery",
-                "background": "transparent"
-            }
-        },
-        {
-            "type": "metric",
-            "x": 0,
-            "y": 74,
-            "width": 8,
-            "height": 6,
-            "properties": {
-                "title": "Delay between retries for each batch (s)",
-                "view": "timeSeries",
-                "stacked": false,
-                "region": "REGION",
-                "period": 60,
-                "stat": "Sum",
-                "metrics": [
-                    [
-                        {
-                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,qualifier} MetricName=\"bulkAttemptGap\" OTelLib=\"documentMigration\"', 'Sum', 60))",
-                            "label": "",
-                            "id": "e1",
-                            "visible": false,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,qualifier} MetricName=\"bulkAttemptGap\" OTelLib=\"documentMigration\"', 'SampleCount', 60))",
-                            "label": "",
-                            "id": "e2",
-                            "visible": false,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "e1 / e2 / 1000",
-                            "label": "Mean",
-                            "id": "e3",
-                            "visible": true,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "(SUM(SEARCH('{OpenSearchMigrations,OTelLib,qualifier} MetricName=\"bulkAttemptGap\" OTelLib=\"documentMigration\"', 'SampleCount', 60)) + 0 * SUM(SEARCH('{OpenSearchMigrations,OTelLib,phase,tier,qualifier} MetricName=\"rfsWorkerPhase\" OTelLib=\"documentMigration\"', 'Sum', 60))) / 60 * 60",
-                            "label": "Observed retries/min",
-                            "id": "e4",
-                            "visible": true,
-                            "region": "REGION",
-                            "yAxis": "right"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "SUM(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetWorkers\" namespace=\"placeholder-namespace\"', 'Sum', 60))",
-                            "label": "",
-                            "id": "e5",
-                            "visible": false,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "IF(FILL(e5, -1) == 0, 0)",
-                            "label": "Fleet idle",
-                            "id": "e6",
-                            "visible": true,
-                            "region": "REGION",
-                            "color": "#879596"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "IF((FILL(e5, -1) > 0) AND (FILL(DATAPOINT_COUNT([e3,e4]), 0) == 0), 0)",
-                            "label": "Zero reported samples",
-                            "id": "e7",
-                            "visible": true,
-                            "region": "REGION",
-                            "color": "#60676D"
-                        }
-                    ]
-                ],
-                "yAxis": {
-                    "left": {
-                        "label": "s",
-                        "showUnits": false,
-                        "min": 0
-                    },
-                    "right": {
-                        "label": "per min",
-                        "showUnits": false,
-                        "min": 0
-                    }
-                }
-            }
-        },
-        {
-            "type": "metric",
-            "x": 8,
-            "y": 74,
-            "width": 8,
-            "height": 6,
-            "properties": {
-                "title": "Target-unavailable document attempts per minute",
-                "view": "timeSeries",
-                "stacked": true,
-                "region": "REGION",
-                "period": 60,
-                "stat": "Sum",
-                "metrics": [
-                    [
-                        {
-                            "expression": "REMOVE_EMPTY(SEARCH('{OpenSearchMigrations,OTelLib,reason,qualifier} MetricName=\"bulkDocsTargetUnavailable\" OTelLib=\"documentMigration\"', 'Sum', 60) / 60 * 60)",
-                            "label": "",
-                            "id": "e1",
-                            "visible": true,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "SUM(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetWorkers\" namespace=\"placeholder-namespace\"', 'Sum', 60))",
-                            "label": "",
-                            "id": "e2",
-                            "visible": false,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "IF(FILL(e2, -1) == 0, 0)",
-                            "label": "Fleet idle",
-                            "id": "e3",
-                            "visible": true,
-                            "region": "REGION",
-                            "color": "#879596"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "IF((FILL(e2, -1) > 0) AND (FILL(DATAPOINT_COUNT([e1]), 0) == 0), 0)",
-                            "label": "Zero reported samples",
-                            "id": "e4",
-                            "visible": true,
-                            "region": "REGION",
-                            "color": "#60676D"
-                        }
-                    ]
-                ],
-                "yAxis": {
-                    "left": {
-                        "label": "per min",
-                        "showUnits": false,
-                        "min": 0
-                    }
-                }
-            }
-        },
-        {
-            "type": "metric",
-            "x": 16,
-            "y": 74,
-            "width": 8,
-            "height": 6,
-            "properties": {
-                "title": "Bulk attempt duration (s)",
-                "view": "timeSeries",
-                "stacked": false,
-                "region": "REGION",
-                "period": 60,
-                "stat": "Sum",
-                "metrics": [
-                    [
-                        {
-                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,outcome,qualifier} MetricName=\"bulkAttemptDuration\" OTelLib=\"documentMigration\"', 'Sum', 60)) / SUM(SEARCH('{OpenSearchMigrations,OTelLib,outcome,qualifier} MetricName=\"bulkAttemptDuration\" OTelLib=\"documentMigration\"', 'SampleCount', 60)) / 1000",
-                            "label": "Mean",
-                            "id": "e1",
-                            "visible": true,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "SUM(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetWorkers\" namespace=\"placeholder-namespace\"', 'Sum', 60))",
-                            "label": "",
-                            "id": "e2",
-                            "visible": false,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "IF(FILL(e2, -1) == 0, 0)",
-                            "label": "Fleet idle",
-                            "id": "e3",
-                            "visible": true,
-                            "region": "REGION",
-                            "color": "#879596"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "IF((FILL(e2, -1) > 0) AND (FILL(DATAPOINT_COUNT([e1]), 0) == 0), 0)",
-                            "label": "Zero reported samples",
-                            "id": "e4",
-                            "visible": true,
-                            "region": "REGION",
-                            "color": "#60676D"
-                        }
-                    ]
-                ],
-                "yAxis": {
-                    "left": {
-                        "label": "s",
-                        "showUnits": false,
-                        "min": 0
-                    }
-                }
-            }
-        },
-        {
-            "type": "metric",
-            "x": 0,
-            "y": 80,
-            "width": 8,
-            "height": 6,
-            "properties": {
-                "title": "Batch completion time and oldest unfinished batch (s)",
-                "view": "timeSeries",
-                "stacked": false,
-                "region": "REGION",
-                "period": 60,
-                "stat": "Sum",
-                "metrics": [
-                    [
-                        {
-                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,qualifier} MetricName=\"bulkBatchAge\" OTelLib=\"documentMigration\"', 'Sum', 60))",
-                            "label": "",
-                            "id": "e1",
-                            "visible": false,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,qualifier} MetricName=\"bulkBatchAge\" OTelLib=\"documentMigration\"', 'SampleCount', 60))",
-                            "label": "",
-                            "id": "e2",
-                            "visible": false,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "e1 / e2 / 1000",
-                            "label": "Mean completion time",
-                            "id": "e3",
-                            "visible": true,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "MAX(SEARCH('{OpenSearchMigrations,OTelLib,qualifier} MetricName=\"bulkOldestOpenBatchAge\" OTelLib=\"documentMigration\"', 'Maximum', 60))",
-                            "label": "",
-                            "id": "e4",
-                            "visible": false,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "e4 / 1000",
-                            "label": "Oldest unfinished (highest worker)",
-                            "id": "e5",
-                            "visible": true,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "SUM(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetWorkers\" namespace=\"placeholder-namespace\"', 'Sum', 60))",
-                            "label": "",
-                            "id": "e6",
-                            "visible": false,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "IF(FILL(e6, -1) == 0, 0)",
-                            "label": "Fleet idle",
-                            "id": "e7",
-                            "visible": true,
-                            "region": "REGION",
-                            "color": "#879596"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "IF((FILL(e6, -1) > 0) AND (FILL(DATAPOINT_COUNT([e3,e5]), 0) == 0), 0)",
-                            "label": "Zero reported samples",
-                            "id": "e8",
-                            "visible": true,
-                            "region": "REGION",
-                            "color": "#60676D"
-                        }
-                    ]
-                ],
-                "yAxis": {
-                    "left": {
-                        "label": "s",
-                        "showUnits": false,
-                        "min": 0
-                    }
-                }
-            }
-        },
-        {
-            "type": "metric",
-            "x": 8,
-            "y": 80,
-            "width": 8,
-            "height": 6,
-            "properties": {
-                "title": "Retry budget tokens and exhaustion",
-                "view": "timeSeries",
-                "stacked": false,
-                "region": "REGION",
-                "period": 60,
-                "stat": "Sum",
-                "metrics": [
-                    [
-                        {
-                            "expression": "MIN(SEARCH('{OpenSearchMigrations,OTelLib,qualifier} MetricName=\"retryBudgetTokens\" OTelLib=\"documentMigration\"', 'Minimum', 60))",
-                            "label": "",
-                            "id": "e1",
-                            "visible": false,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "e1",
-                            "label": "Lowest worker",
-                            "id": "e2",
-                            "visible": true,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "MAX(SEARCH('{OpenSearchMigrations,OTelLib,qualifier} MetricName=\"retryBudgetTokens\" OTelLib=\"documentMigration\"', 'Maximum', 60))",
-                            "label": "",
-                            "id": "e3",
-                            "visible": false,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "e3",
-                            "label": "Highest worker",
-                            "id": "e4",
-                            "visible": true,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "SUM(SEARCH('{OpenSearchMigrations,OTelLib,qualifier} MetricName=\"retryBudgetEmpty\" OTelLib=\"documentMigration\"', 'Sum', 60))",
-                            "label": "",
-                            "id": "e5",
-                            "visible": false,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "FILL(e5, 0) / 60 * 60",
-                            "label": "Ran out per minute",
-                            "id": "e6",
-                            "visible": true,
-                            "region": "REGION",
-                            "yAxis": "right"
-                        }
-                    ]
-                ],
-                "yAxis": {
-                    "left": {
-                        "label": "tokens",
-                        "showUnits": false,
-                        "min": 0
-                    },
-                    "right": {
-                        "label": "per min",
-                        "showUnits": false,
-                        "min": 0
-                    }
-                }
-            }
-        },
-        {
-            "type": "text",
-            "x": 0,
-            "y": 86,
-            "width": 24,
-            "height": 1,
-            "properties": {
-                "markdown": "## Failure diagnosis",
-                "background": "transparent"
-            }
-        },
-        {
-            "type": "metric",
-            "x": 0,
-            "y": 87,
-            "width": 8,
-            "height": 6,
-            "properties": {
-                "title": "Documents given up after retries (per minute)",
-                "view": "timeSeries",
-                "stacked": false,
-                "region": "REGION",
-                "period": 60,
-                "stat": "Sum",
-                "metrics": [
-                    [
-                        {
-                            "expression": "REMOVE_EMPTY(SEARCH('{OpenSearchMigrations,OTelLib,reason,qualifier} MetricName=\"bulkDocsGaveUp\" OTelLib=\"documentMigration\"', 'Sum', 60) / 60 * 60)",
-                            "label": "",
-                            "id": "e1",
-                            "visible": true,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "SUM(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetWorkers\" namespace=\"placeholder-namespace\"', 'Sum', 60))",
-                            "label": "",
-                            "id": "e2",
-                            "visible": false,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "IF(FILL(e2, -1) == 0, 0)",
-                            "label": "Fleet idle",
-                            "id": "e3",
-                            "visible": true,
-                            "region": "REGION",
-                            "color": "#879596"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "IF((FILL(e2, -1) > 0) AND (FILL(DATAPOINT_COUNT([e1]), 0) == 0), 0)",
-                            "label": "Zero reported samples",
-                            "id": "e4",
-                            "visible": true,
-                            "region": "REGION",
-                            "color": "#60676D"
-                        }
-                    ]
-                ],
-                "yAxis": {
-                    "left": {
-                        "label": "per min",
-                        "showUnits": false,
-                        "min": 0
-                    }
-                }
-            }
-        },
-        {
-            "type": "metric",
-            "x": 8,
-            "y": 87,
-            "width": 8,
-            "height": 6,
-            "properties": {
-                "title": "Item errors per second",
-                "view": "timeSeries",
-                "stacked": true,
-                "region": "REGION",
-                "period": 60,
-                "stat": "Sum",
-                "metrics": [
-                    [
-                        {
-                            "expression": "(SUM(SEARCH('{OpenSearchMigrations,OTelLib,errorType,retryable,qualifier} MetricName=\"bulkItemErrors\" OTelLib=\"documentMigration\" retryable=\"true\"', 'Sum', 60)) + 0 * SUM(SEARCH('{OpenSearchMigrations,OTelLib,attempt,outcome,qualifier} MetricName=\"bulkAttempts\" OTelLib=\"documentMigration\"', 'Sum', 60))) / 60",
-                            "label": "Retried",
-                            "id": "e1",
-                            "visible": true,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "(SUM(SEARCH('{OpenSearchMigrations,OTelLib,errorType,retryable,qualifier} MetricName=\"bulkItemErrors\" OTelLib=\"documentMigration\" retryable=\"false\"', 'Sum', 60)) + 0 * SUM(SEARCH('{OpenSearchMigrations,OTelLib,attempt,outcome,qualifier} MetricName=\"bulkAttempts\" OTelLib=\"documentMigration\"', 'Sum', 60))) / 60",
-                            "label": "Terminal",
-                            "id": "e2",
-                            "visible": true,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "SUM(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetWorkers\" namespace=\"placeholder-namespace\"', 'Sum', 60))",
-                            "label": "",
-                            "id": "e3",
-                            "visible": false,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "IF(FILL(e3, -1) == 0, 0)",
-                            "label": "Fleet idle",
-                            "id": "e4",
-                            "visible": true,
-                            "region": "REGION",
-                            "color": "#879596"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "IF((FILL(e3, -1) > 0) AND (FILL(SUM(SEARCH('{OpenSearchMigrations,OTelLib,attempt,outcome,qualifier} MetricName=\"bulkAttempts\" OTelLib=\"documentMigration\"', 'Sum', 60)), 0) == 0), 0)",
-                            "label": "No reported bulk attempts",
-                            "id": "e5",
-                            "visible": true,
-                            "region": "REGION",
-                            "color": "#60676D"
-                        }
-                    ]
-                ],
-                "yAxis": {
-                    "left": {
-                        "label": "errors/s",
-                        "showUnits": false,
-                        "min": 0
-                    }
-                }
-            }
-        },
-        {
-            "type": "text",
             "x": 0,
             "y": 93,
-            "width": 24,
-            "height": 1,
-            "properties": {
-                "markdown": "## Flow-control internals (expert)",
-                "background": "transparent"
-            }
-        },
-        {
-            "type": "metric",
-            "x": 0,
-            "y": 94,
             "width": 8,
             "height": 6,
             "properties": {
@@ -3874,7 +3937,7 @@
         {
             "type": "metric",
             "x": 8,
-            "y": 94,
+            "y": 93,
             "width": 8,
             "height": 6,
             "properties": {
@@ -3981,7 +4044,7 @@
         {
             "type": "metric",
             "x": 16,
-            "y": 94,
+            "y": 93,
             "width": 8,
             "height": 6,
             "properties": {
@@ -4074,7 +4137,7 @@
         {
             "type": "metric",
             "x": 0,
-            "y": 100,
+            "y": 99,
             "width": 8,
             "height": 6,
             "properties": {
@@ -4190,7 +4253,7 @@
         {
             "type": "metric",
             "x": 8,
-            "y": 100,
+            "y": 99,
             "width": 8,
             "height": 6,
             "properties": {

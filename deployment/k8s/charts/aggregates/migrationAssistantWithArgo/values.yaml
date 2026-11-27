@@ -347,7 +347,7 @@ metrics:
     # Disable to keep Prometheus/Grafana metrics while suppressing CloudWatch
     # metric export and ACK-managed dashboards.
     enabled: true
-    # Self-managed targets do not publish the AWS/ES metrics used in the Target domain section.
+    # Show AWS/ES domain metrics alongside the target feedback reported by RFS.
     showManagedTargetDomain: true
   metricsCollectorEndpoint: "http://otel-collector:4317"
   env: []

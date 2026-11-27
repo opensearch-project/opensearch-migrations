@@ -133,6 +133,15 @@ def prom_dedup(name, suffix="", where=None, rate=False, offset=None):
     metric = f"{prom_name(name, suffix)}{sel(name, where)}"
     if offset:
         metric += f" offset {offset}"
+    if rate and name in {"bulkAttempts", "bulkAttemptDuration", "bulkItemErrors", "bulkRequestDocuments",
+                         "bulkRequestBytes", "bulkRequestSentBytes", "bulkDocsTargetUnavailable"}:
+        # A worker can complete all its requests in its first export. These cumulative series are
+        # keyed by process lifetime. Subtract the prior reading when present and count the first
+        # reading in full. Deduplicate before subtraction so a collector handoff counts once.
+        group = f"max by ({','.join(labels)})"
+        current = f"{group} (last_over_time({metric}[{RI}]))"
+        previous = f"{group} ({metric} offset {RI})"
+        return f"((({current} - {previous}) or {current}) / ($__rate_interval_ms / 1000))"
     if rate:
         metric = f"rate({metric}[{RI}])"
     return f"max by ({','.join(labels)}) ({metric})"
@@ -235,6 +244,17 @@ class TrafficBackedAggregateRate(Rate):
     def __init__(self, *args, traffic_metric, **kwargs):
         super().__init__(*args, **kwargs)
         self.traffic_metric = traffic_metric
+
+    def prom(self):
+        targets = super().prom()
+        if self.by:
+            # No error-type series exists until a bulk item fails. Show a healthy zero only
+            # while requests are being made, retaining individual error types when available.
+            expr, label = targets[0]
+            traffic = prom_dedup(self.traffic_metric, rate=True)
+            zero = f'label_replace(0 * (sum({traffic}) > 0), "{self.by}", "none", "", "")'
+            return [(f"({expr}) or on() {zero}", label)]
+        return targets
 
     def cw(self, w):
         stat = "SampleCount" if METRICS[self.name][1] == "histogram" else "Sum"
@@ -423,17 +443,16 @@ class AttemptOutcomeGroups:
 
     @staticmethod
     def _prom_term(attempt, outcome):
-        attempt_selector = "" if attempt == "*" else f',attempt="{attempt}"'
-        metric = (
-            f'{prom_name("bulkAttempts")}{{otel_scope_name="{RFS}"{attempt_selector},outcome="{outcome}"}}'
-        )
-        return f"sum(max by (exported_instance,attempt,outcome) (rate({metric}[{RI}])))"
+        where = {"outcome": outcome}
+        if attempt != "*":
+            where["attempt"] = attempt
+        return f"(sum({prom_dedup('bulkAttempts', where=where, rate=True)}) or vector(0))"
 
     def prom(self):
         series = []
         for label, terms in self.GROUPS:
             expression = " + ".join(self._prom_term(attempt, outcome) for attempt, outcome in terms)
-            series.append((f"({expression}) or vector(0)", label))
+            series.append((expression, label))
         return series
 
     def cw(self, w):
@@ -666,11 +685,11 @@ class Panel:
 
 SECTIONS = [
     # Three aligned columns answer the first operator questions: result, worker capacity, and target feedback.
-    ("Operator overview", False, [
-        Panel("Documents migrated per second",
-              "Documents successfully written to the target, fleet total per second. A sustained drop matters only "
-              "after comparing it with the worker-capacity and target-feedback panels in the same row.",
-              DOCS_PER_SECOND_UNIT, [Rate("pipelineDocsMigrated", "Documents/s")]),
+    ("Migration overview", False, [
+        Panel("Source documents processed per second",
+              "Source documents in batches that advanced, including documents recorded as failures. Compare "
+              "with Failed documents per minute to see whether documents need attention.",
+              DOCS_PER_SECOND_UNIT, [Rate("pipelineDocsMigrated", "Source processed")]),
         Panel("Workers by phase",
               "Number of RFS worker processes in each lifecycle phase. The stack is ordered from the first phase at "
               "the bottom to the last at the top: starting, acquiring work, downloading and unpacking a shard, "
@@ -684,17 +703,16 @@ SECTIONS = [
               "Bulk HTTP requests per second, grouped into operator-facing outcomes. The stack is ordered with "
               "requests accepted on the first try at the bottom, then requests accepted after retry, item errors, "
               "target throttling, no response, and other errors. A growing upper portion means more request work is "
-              "being repeated or rejected. The detailed first-versus-retry outcome matrix is in the expert section.",
+              "being repeated or rejected. The detailed first-versus-retry outcome matrix is in Flow-control internals.",
               ATTEMPTS_PER_SECOND_UNIT, [AttemptOutcomeGroups()], stacked=True),
-        Panel("Documents requiring manual action (per minute)",
-              "Documents that did not migrate and were recorded as terminal failures, by failure class. "
-              "NON_RETRYABLE is a document/request problem that retrying cannot fix; RETRYABLE_EXHAUSTED was given "
-              "up after its retry policy. These are the documents an operator must inspect and replay or correct. "
-              "Target throttles and temporary unavailability do not appear here unless a document ultimately fails.",
+        Panel("Failed documents per minute",
+              "Documents RFS stopped trying to migrate. The stack shows the total that need inspection. "
+              "A non-retryable error requires a correction. For documents that reached the retry limit, "
+              "see the reason breakdown in Retries and document failures.",
               PER_MINUTE_UNIT, [
-                  Rate("bulkDocumentsFailed", "Cannot be retried",
+                  Rate("bulkDocumentsFailed", "Non-retryable error",
                        where={"failureClass": "NON_RETRYABLE"}, per_min=True),
-                  Rate("bulkDocumentsFailed", "Retries exhausted",
+                  Rate("bulkDocumentsFailed", "Retry limit reached",
                        where={"failureClass": "RETRYABLE_EXHAUSTED"}, per_min=True),
               ], stacked=True),
         Panel("Workers by connection-limit utilization",
@@ -719,13 +737,12 @@ SECTIONS = [
                        where={"signal": "admission_rejected"}, per_min=True),
                   Rate("bulkLimitCuts", "Response timeout", where={"signal": "timeout"}, per_min=True),
               ], stacked=True),
-        Panel("Documents sent vs migrated per second",
-              "Documents included in bulk requests on every attempt, documents successfully migrated, and the "
-              "subset sent again during retries. Sent can briefly lead migrated while requests are in flight. "
-              "Sustained re-sends or a widening sent-versus-migrated gap means retries or failures are consuming "
-              "target capacity.",
+        Panel("Source progress and target sends (docs/s)",
+              "Sent counts target operations on every bulk attempt, including re-sends. Source processed counts "
+              "source documents as their batches advance, including recorded failures. Retries, transformations "
+              "and requests still in flight can all cause these rates to differ.",
               DOCS_PER_SECOND_UNIT, [HistogramSumRate("bulkRequestDocuments", "Sent"),
-                                     Rate("pipelineDocsMigrated", "Migrated"),
+                                     Rate("pipelineDocsMigrated", "Source processed"),
                                      Rate("bulkDocsResent", "Re-sent")]),
         Panel("Requests in flight vs adaptive allowance",
               "Fleet totals for bulk requests currently in flight, the workers' current adaptive allowances, their "
@@ -747,13 +764,13 @@ SECTIONS = [
     ]),
     ("Throughput and worker resources", False, [
         Panel("Document and bulk request bytes (MiB/s)",
-              "Three different byte boundaries, shown as absolute rates. Migrated document source is the original "
-              "document-source payload successfully advanced by the pipeline; it excludes bulk action metadata and "
-              "NDJSON framing. Uncompressed bulk NDJSON is the assembled request body for every attempt, including "
+              "Three different byte boundaries, shown as absolute rates. Processed source bytes are the original "
+              "payload of source documents in batches that advanced, including recorded failures. Uncompressed "
+              "bulk NDJSON is the assembled request body for every attempt, including "
               "metadata, framing, and retries. Bulk request body sent is that same body after optional compression. "
               "Compare the two request lines to see compression; compare document send/re-send rates above to "
               "separate retries from request overhead.",
-              MIB_PER_SECOND_UNIT, [Rate("pipelineBytesMigrated", "Migrated document source", scale=MIB),
+              MIB_PER_SECOND_UNIT, [Rate("pipelineBytesMigrated", "Processed source bytes", scale=MIB),
                                     HistogramSumRate("bulkRequestBytes", "Uncompressed bulk NDJSON", scale=MIB),
                                     HistogramSumRate("bulkRequestSentBytes", "Bulk request body sent", scale=MIB)]),
         Panel("RFS CPU used vs allocated (cores)",
@@ -792,7 +809,100 @@ SECTIONS = [
               "appears when it starts. Workers without memory scaling contribute to tier 0.",
               "count", [WorkersByTier()], stacked=True),
     ]),
-    ("Pipeline performance diagnosis", False, [
+    ("Target health and response", False, [
+        Panel("Bulk request duration seen by RFS (s)",
+              "Time workers spend waiting for a bulk HTTP response or transport error. Compare the mean with "
+              "the configured response timeout. Grafana also shows p50 and p99.",
+              "s", [Mean("bulkAttemptDuration", "Mean", scale=1000),
+                    Quantile("bulkAttemptDuration", "p50", q=0.5, scale=1000),
+                    Quantile("bulkAttemptDuration", "p99", q=0.99, scale=1000)]),
+        Panel("Target-unavailable document attempts per minute",
+              "Document attempts that could not be written because the target was unavailable, grouped by reason: "
+              "a write block, unavailable shards, HTTP 503, or connection failure/reset. This does not include HTTP "
+              "429 throttles; correlate the overview's paused-document gauge with its limit-cut panel for those. "
+              "A document is counted again on each attempt, so this is refusal volume rather than a "
+              "distinct-document count.",
+              PER_MINUTE_UNIT, [Rate("bulkDocsTargetUnavailable", "{by}", by="reason", per_min=True)], stacked=True),
+        Panel("Target indexing rate and write queue",
+              "Fleet-total AWS/ES IndexingRate (operations per minute) and, on the right axis, the write thread "
+              "pool's queue (maximum over nodes) and rejections. Indexing-pressure rejections (429s for too many "
+              "bytes in flight) appear in Target request outcomes and the domain's 4xx count.",
+              "ops/min", [Domain("IndexingRate", "Sum", "Indexing rate (fleet ops/min)"),
+                          Right(Domain("ThreadpoolWriteQueue", "Maximum", "Write queue (max)")),
+                          Right(Domain("ThreadpoolWriteRejected", "Sum", "Write rejected"))],
+              cw_only=True, right_unit="count"),
+        Panel("Target CPU and JVM pressure (%)",
+              "AWS/ES CPUUtilization and JVMMemoryPressure, maximum over nodes.",
+              "percent", [Domain("CPUUtilization", "Maximum", "CPU (max node)"),
+                          Domain("JVMMemoryPressure", "Maximum", "JVM pressure (max node)")], cw_only=True),
+        Panel("Target latency and HTTP status codes (all clients)",
+              "AWS/ES IndexingLatency (ms per operation) and, on the right axis, 4xx and 5xx responses per minute, "
+              "from every client. Bulk item errors such as cluster_block_exception are carried inside an HTTP 200 "
+              "bulk response. The Item errors returned by the target panel counts those errors.",
+              "ms", [Domain("IndexingLatency", "Average", "Indexing latency (ms)"),
+                     Right(Domain("4xx", "Sum", "4xx")), Right(Domain("5xx", "Sum", "5xx"))],
+              cw_only=True, right_unit=PER_MINUTE_UNIT),
+        Panel("Target searchable documents (thousands) and used space (GB)",
+              "AWS/ES SearchableDocuments and, on the right axis, ClusterUsedSpace.",
+              "thousands of docs",
+              [Domain("SearchableDocuments", "Maximum", "Searchable docs (k)", scale=1000),
+               Right(Domain("ClusterUsedSpace", "Maximum", "Used space (GB)", scale=1024))],
+              cw_only=True, right_unit="GB"),
+        Panel("Target EBS throttling",
+              "Each line reaches 1 when any data node on the selected domain hits its EBS throughput or IOPS "
+              "limit during the minute.",
+              "0 or 1", [Domain("ThroughputThrottle", "Maximum", "Throughput throttled"),
+                         Domain("IopsThrottle", "Maximum", "IOPS throttled")], cw_only=True),
+    ]),
+    ("Retries and document failures", True, [
+        Panel("Delay between retries for each batch (s)",
+              "For each retrying batch, time from the end of its previous HTTP attempt until its next attempt was "
+              "sent. This is per batch/retry chain, not per connection. It includes planned backoff and any later "
+              "wait for retry capacity or a target-request slot. The right axis counts observed retries. Delay is measured when a retry "
+              "occurs. Grafana also shows p95.",
+              "s", [Mean("bulkAttemptGap", "Mean", scale=1000),
+                    Quantile("bulkAttemptGap", "p95", scale=1000),
+                    Right(TrafficBackedAggregateRate("bulkAttemptGap", "Observed retries/min", per_min=True,
+                                                     traffic_metric="rfsWorkerPhase"))], right_unit=PER_MINUTE_UNIT),
+        Panel("Batch completion time and oldest unfinished batch (s)",
+              "A batch is one request-sized group of documents followed through all of its retries. Mean completion "
+              "time runs from the first attempt until the batch succeeds or gives up. Oldest unfinished is the "
+              "highest age of any still-open batch in a worker. If the oldest rises while other batches complete, "
+              "some early work may be starved.",
+              "s", [Mean("bulkBatchAge", "Mean completion time", scale=1000),
+                    Gauge("bulkOldestOpenBatchAge", "Oldest unfinished (highest worker)", "max", scale=1000)]),
+        Panel("Retry budget tokens and exhaustion",
+              "Tokens remaining in each worker's shared retry budget (500 initially), shown for the lowest and "
+              "highest worker. The right axis counts times retries had to wait because a worker ran out. A low "
+              "minimum means at least one worker is seeing sustained failures even if the rest are healthy.",
+              "tokens", [Gauge("retryBudgetTokens", "Lowest worker", "min"),
+                         Gauge("retryBudgetTokens", "Highest worker", "max"),
+                         Right(Rate("retryBudgetEmpty", "Ran out per minute", per_min=True))],
+              right_unit=PER_MINUTE_UNIT),
+        Panel("Why documents reached the retry limit (docs/min)",
+              "The stack breaks down the Retry limit reached series in Failed documents per minute. A response "
+              "timeout means the worker waited too long for a reply. A repeated item error came back for one "
+              "document inside a bulk response. An unexpected HTTP status applied to the whole request.",
+              PER_MINUTE_UNIT, [
+                  Rate("bulkDocsGaveUp", "Response timed out", where={"reason": "no_response"}, per_min=True),
+                  Rate("bulkDocsGaveUp", "Repeated item error", where={"reason": "item_failures"}, per_min=True),
+                  Rate("bulkDocsGaveUp", "Unexpected HTTP status", where={"reason": "unknown_failures"}, per_min=True),
+              ], stacked=True),
+        Panel("Item errors returned by the target (errors/s)",
+              "Each failed item in a bulk response counts once per attempt. A document can contribute several "
+              "retryable errors before it succeeds or reaches its retry limit. A response timeout produces no "
+              "item error. Grafana also groups the errors by type.",
+              "errors/s", [
+                  TrafficBackedAggregateRate(
+                      "bulkItemErrors", "Retryable · {by}", by="errorType", where={"retryable": "true"},
+                      cw_label="Retryable", traffic_metric="bulkAttempts"),
+                  TrafficBackedAggregateRate(
+                      "bulkItemErrors", "Non-retryable · {by}", by="errorType", where={"retryable": "false"},
+                      cw_label="Non-retryable", traffic_metric="bulkAttempts"),
+              ],
+              stacked=True, show_bulk_activity=True),
+    ]),
+    ("Worker pipeline bottlenecks", True, [
         Panel("Hottest RFS pod by CPU limit", "Highest CPU usage relative to that running pod's own CPU limit.",
               "percent", [HottestPod("cpu")], grafana_only=True),
         Panel("Hottest RFS pod by memory limit", "Highest working set relative to that running pod's own memory limit.",
@@ -865,7 +975,7 @@ SECTIONS = [
         Panel("Pipeline service time (ms)",
               "Mean CPU preparation time per chunk, serial exact-packer time per chunk, and complete sink-call time "
               "per successful request group. Request-group duration includes target requests and their response "
-              "handling, so compare it with Bulk attempt duration and the client-side timings.",
+              "handling, so compare it with the bulk request duration seen by RFS and the client-side timings.",
               "ms", [
                   Mean("pipelinePreparationDuration", "Prepare chunk", where={"outcome": "success"}),
                   Mean("pipelinePackingDuration", "Exact packer"),
@@ -918,96 +1028,7 @@ SECTIONS = [
               "awaiting a fresh CPU or memory sample during those snapshots.",
               "count", [FleetSampling()], cw_only=True),
     ]),
-    ("Target domain", True, [
-        Panel("Target indexing rate and write queue",
-              "Fleet-total AWS/ES IndexingRate (operations per minute) and, on the right axis, the write thread "
-              "pool's queue (maximum over nodes) and rejections. Indexing-pressure rejections (429s for too many "
-              "bytes in flight) aren't in the thread pool: see Bulk attempts by outcome and the 4xx count.",
-              "ops/min", [Domain("IndexingRate", "Sum", "Indexing rate (fleet ops/min)"),
-                          Right(Domain("ThreadpoolWriteQueue", "Maximum", "Write queue (max)")),
-                          Right(Domain("ThreadpoolWriteRejected", "Sum", "Write rejected"))],
-              cw_only=True, right_unit="count"),
-        Panel("Target CPU and JVM pressure (%)",
-              "AWS/ES CPUUtilization and JVMMemoryPressure, maximum over nodes.",
-              "percent", [Domain("CPUUtilization", "Maximum", "CPU (max node)"),
-                          Domain("JVMMemoryPressure", "Maximum", "JVM pressure (max node)")], cw_only=True),
-        Panel("Target latency and HTTP status codes (all clients)",
-              "AWS/ES IndexingLatency (ms per operation) and, on the right axis, 4xx and 5xx responses per minute, "
-              "from every client. Bulk item errors such as cluster_block_exception are carried inside an HTTP 200 "
-              "bulk response and do not appear as 4xx here; correlate this panel with Bulk attempts, Why the target "
-              "couldn't take documents, and Item errors.",
-              "ms", [Domain("IndexingLatency", "Average", "Indexing latency (ms)"),
-                     Right(Domain("4xx", "Sum", "4xx")), Right(Domain("5xx", "Sum", "5xx"))],
-              cw_only=True, right_unit=PER_MINUTE_UNIT),
-        Panel("Target searchable documents (thousands) and used space (GB)",
-              "AWS/ES SearchableDocuments and, on the right axis, ClusterUsedSpace.",
-              "thousands of docs",
-              [Domain("SearchableDocuments", "Maximum", "Searchable docs (k)", scale=1000),
-               Right(Domain("ClusterUsedSpace", "Maximum", "Used space (GB)", scale=1024))],
-              cw_only=True, right_unit="GB"),
-    ]),
-    ("Retry and recovery", True, [
-        Panel("Delay between retries for each batch (s)",
-              "For each retrying batch, time from the end of its previous HTTP attempt until its next attempt was "
-              "sent. This is per batch/retry chain, not per connection. It includes planned backoff and any later "
-              "wait for retry capacity or a target-request slot. The right axis counts observed retries. Delay is measured when a retry "
-              "occurs. Grafana also shows p95.",
-              "s", [Mean("bulkAttemptGap", "Mean", scale=1000),
-                    Quantile("bulkAttemptGap", "p95", scale=1000),
-                    Right(TrafficBackedAggregateRate("bulkAttemptGap", "Observed retries/min", per_min=True,
-                                                     traffic_metric="rfsWorkerPhase"))], right_unit=PER_MINUTE_UNIT),
-        Panel("Target-unavailable document attempts per minute",
-              "Document attempts that could not be written because the target was unavailable, grouped by reason: "
-              "a write block, unavailable shards, HTTP 503, or connection failure/reset. This does not include HTTP "
-              "429 throttles; correlate the overview's paused-document gauge with its limit-cut panel for those. "
-              "A document is counted again on each attempt, so this is refusal volume rather than a "
-              "distinct-document count.",
-              PER_MINUTE_UNIT, [Rate("bulkDocsTargetUnavailable", "{by}", by="reason", per_min=True)], stacked=True),
-        Panel("Bulk attempt duration (s)",
-              "Time from sending a bulk HTTP request until its response or transport error. The panel shows the "
-              "mean, p50, and p99. Durations approaching the configured bulk response timeout indicate responses "
-              "are arriving too slowly.",
-              "s", [Mean("bulkAttemptDuration", "Mean", scale=1000),
-                    Quantile("bulkAttemptDuration", "p50", q=0.5, scale=1000),
-                    Quantile("bulkAttemptDuration", "p99", q=0.99, scale=1000)]),
-        Panel("Batch completion time and oldest unfinished batch (s)",
-              "A batch is one request-sized group of documents followed through all of its retries. Mean completion "
-              "time runs from the first attempt until the batch succeeds or gives up. Oldest unfinished is the "
-              "highest age of any still-open batch in a worker. If the oldest rises while other batches complete, "
-              "some early work may be starved.",
-              "s", [Mean("bulkBatchAge", "Mean completion time", scale=1000),
-                    Gauge("bulkOldestOpenBatchAge", "Oldest unfinished (highest worker)", "max", scale=1000)]),
-        Panel("Retry budget tokens and exhaustion",
-              "Tokens remaining in each worker's shared retry budget (500 initially), shown for the lowest and "
-              "highest worker. The right axis counts times retries had to wait because a worker ran out. A low "
-              "minimum means at least one worker is seeing sustained failures even if the rest are healthy.",
-              "tokens", [Gauge("retryBudgetTokens", "Lowest worker", "min"),
-                         Gauge("retryBudgetTokens", "Highest worker", "max"),
-                         Right(Rate("retryBudgetEmpty", "Ran out per minute", per_min=True))],
-              right_unit=PER_MINUTE_UNIT),
-    ]),
-    ("Failure diagnosis", True, [
-        Panel("Documents given up after retries (per minute)",
-              "Documents abandoned after repeated unknown status, no-response, or item failures. This explains the "
-              "RETRYABLE_EXHAUSTED portion of the overview's manual-action graph. "
-              "Throttling and temporary target unavailability do not give documents up by themselves.",
-              PER_MINUTE_UNIT, [Rate("bulkDocsGaveUp", "", by="reason", per_min=True)]),
-        Panel("Item errors per second",
-              "Per-document errors returned inside otherwise successful bulk HTTP responses. Retried errors may "
-              "reflect target state; terminal errors were attributed to the document and recorded for manual action. "
-              "CloudWatch aggregates error types into retried and terminal totals and shows zero while healthy bulk "
-              "traffic is present; Grafana retains the per-error-type breakdown.",
-              "errors/s", [
-                  TrafficBackedAggregateRate(
-                      "bulkItemErrors", "{by} (retried)", by="errorType", where={"retryable": "true"},
-                      cw_label="Retried", traffic_metric="bulkAttempts"),
-                  TrafficBackedAggregateRate(
-                      "bulkItemErrors", "{by} (terminal)", by="errorType", where={"retryable": "false"},
-                      cw_label="Terminal", traffic_metric="bulkAttempts"),
-              ],
-              stacked=True, show_bulk_activity=True),
-    ]),
-    ("Flow-control internals (expert)", True, [
+    ("Flow-control internals", True, [
         Panel("Target request detail: first vs retry by outcome",
               "Every bulk HTTP attempt split by first attempt or retry and by the exact internal outcome. Use this "
               "after the grouped overview graph identifies a problem and the distinction between first attempts and "
@@ -1019,7 +1040,7 @@ SECTIONS = [
               "connections", [Gauge("bulkLimit", "", "pod")], grafana_only=True),
         Panel("Adaptive limit state",
               "Mean and highest current worker limit plus the mean threshold separating fast initial growth from "
-              "slower congestion-avoidance growth. Use the operator overview for configured ceiling, utilization "
+              "slower congestion-avoidance growth. Use the migration overview for configured ceiling, utilization "
               "bands, actual in-flight requests, and target-driven cuts.",
               "connections", [Gauge("bulkLimit", "Mean worker", "avg"),
                               Gauge("bulkLimit", "Highest worker", "max"),
@@ -1049,17 +1070,15 @@ SECTIONS = [
 ]
 
 SECTION_HEADERS = {
-    "Operator overview": ["Migration results", "Worker capacity", "Target feedback"],
+    "Migration overview": ["Migration progress", "Worker capacity", "Target feedback"],
 }
 
 READING_GUIDE = (
-    "**Reading the fleet charts.** Compare migration throughput with CPU consumed and memory working set by tier. "
-    "The colored bands show measured usage. The gray band shows how much of each running worker’s limit lies "
-    "above its measured usage, including the full limit of workers awaiting a reading. EC2 cost depends on "
-    "node size and runtime. CloudWatch averages the successful "
-    "fleet snapshots each minute (up to four). An idle fleet reads zero. A gray baseline on "
-    "application charts identifies an idle fleet or zero reported samples while containers were running. "
-    "See RFS/docs/BULK_TRAFFIC_CONTROL.md for pipeline controls.")
+    "**Migration progress.** Source processed includes recorded failures. Failed documents are final outcomes. "
+    "Retries can produce several item errors for one document.  \n"
+    "**Worker resources.** Colored bands show measured usage by tier. Gray fills the remaining container limit, "
+    "including workers awaiting a reading. CloudWatch averages up to four fleet snapshots per minute. An idle "
+    "fleet reads zero. Gray baselines on application charts mark an idle fleet or missing application samples.")
 
 PANEL_W, PANEL_H, COLUMNS = 8, 6, 3
 

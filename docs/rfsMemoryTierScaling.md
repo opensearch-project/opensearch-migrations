@@ -510,7 +510,7 @@ The console includes the following fields when `memoryScaling` is configured.
 
 ### What the fleet used
 
-Read CPU and memory alongside documents migrated per second. Each colored band shows one tier's
+Read CPU and memory alongside source documents processed per second. Each colored band shows one tier's
 CPU consumption in cores or sampled container working set in GiB. The gray band shows the portion
 of running containers’ limits above measured usage. It includes the full limit of any worker whose
 usage reading is missing. A worker measured above its own limit contributes zero to the gray band

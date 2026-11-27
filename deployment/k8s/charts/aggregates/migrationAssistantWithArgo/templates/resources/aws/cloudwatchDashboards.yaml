@@ -41,22 +41,19 @@ spec:
     {{- end }}
     {{- $_ := set $rfs "variables" $variables }}
     {{- $widgets := list }}
-    {{- $skip := false }}
-    {{- $start := 0 }}
-    {{- $height := 0 }}
+    {{- /* Keep the RFS client panels for every target. Compact the grid over the remaining rows. */}}
+    {{- $previousRow := -1 }}
+    {{- $rowY := 0 }}
+    {{- $nextY := 0 }}
     {{- range $rfs.widgets }}
-      {{- $markdown := .properties.markdown | default "" }}
-      {{- if eq $markdown "## Target domain" }}
-        {{- $skip = true }}
-        {{- $start = int .y }}
-      {{- else if and $skip (hasPrefix "## " $markdown) }}
-        {{- $skip = false }}
-        {{- $height = sub (int .y) $start }}
+      {{- if and .properties.metrics (has "AWS/ES" (first .properties.metrics)) }}{{- continue }}{{- end }}
+      {{- if ne $previousRow (int .y) }}
+        {{- $previousRow = int .y }}
+        {{- $rowY = $nextY }}
       {{- end }}
-      {{- if not $skip }}
-        {{- $_ := set . "y" (sub (int .y) $height) }}
-        {{- $widgets = append $widgets . }}
-      {{- end }}
+      {{- $nextY = max $nextY (add $rowY (int .height)) }}
+      {{- $_ := set . "y" $rowY }}
+      {{- $widgets = append $widgets . }}
     {{- end }}
     {{- $_ := set $rfs "widgets" $widgets }}
   {{- end }}

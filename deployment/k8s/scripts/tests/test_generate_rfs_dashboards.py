@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -107,8 +108,8 @@ class GeneratedDashboardTest(unittest.TestCase):
         cloudwatch = self.cloudwatch_widget(title)
         self.assertIsNotNone(cloudwatch)
         self.assertIsNone(self.grafana_panel(title))
-        target_section = next(section for section in dashboard_generator.SECTIONS if section[0] == "Target domain")
-        target_panel = next(panel for panel in target_section[2] if panel.title == title)
+        target_panel = next(panel for _, _, panels in dashboard_generator.SECTIONS for panel in panels
+                            if panel.title == title)
         self.assertIn("inside an HTTP 200", target_panel.desc)
 
     def test_target_indexing_rate_is_the_fleet_total(self):
@@ -119,6 +120,52 @@ class GeneratedDashboardTest(unittest.TestCase):
             if len(row) > 1 and row[0] == "AWS/ES" and row[1] == "IndexingRate"
         )
         self.assertEqual("Sum", indexing_rate[-1]["stat"])
+
+    def test_target_health_starts_with_rfs_observations_for_any_target(self):
+        target_health = next(panels for section, _, panels in dashboard_generator.SECTIONS
+                             if section == "Target health and response")
+        self.assertEqual(
+            ["Bulk request duration seen by RFS (s)", "Target-unavailable document attempts per minute"],
+            [panel.title for panel in target_health if not panel.cw_only],
+        )
+        metrics = self.cloudwatch_widget("Target EBS throttling")["properties"]["metrics"]
+        self.assertEqual([("AWS/ES", "ThroughputThrottle", "Maximum"), ("AWS/ES", "IopsThrottle", "Maximum")],
+                         [(row[0], row[1], row[-1]["stat"]) for row in metrics])
+
+    @unittest.skipUnless(shutil.which("helm"), "requires Helm to render the dashboard")
+    def test_self_managed_target_keeps_all_rfs_widgets(self):
+        rendered = subprocess.check_output([
+            "helm", "template", "verify", str(CHART_DIRECTORY), "--kube-version", "1.35.0",
+            "-f", str(CHART_DIRECTORY / "valuesEks.yaml"),
+            "--set-string", "stageName=verify,aws.region=us-east-2,aws.account=123456789012,aws.eksClusterName=verify",
+            "--set", "metrics.cloudWatch.showManagedTargetDomain=false",
+            "--show-only", "templates/resources/aws/cloudwatchDashboardManifests.yaml",
+        ], text=True)
+        body = re.search(r'dashboardName: "[^"]*-ReindexFromSnapshot"\n\s+dashboardBody: (.+)', rendered)
+        dashboard = json.loads(json.loads(body.group(1)))
+        self.assertNotIn("TC_DOMAIN_NAME", {v["id"] for v in dashboard["variables"]})
+        expected = [w["properties"] for w in self.cloudwatch["widgets"]
+                    if not any(row[0] == "AWS/ES" for row in w["properties"].get("metrics", []))]
+        self.assertEqual([p.get("title") or p["markdown"] for p in expected],
+                         [w["properties"].get("title") or w["properties"]["markdown"] for w in dashboard["widgets"]])
+        bottom = 0
+        for widget in dashboard["widgets"]:
+            self.assertLessEqual(widget["y"], bottom, "Removed domain widgets left an empty row")
+            bottom = max(bottom, widget["y"] + widget["height"])
+
+    def test_retry_limit_breakdown_aggregates_each_reason_under_a_short_label(self):
+        title = "Why documents reached the retry limit (docs/min)"
+        reasons = {"Response timed out": "no_response", "Repeated item error": "item_failures",
+                   "Unexpected HTTP status": "unknown_failures"}
+        _, expressions = self._cw_rows_and_expressions(title)
+        cw = {row["label"]: row["expression"] for row in expressions if row["label"] in reasons}
+        grafana = {t["legendFormat"]: t["expr"] for t in self.grafana_panel(title)["targets"]}
+        self.assertEqual(reasons.keys(), grafana.keys())
+        for label, reason in reasons.items():
+            self.assertIn('SUM(SEARCH(', cw[label])
+            for expr in (cw[label], grafana[label]):
+                self.assertIn("bulkDocsGaveUp", expr)
+                self.assertIn(f'reason="{reason}"', expr)
 
     def test_retry_wait_panels_explain_clean_runs(self):
         title = "Delay between retries for each batch (s)"
@@ -134,12 +181,12 @@ class GeneratedDashboardTest(unittest.TestCase):
 
     def test_grafana_deduplicates_collector_handoffs(self):
         expected = {
-            "Documents migrated per second": "max by (exported_instance) (rate(",
+            "Source documents processed per second": "max by (exported_instance) (rate(",
             "Workers by phase": "max by (exported_instance) (",
             "Adaptive limit by worker": "max by (exported_instance) (",
             "Retry delay breakdown (expert)": "max by (exported_instance,errorClass) (rate(",
-            "Bulk attempt duration (s)": (
-                "sum by (le) (max by (exported_instance,outcome,le) (rate("
+            "Bulk request duration seen by RFS (s)": (
+                "max by (exported_instance,outcome,le) (last_over_time(bulkAttemptDuration_milliseconds_bucket"
             ),
             "Document and bulk request bytes (MiB/s)": "max by (exported_instance) (rate(",
             "Shards completed (cumulative)": "count(max by (exported_instance) (",
@@ -155,13 +202,12 @@ class GeneratedDashboardTest(unittest.TestCase):
     def test_operator_first_layout_and_worker_limit_distribution(self):
         self.assertEqual(
             [
-                "Operator overview",
+                "Migration overview",
                 "Throughput and worker resources",
-                "Pipeline performance diagnosis",
-                "Target domain",
-                "Retry and recovery",
-                "Failure diagnosis",
-                "Flow-control internals (expert)",
+                "Target health and response",
+                "Retries and document failures",
+                "Worker pipeline bottlenecks",
+                "Flow-control internals",
             ],
             [section[0] for section in dashboard_generator.SECTIONS],
         )
@@ -169,21 +215,21 @@ class GeneratedDashboardTest(unittest.TestCase):
         overview = dashboard_generator.SECTIONS[0][2]
         self.assertEqual(
             [
-                "Documents migrated per second",
+                "Source documents processed per second",
                 "Workers by phase",
                 "Target request outcomes (attempts/s)",
-                "Documents requiring manual action (per minute)",
+                "Failed documents per minute",
                 "Workers by connection-limit utilization",
                 "Adaptive-limit cuts per minute (fleet total)",
-                "Documents sent vs migrated per second",
+                "Source progress and target sends (docs/s)",
                 "Requests in flight vs adaptive allowance",
                 "Documents paused for target recovery",
             ],
             [panel.title for panel in overview],
         )
         self.assertEqual(
-            ["Migration results", "Worker capacity", "Target feedback"],
-            dashboard_generator.SECTION_HEADERS["Operator overview"],
+            ["Migration progress", "Worker capacity", "Target feedback"],
+            dashboard_generator.SECTION_HEADERS["Migration overview"],
         )
         self.assertIn("bulkLimitMax", dashboard_generator.METRICS)
         self.assertIn("bulkWorkersByLimitUtilization", dashboard_generator.METRICS)
@@ -208,9 +254,9 @@ class GeneratedDashboardTest(unittest.TestCase):
         )
         self.assertEqual("suffix: attempts/s", outcomes["fieldConfig"]["defaults"]["unit"])
 
-        failures = self.grafana_panel("Documents requiring manual action (per minute)")
+        failures = self.grafana_panel("Failed documents per minute")
         self.assertEqual(
-            ["Cannot be retried", "Retries exhausted"],
+            ["Non-retryable error", "Retry limit reached"],
             [target["legendFormat"] for target in failures["targets"]],
         )
 
@@ -415,6 +461,7 @@ class GeneratedDashboardTest(unittest.TestCase):
         )
 
         target_titles = {
+            "Target EBS throttling",
             "Target indexing rate and write queue",
             "Target CPU and JVM pressure (%)",
             "Target latency and HTTP status codes (all clients)",
@@ -433,10 +480,9 @@ class GeneratedDashboardTest(unittest.TestCase):
             violations.append("CloudWatch is missing native target-domain panels")
         if target_titles & grafana_titles:
             violations.append("Grafana contains CloudWatch-native target-domain panels")
-        if "Target domain" not in cloudwatch_markdown:
-            violations.append("CloudWatch is missing the native Target domain section")
-        if "Target domain" in grafana_titles:
-            violations.append("Grafana contains the CloudWatch-native Target domain section")
+        target_section = "Target health and response"
+        if f"## {target_section}" not in cloudwatch_markdown or target_section not in grafana_titles:
+            violations.append("Target health and response must be visible in both dashboards")
 
         self.assertEqual([], violations)
 
@@ -444,7 +490,7 @@ class GeneratedDashboardTest(unittest.TestCase):
         overview = dashboard_generator.SECTIONS[0][2]
         self.assertEqual(
             [
-                "Documents sent vs migrated per second",
+                "Source progress and target sends (docs/s)",
                 "Requests in flight vs adaptive allowance",
                 "Documents paused for target recovery",
             ],
@@ -476,13 +522,13 @@ class GeneratedDashboardTest(unittest.TestCase):
         }
         self.assertEqual(
             {
-                "Migrated document source",
+                "Processed source bytes",
                 "Uncompressed bulk NDJSON",
                 "Bulk request body sent",
             },
             set(byte_targets),
         )
-        self.assertIn("pipelineBytesMigrated", byte_targets["Migrated document source"])
+        self.assertIn("pipelineBytesMigrated", byte_targets["Processed source bytes"])
         self.assertIn("bulkRequestBytes_bytes_sum", byte_targets["Uncompressed bulk NDJSON"])
         self.assertIn("bulkRequestSentBytes_bytes_sum", byte_targets["Bulk request body sent"])
 
@@ -541,14 +587,14 @@ class GeneratedDashboardTest(unittest.TestCase):
             self.assertNotRegex(expressions, r"SEARCH\('[^}]*,pod[,}]")
 
     def test_cloudwatch_item_errors_use_static_labels_and_a_traffic_backed_zero(self):
-        item_errors = self.cloudwatch_widget("Item errors per second")
+        item_errors = self.cloudwatch_widget("Item errors returned by the target (errors/s)")
         expressions = [
             row[0]
             for row in item_errors["properties"]["metrics"]
             if len(row) == 1 and isinstance(row[0], dict) and row[0].get("visible", True)
             if row[0].get("label") not in ("Fleet idle", "No reported bulk attempts")
         ]
-        self.assertEqual(["Retried", "Terminal"], [expression["label"] for expression in expressions])
+        self.assertEqual(["Retryable", "Non-retryable"], [expression["label"] for expression in expressions])
         self.assertNotIn("${PROP(", str(item_errors))
         for expression in expressions:
             self.assertIn(
@@ -561,15 +607,25 @@ class GeneratedDashboardTest(unittest.TestCase):
             )
             self.assertIn('MetricName="bulkAttempts"', expression["expression"])
 
+    def test_grafana_uses_single_export_request_counts_and_observed_traffic_for_healthy_zeros(self):
+        title = "Item errors returned by the target (errors/s)"
+        for target in self.grafana_panel(title)["targets"]:
+            expr = target["expr"]
+            self.assertIn("last_over_time(bulkItemErrors_count_total", expr)
+            self.assertIn("offset $__rate_interval", expr)
+            self.assertIn("or on() label_replace(0 * (sum(", expr)
+            self.assertIn("last_over_time(bulkAttempts_count_total", expr)
+            self.assertNotIn("or vector(0)", expr)
+
     def test_complex_bulk_panels_use_independent_request_activity(self):
-        for title in ("Item errors per second", "Client preparation and response handling (ms)"):
+        for title in ("Item errors returned by the target (errors/s)", "Client preparation and response handling (ms)"):
             _, expressions = self._cw_rows_and_expressions(title)
             status = next(row for row in expressions if row["label"] == "No reported bulk attempts")
             self.assertIn('MetricName="bulkAttempts"', status["expression"])
             self.assertNotIn("DATAPOINT_COUNT", status["expression"])
 
     def test_documents_sent_panel_uses_request_document_totals(self):
-        title = "Documents sent vs migrated per second"
+        title = "Source progress and target sends (docs/s)"
         cloudwatch = self.cloudwatch_widget(title)
         self.assertIsNotNone(cloudwatch)
         # Attribute-less metrics render as qualifier-agnostic SEARCH expressions now (global view).
@@ -584,7 +640,7 @@ class GeneratedDashboardTest(unittest.TestCase):
         grafana = self.grafana_panel(title)
         self.assertIsNotNone(grafana)
         targets = {target["legendFormat"]: target["expr"] for target in grafana["targets"]}
-        self.assertEqual({"Sent", "Migrated", "Re-sent"}, set(targets))
+        self.assertEqual({"Sent", "Source processed", "Re-sent"}, set(targets))
         self.assertIn("bulkRequestDocuments_count_sum", targets["Sent"])
 
     def test_only_the_worker_chart_exposes_memory_tier_scaling(self):
