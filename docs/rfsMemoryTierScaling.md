@@ -64,11 +64,10 @@ Secondary objectives shaped the design:
 
 ## Design overview
 
-Five cooperating roles:
-
 | Role | Component | Responsibility |
 | --- | --- | --- |
-| Crash witness | sidecar container in each RFS pod | record *why* the main container died (OOM or not) |
+| Supervisor + crash recorder | in-container wrapper script (PID 1 of each RFS container) | relaunch the worker in place (pod stays Ready through recovery); record *why* each launch died |
+| Kernel-OOM witness | monitor (same sweep) | record the one death the supervisor cannot (cgroup group kill), via a pod annotation |
 | Detector + marker | RFS java, startup sweep | find *that* a predecessor died holding work; escalate or recover the item |
 | Work router | RFS java, acquire protocol | exact-tier matching + yield to higher tiers |
 | Scheduler | monitor CronJob | per-sweep fleet sizing, tier activation/reactivation, budget arbitration, terminal status |
@@ -76,16 +75,19 @@ Five cooperating roles:
 
 A shard that OOMs flows through the system like this:
 
-1. Worker holding item `I` at tier `n` is killed (heap OOM → exit 3, or a cgroup OOM kill →
-   137 with kubelet reason `OOMKilled`; a bare 137 such as `kill -9` is NOT OOM evidence).
-   Its lease on `I` survives — hard kills bypass shutdown hooks, and that is the evidence.
-2. The sidecar observes the container termination via a k8s watch on its own pod and appends a
-   verdict record to a shared `emptyDir` file.
-3. kubelet restarts the container in the same pod. The new JVM's startup sweep finds the dirty
-   lease (pod-name prefix, different UUID), reads the verdict file, sees OOM, and executes the
+1. Worker holding item `I` at tier `n` dies of memory: heap/metaspace OOM or a library-raised
+   `OutOfMemoryError` → exit 3 (a bare 137 such as `kill -9` is NOT OOM evidence). Its lease on
+   `I` survives — hard kills bypass shutdown hooks, and that is the evidence.
+2. The supervisor records `<instanceId>=3` and relaunches the worker immediately; the container
+   never exits, so the pod never leaves Ready. (For the rare kernel OOM that kills the whole
+   container, the monitor records `<instanceId>=OOMKilled` on the pod instead and the restarted
+   supervisor waits bounded for that evidence — see "Kernel-OOM witness".)
+3. The new worker's startup sweep finds the dirty lease (pod-name prefix, different instance id),
+   looks its holder up in the predecessor crashes, sees OOM, and executes the
    escalate: `requiredMemoryTier = max(current, n+1)`, lease cleared, lease exponent restored.
 4. The same process (and the rest of the tier-`n` fleet) keeps draining other tier-`n` work.
-   Workers that find no eligible work at their tier exit with distinct non-zero codes and idle.
+   Workers that find no eligible work at their tier exit with distinct non-zero codes; the
+   supervisor sleeps briefly and retries, with the pod Ready and cheap to delete.
 5. The monitor's next sweep sees eligible work at tier `n+1` with no fleet, creates (or scales)
    `<session>-rfs-t<n+1>` from the pre-rendered manifest, and trims idle lower-tier pods to fund
    it — never touching a pod that holds a lease.
@@ -103,7 +105,7 @@ is not supported.
 | Field | Written by | Meaning |
 | --- | --- | --- |
 | `requiredMemoryTier` (int, absent ⇒ 0) | escalation script | minimum fleet tier that may acquire this item |
-| `leaseAcquiredAt` (epoch seconds) | acquire scripts | when the current lease was taken; used to attribute crash verdicts to the right lease |
+| `leaseAcquiredAt` (epoch seconds) | acquire scripts | when the current lease was taken (diagnostics; crash attribution itself is by the holder's instance id, not time) |
 | `leaseAbandoned` (bool, absent ⇒ false) | deliberate-abandon path | lease was left to expire on purpose; the sweep must not treat it as a crash. **Cleared atomically by the next acquisition** (and by the escalation/release scripts) — a sticky flag would permanently mask later hard crashes on the same item |
 
 Successor items inherit the predecessor's `requiredMemoryTier` (the worker creating them passes
@@ -113,29 +115,42 @@ its own tier through).
 
 ### New arguments
 
-Both arrive via the existing `RFS_` env-var injection, set on the Deployment pod template:
+The tier arrives via the existing `RFS_` env-var injection, set on the Deployment pod template;
+the per-launch arguments are passed on the command line by the in-container supervisor
+(`runJavaWithClasspathWithRepeat.sh`), which relaunches the worker JVM in place:
 
 ```
---worker-memory-tier <int>     RFS_WORKER_MEMORY_TIER    default 0
---crash-verdict-file <path>    RFS_CRASH_VERDICT_FILE    default unset → sweep still runs,
-                                                         but every dirty lease is release-only
+--worker-memory-tier <int>        RFS_WORKER_MEMORY_TIER   default 0 (env; also switches the
+                                                           wrapper into its supervised loop)
+--worker-instance-id <id>         per launch, from the supervisor: <containerStartEpoch>-<launchN>.
+                                  The worker id becomes <podName>_<instanceId>, so every lease
+                                  names exactly the launch that held it.
+--predecessor-crashes <id>=<outcome>[,...]
+                                  how recent launches in this container died (exit code, or
+                                  "OOMKilled"); the startup sweep's evidence. Absent → every
+                                  dirty lease is release-only.
+--sweep-only                      run the startup sweep and exit 0 (the supervisor uses this on
+                                  SIGTERM when a crash has not been swept yet)
 ```
 
 ### Exit codes
 
-| Condition | Code | Notes |
+| Condition | Code | Supervisor policy (feature on) |
 | --- | --- | --- |
-| work item completed | 0 | the item is marked complete (`completedAt` stamped — never again acquirable); the wrapper restarts the JVM to take the next item |
-| unhandled error (uncaught exception) | 1 | JVM default, never assigned by RFS code — e.g. startup or connectivity failures |
-| lease timeout (successors created) | 2 | unchanged |
-| heap OOM (`ExitOnOutOfMemoryError`) | 3 | JVM-fixed; now unambiguous |
-| work exists, none eligible for me | 4 | unchanged |
-| non-retriable snapshot read failure | 5 | unchanged (pre-existing; aligned with the metadata command's same code) |
-| no work left anywhere (drained) | 6 | **was 3** — renumbered to free 3 for OOM |
-| own tier over its lease cap | 7 (new) | non-zero on purpose: kubelet backoff paces re-checks, and the waiting container makes the pod not-ready (see § "Culling") |
-| cgroup OOM kill | 137 | SIGKILL — ambiguous alone; only `reason: OOMKilled` makes it OOM evidence |
+| work item completed | 0 | relaunch now (`completedAt` stamped — never again acquirable) |
+| unhandled error (uncaught exception) | 1 | record crash, relaunch (backoff after repeated short-lived crashes) |
+| lease timeout (successors created) | 2 | relaunch now |
+| out of memory | 3 | record as OOM, relaunch now. Heap/metaspace via `-XX:+ExitOnOutOfMemoryError`; an `OutOfMemoryError` raised from library code (e.g. the direct-buffer limit) reaches the same exit through the fatal-error policy (`FatalErrors`: uncaught handler, `Hooks.onErrorDropped`, and the HTTP/retry boundaries — reactive failures travel the onError channel, where a retry operator would otherwise swallow them) |
+| work exists, none eligible for me | 4 | sleep 15–30 s, relaunch |
+| non-retriable snapshot read failure | 5 | record crash, relaunch (pre-existing code; aligned with the metadata command) |
+| no work left anywhere (drained) | 6 | sleep 60–90 s, relaunch. **Was 3** — renumbered to free 3 for OOM |
+| own tier over its lease cap | 7 | sleep 15–30 s, relaunch. The pod stays Ready while it idles; the monitor's pod-deletion-cost, not readiness, marks it as the scale-down victim |
+| non-OOM `java.lang.Error` (LinkageError, AssertionError, …) | 8 (new) | record crash, relaunch. Fail-fast like an OOM, but the sweep must *release*, never escalate — a deterministic non-memory crash must not climb the memory ladder |
+| SIGKILL of the worker | 137 | ambiguous alone; recorded as OOM only when the container cgroup's `oom_kill` counter rose (the non-k8s witness). Under cgroup v2's default `memory.oom.group=1` a kernel OOM kills the supervisor too — see "Kernel-OOM witness" |
 
 Nothing outside the container consumes the old codes, so renumbering is contract-internal.
+With the feature off (`RFS_WORKER_MEMORY_TIER` unset) the wrapper keeps its original behavior:
+relaunch on 0, exit otherwise, kubelet restarts the container.
 
 ### Dirty-lease sweep (startup, before any acquisition)
 
@@ -146,13 +161,12 @@ dirty = search( prefix(leaseHolderId, podName + "_")
                 AND expiration > now
                 AND NOT leaseAbandoned )
 for each dirty lease:
-    verdict = newest verdict-file record with finishedAt >= leaseAcquiredAt - skew
-              (poll up to ~10 s if the file has no covering record yet)
-    if verdict.isOom:
+    outcome = predecessorCrashes[ instanceIdOf(lease.leaseHolderId) ]   # exact, no timestamps
+    if outcome is "3" or "OOMKilled":
         escalate: requiredMemoryTier = max(current, myTier + 1)
                     nextAcquisitionLeaseExponent = acquisitionLeaseExponent   # tier ≠ time
                     expiration = 0; leaseHolderId = null
-    else (non-OOM verdict, or none arrives):
+    else (any other outcome, or holder not in the list):
         release only (same fields cleared, tier untouched)
 ```
 
@@ -162,15 +176,22 @@ Properties:
   hook, uncaught exception — a normal JVM exit runs shutdown hooks) destroys or transfers its
   lease first. Only hard kills (heap OOM bypasses hooks via `os::_exit`, cgroup SIGKILL, JVM
   native crash) leave a live lease behind. First starts and clean restarts find nothing.
+- **Exact attribution.** The lease names its holder as `<podName>_<instanceId>` and the
+  supervisor reports crashes by the same instance id, so classification is a map lookup — no
+  clock comparison, no skew window, no polling, and no way to attach a verdict to the wrong
+  lease.
 - **Conservative default.** No OOM evidence → no tier bump. A real OOM recurs and gets attributed
   on a later round; a transient crash just gets its lease back immediately (an improvement over
   today's wait-for-expiry, and deliberately kept even though crashes are rare).
 - **Idempotent.** The escalation script guards on the observed `leaseHolderId` and no-ops if the
   lease moved; clearing the lease means a second look finds nothing.
 - The `leaseHolderId != myWorkerId` clause is an invariant, not a live filter: the sweep runs
-  before any acquisition and the id's UUID is minted per JVM, so it can never match today. It
-  keeps the sweep safe against its own live lease if it is ever re-run mid-process (the planned
-  in-java acquire loop would do exactly that).
+  before any acquisition and the instance id is minted per launch, so it can never match today.
+  It keeps the sweep safe against its own live lease if it is ever re-run mid-process (the
+  planned in-java acquire loop would do exactly that).
+- **SIGTERM cover.** The worker's shutdown hook finishes a startup sweep that had not completed,
+  and if SIGTERM lands between a crash and the next launch, the supervisor runs one `--sweep-only`
+  worker before exiting — so recorded evidence is never lost to a scale-down.
 - The escalation update is a painless scripted `_update` like every other coordinator mutation —
   version conflicts surface as 409s and retry, consistent with the existing client.
 - The deliberate-abandon path (failed-document-stream flush failure at shutdown,
@@ -272,46 +293,79 @@ exit-0 restart loop) is the companion change that removes the image's last shell
 distroless; with it, yield becomes an in-process capped sleep instead of an exit code. It is not
 required for this feature.
 
-## Sidecar crash witness
+## In-container supervisor
 
-A second ordinary container (native-sidecar semantics are only needed for Jobs) in each RFS pod:
+`runJavaWithClasspathWithRepeat.sh` (PID 1 of the bulk-loader container) becomes a supervisor
+when `RFS_WORKER_MEMORY_TIER` is set: it relaunches the worker JVM in place per the exit-code
+policy table above and **never exits on its own**, so the container keeps running and the pod
+stays Ready while a worker recovers from a crash. That is the load-bearing property: a
+ReplicaSet scale-down ranks victims by readiness *before* pod-deletion-cost, so a pod that
+flipped not-ready at the instant of an OOM would be culled mid-recovery regardless of the
+monitor's annotations. Keeping the pod Ready lets the monitor protect a recovering lease holder
+by assigning it a high deletion cost.
 
-- Watches **its own pod** via the k8s API (Downward-API name/namespace; pod get/watch RBAC the
-  executor SA already has). Event-driven; on its own restart it reconciles from
-  `lastState.terminated` + `restartCount`, so a death it did not witness live is still recorded.
-- Appends one JSONL record per bulk-loader termination to the shared `emptyDir`:
-  `{finishedAt, exitCode, reason, restartCount}`. Verdict: OOM iff **exit 3 or
-  `reason == OOMKilled`** — never bare 137. Exit 3 is the dominant java path:
-  `MaxRAMPercentage=80` clamps heap below the cgroup limit, so the JVM throws and
-  `ExitOnOutOfMemoryError` exits before the kernel is involved. A true cgroup kill (native or
-  direct-buffer growth) reliably carries kubelet's `OOMKilled` reason. Bare 137 is SIGKILL of
-  unknown provenance — `kill -9`, eviction, or the wrapper's own 30 s force-kill — and is treated
-  as non-OOM (release-only). The emptyDir survives container restarts and dies with the pod —
-  exactly the evidence lifetime needed.
-- Holds **no coordinator credentials** and mutates nothing. All coordinator writes stay in the
-  one battle-tested java client. (Sidecar-as-marker was rejected: it would duplicate the
-  scripted-update machinery — script version, retries, clock skew — in python and spread
-  coordinator credentials into more containers.)
-- v1 image: migration console image (has python + k8s client), ~100m CPU / 128–256 Mi requests;
-  a purpose-built slim image can follow if pull size matters.
+Per launch, the supervisor mints `--worker-instance-id <containerStartEpoch>-<launchN>` and
+passes the recent crashes as `--predecessor-crashes` (last 5, `<instanceId>=<exit code or
+OOMKilled>`), giving the sweep its exact-attribution evidence. The worker's own memory flags are
+untouched: heap stays at `MaxRAMPercentage=80`, and no metaspace/direct caps are imposed —
+artificially low caps could force a shard to climb several tiers to satisfy a limit it never
+actually needed, so the design prefers an occasional kernel OOM (witnessed below) over
+miscategorized escalations.
 
-**Timing and the verdict race.** The sidecar's write (kubelet status sync → API server → watch
-event → file append, usually well under a second) races the main container's restart (immediate on
-first failure) plus JVM boot (seconds). The JVM usually loses that race, but nothing guarantees
-it, so the sweep's bounded ~10 s poll is the designed cover — incurred only when a dirty lease
-exists with no covering verdict, i.e. only after an actual hard kill. The miss case is fail-safe
-in the cheap direction: no verdict → release-only, no tier bump; a real OOM recurs and is
-attributed next round (and `lastState` persists until the *next* termination, so a sidecar that
-was down during the crash still records it late). Attribution compares kubelet-clock `finishedAt`
-against coordinator-clock `leaseAcquiredAt` with a skew allowance; in a pathological
-crash→restart→acquire→crash chain inside that window, an OOM verdict can attach to the wrong
-dirty lease — the consequence is one unneeded tier bump for one shard, bounded because
-escalating clears the lease (at most one attribution per dirty lease).
+Two optional environment hooks, both plain files so the script stays environment-agnostic:
 
-Why not in-pod/in-process OOM detection: `lastState` is the API-stable source of the *reason*,
-and the lease table is the race-free source of the *occurrence*. In-JVM hooks
-(`OnOutOfMemoryError=cmd`) fork a shell (not distroless-compatible) and are unreliable under heap
-exhaustion; cgroup group-kill gives no process a chance to write anything.
+- `RFS_STATE_DIR` — a directory that outlives the supervisor but not the pod (an `emptyDir` in
+  k8s). Holds the crash list and an **open-launch ledger** entry written before each launch and
+  closed with its outcome; an open entry at supervisor startup means the whole container died
+  abruptly (the kernel-OOM case).
+- `RFS_CRASH_EVIDENCE_FILE` — a file an outside witness maintains with the same
+  `<instanceId>=<outcome>` entries, merged into the crash list before every launch.
+
+### Kernel-OOM witness (the monitor)
+
+Under cgroup v2's default `memory.oom.group=1` (k8s ≥1.28 behavior, verified empirically), a
+kernel OOM kills **every** process in the container — supervisor included — so no in-container
+code can record it; the kubelet restarts the container and the evidence would die with it. The
+witness is the component that already watches the fleet:
+
+1. The monitor's pod LIST (which it already performs each sweep) carries
+   `lastState.terminated.reason == OOMKilled` with the dead container's `startedAt`/`finishedAt`.
+2. Instance ids begin with the container-start epoch, so the dead holder is simply the dirty
+   lease on that pod whose instance timestamp falls inside the dead container's lifetime
+   (± small skew; same node clock). No tick-over-tick holder tracking.
+3. The monitor patches one pod annotation,
+   `migrations.opensearch.org/rfs-predecessor-crashes: <instanceId>=OOMKilled` (merged,
+   length-capped, idempotent — one small PATCH per actual kernel OOM).
+4. A downward-API volume projects that annotation into the container as the
+   `RFS_CRASH_EVIDENCE_FILE`; the kubelet rewrites the file in place when the annotation changes.
+5. The restarted supervisor finds the open ledger entry with no outcome and **waits bounded**
+   (`RFS_EVIDENCE_WAIT_SECONDS`, default 120 s — one monitor tick plus downward-API propagation)
+   for the file to name that instance before launching, so the first post-OOM sweep escalates
+   instead of releasing blind. The wait ends early the moment the evidence appears; if it never
+   does (e.g. the container was SIGKILLed by something other than the kernel, where no OOMKilled
+   record exists), launching with no evidence is the correct outcome — release at the same tier.
+
+The monitor **still never mutates work items**: there is exactly one writer path for coordinator
+mutations (a worker's startup sweep, in the battle-tested java client). The monitor only
+annotates pods, which it already does for deletion costs. Degradation is safe in both directions:
+monitor down → kernel-OOM items retry at the same tier with growing restart backoff until it
+returns (JVM-raised OOMs — the dominant path, since heap is 80 % of the budget — never involve
+the monitor); evidence late → one same-tier retry, self-correcting because restart backoff grows
+past the witness latency.
+
+Outside k8s (docker/local), there is no monitor: the supervisor's cgroup `oom_kill`-counter check
+on a 137 is the kernel-OOM witness there (single-process kills; without `oom.group` the wrapper
+survives).
+
+**Rejected alternatives.** A per-pod sidecar witness (an earlier draft of this design) writes the
+same evidence with lower latency, but costs an extra container on every one of hundreds of worker
+pods, its own RBAC and image pulls, and still cannot keep the pod Ready through a worker crash —
+the supervisor was needed anyway, at which point the fleet-wide monitor covers the rare kernel-OOM
+case for free. Lowering the supervisor's `oom_score_adj` to −1000 (so it survives the group kill
+and records the evidence itself) works — verified with `CAP_SYS_RESOURCE` granted — but the
+capability is outside the Pod Security "baseline" profile and protecting a process from the OOM
+killer in a memory-stressed container was judged imprudent; it remains possible as a purely
+optional hardening since the write degrades gracefully to a no-op without the capability.
 
 ## Fleet management
 
@@ -338,7 +392,9 @@ arithmetic is the mechanism — and it must exist anyway to express priority:
 
 ```
 per sweep:
-  busy[t]     = pods of tier t named in live leases (read from the coordinator index)
+  busy[t]     = DISTINCT RUNNING pods of tier t named in live leases (a lease whose holder pod
+                is gone or terminating is a GHOST. It still occupies a lease slot, so it is
+                added to the tier's published cap and subtracted from its demand)
   eligible[t] = incomplete items at tier t
   precedence (highest wins when the budget cannot satisfy all three):
     1. busy floor: never set replicas[t] below busy[t] — inviolable
@@ -354,8 +410,14 @@ per sweep:
         patch replicas = busy + kept-idle — in that order, same sweep
   reactivate: eligible work at a tier with no fleet → create its Deployment from the
               pre-rendered manifest (replicas = min(eligible, available budget))
-  bootstrap: level 0 starts at replicas = 1; first sweep after the shard_setup sentinel
-             completes right-sizes to min(eligible, budget)
+  bootstrap: level 0 starts at the FULL pod budget (maxTotalPods) — workers self-coordinate
+             through the coordination index as they always have, and node provisioning overlaps
+             shard setup instead of trailing the first sweep. Until the shard_setup sentinel
+             completes the monitor LAYS OFF entirely (no caps, no trims, no creates): item
+             counts are meaningless before work items exist, and acting on them would cull the
+             fleet mid-setup. The first post-setup sweep right-sizes to min(eligible, budget).
+  metrics: each sweep emits its per-tier truth (cap, desired replicas, busy, ghosts, eligible,
+           waiting) as fleetMonitor-scope gauges through the OTel collector for scheduler investigations
 ```
 
 Rebalancing is **attrition-based**: budget moves to higher tiers only as lower-tier pods actually
@@ -366,13 +428,15 @@ If a tier has no idle pods, the monitor waits — it never deletes a lease-holdi
 
 ReplicaSet downscale victim ranking: unscheduled → pending → **not-ready** → **lower
 pod-deletion-cost** → shorter ready time → more restarts → newer. There is no pluggable policy
-hook. Three things align in this design's favor:
+hook. Because the in-container supervisor keeps every pod Ready — through crashes, OOM recovery,
+and idle sleeps alike — the not-ready rung never differentiates RFS pods, and victim selection
+rests on `pod-deletion-cost`:
 
-1. A yielded/idle worker exits non-zero, so its container sits in restart backoff → the pod is
-   **not-ready**, outranking every busy pod before cost is even consulted.
-2. Idle pods accumulate restarts and have short ready-times — two more criteria in their favor.
-3. The monitor sets `pod-deletion-cost` from lease truth immediately before each scale patch,
-   which closes the one race (a yielded container is momentarily running during its re-check).
+1. The monitor sets `pod-deletion-cost` from lease truth (busy high, idle low, only values that
+   changed) immediately before each scale patch, with a short pause so the ReplicaSet's cache
+   sees the costs before choosing victims.
+2. An idle (over-cap / no-work) worker is a sleeping supervisor, not a crash-looping container —
+   its pod stays Ready with a low deletion cost, so it is exactly the pod a scale-down takes.
 
 Residual race: a pod judged idle grabs work in the instant before deletion → SIGTERM → existing
 clean-shutdown hook checkpoints or releases → cost ≈ one lease round-trip. The inverse
@@ -389,9 +453,10 @@ net; one delayed retry, no lost work. To make the overrun rare, RFS pods set
 flush is bounded at 5 min, so e.g. 390 s), and the wrapper's internal 30 s SIGKILL fallback rises
 to match.
 
-Known lag: a yielded pod the monitor keeps re-checks at backoff cadence (≤5 min cap), so
-lower-tier resumption after a higher tier claims its items can trail by a few minutes. Acceptable
-at sweep granularity; the in-java acquire loop removes it later.
+Known lag: a yielded pod the monitor keeps re-checks at the supervisor's idle cadence (15–30 s
+sleeps for over-cap/no-work, 60–90 s when the queue looks drained), so lower-tier resumption
+after a higher tier claims its items can trail by under a minute. Acceptable at sweep
+granularity; the in-java acquire loop removes it later.
 
 ## Orchestration
 
@@ -499,7 +564,7 @@ sequenceDiagram
     participant W as Workflow (RfsBackfill)
     participant SM as SnapshotMigration CR
     participant M as rfs-monitor CronJob
-    participant T0 as tier-0 pod (bulk-loader + crash-witness)
+    participant T0 as tier-0 pod (supervised bulk-loader)
     participant C as coordinator index
     participant T1 as tier-1 pod
 
@@ -508,16 +573,16 @@ sequenceDiagram
     W->>SM: wait on status.phase
     Note over W: workflow is now passive until the terminal commit
 
-    T0->>C: acquire heavy shard (lease, leaseAcquiredAt)
+    T0->>C: acquire heavy shard (lease names <pod>_<instanceId>)
     Note over T0: heap OOM → JVM exits 3 (lease left live)
-    T0->>T0: crash-witness appends verdict (exit 3)<br/>kubelet restarts bulk-loader in place
-    T0->>C: startup sweep: dirty lease + OOM verdict<br/>escalate: requiredMemoryTier = 1, lease cleared
+    T0->>T0: supervisor records instanceId=3,<br/>relaunches the worker — pod stays Ready
+    T0->>C: startup sweep: dirty lease + OOM evidence<br/>escalate: requiredMemoryTier = 1, lease cleared
     T0->>C: keeps draining other tier-0 work
 
     M->>C: sweep: eligible tier-1 work, no tier-1 fleet
     M->>C: write caps {0: n-1, 1: 1}
     M->>T1: create SESSION-rfs-t1 from ConfigMap manifest
-    Note over T0: a tier-0 worker finishing its item sees its tier<br/>over cap → exits 7 → pod not-ready → trimmed by monitor
+    Note over T0: a tier-0 worker finishing its item sees its tier over cap<br/>→ exit 7 → supervisor sleeps, pod Ready at low deletion cost<br/>→ monitor's scale patch trims exactly that pod
 
     T1->>C: acquire the escalated shard (exact tier match)
     T1->>C: complete work item
@@ -590,85 +655,85 @@ New fields appear **only when `memoryScaling` is configured**:
 
 ## Metrics and dashboards
 
-Four signal sources already exist; dashboards compose them rather than inventing a new pipeline:
+### What the fleet used
 
-1. **Worker OTel metrics** — scraped into Prometheus and CloudWatch through the shared panel
-   generator (`deployment/k8s/scripts/generate-rfs-dashboards.py`), scopes `documentMigration`
-   (e.g. `rfsWorkerPhase`) and `workCoordination` (`nextWorkAssignedCount`,
-   `noNextWorkAvailableCount`). The tier dimension comes for free: tier pods are named
-   `<session>-rfs-t<n>-…`, so Prometheus derives a `tier` label from `exported_instance` with
-   `label_replace` — no new worker-side attribute needed.
-2. **The coordination index** — the same aggregations the census and console run (group by
-   `requiredMemoryTier` with `"missing": 0`) answer most fleet questions directly, and
-   `requiredMemoryTier` survives completion, so the index is also the retrospective record.
-3. **Monitor sweep logs** — every sweep logs its full input and output as one-line JSON
-   (`Sweep input: {…}`, `Allocation: {…}`): per-tier eligible/waiting/busy, caps, replicas,
-   creates, and the deletion-cost map it set. Consecutive sweeps are a time series.
-4. **k8s via the tier label** — per-tier replicas/ready counts from kube-state-metrics or the
-   API, selected on `migrations.opensearch.org/rfs-memory-tier`.
+Read CPU and memory alongside documents migrated per second. Each colored band shows one tier's
+CPU consumption in cores or sampled container working set in GiB. The gray band shows the portion
+of running containers’ limits above measured usage. It includes the full limit of any worker whose
+usage reading is missing. A worker measured above its own limit contributes zero to the gray band
+and its full measured usage to its tier. A pending worker starts contributing once its bulk-loader
+container runs. Workers from different migrations can have different limits at the same
+tier, so each running worker contributes its own configured limit. Workers without memory scaling
+contribute to tier 0.
 
-Note the crash-witness JSONL is **not** a dashboard source: it lives in the pod's `emptyDir` and
-dies with the pod, which is fine for its one consumer (the next container in the same pod).
+CPU requests influence placement. EC2 cost depends on which nodes run and for how long. On the
+memory chart, a large gray band can coexist with an OOM in one worker. Grafana's hottest-pod
+panels compare each running pod with its own limit. Working-set samples can miss a brief peak.
+Use the OOM evidence and the shard's `requiredMemoryTier` to investigate an escalation.
 
-### Tier build-up
+On EKS the resource sampler lists running bulk-loader containers every 15 seconds and reads CPU
+and working set from the kubelets hosting them. It matches the pod UID, container, and sample time
+before summing by tier. CloudWatch plots the mean of each minute’s successful censuses. A worker
+observed during one of four censuses contributes one quarter of that observation to the minute.
+An empty census contributes zero. During partial coverage the colored bands sum only the workers
+with fresh readings. A failed pod list contributes no observation. The sampling panel shows how
+many censuses succeeded and how many workers were awaiting each measurement. Resource series begin
+at rollout, and new tiers appear when first observed. For a self-managed target, set
+`metrics.cloudWatch.showManagedTargetDomain` to `false` to hide the managed-service panels.
 
-- **Fleet composition by tier** (stacked, over time): running pods per tier from source 4, or
-  non-exited `rfsWorkerPhase` grouped by the derived `tier` label. This is the headline "budget
-  migrating upward" picture.
-- **Cap vs busy vs replicas per tier**: the three lines whose convergence *is* the algorithm —
-  cap lowered → busy drains to cap at item boundaries → replicas patched down. From sweep logs
-  today; the console's `memory_scaling.active` carries the same `{tier, replicas, busy}` for
-  point-in-time checks.
-- **Work census by tier** (stacked): waiting / leased / awaiting-memory / complete, from source 2.
-  `shard_awaiting_memory > 0` at the top tier is the approach-to-`Failed` signal and the one
-  number worth alerting on.
-- **Escalation record**: a terms agg over *all* items (not just incomplete) gives "shards that
-  ended up needing tier n"; its change over time is the escalation rate. A healthy run shows a
-  steep drop-off per tier; a flat distribution means `growthFactor` is too small.
-- **Tier sizing check**: the existing `bulkWorkersByLimitUtilization` panels split by the derived
-  `tier` label show whether escalated pods actually use their larger limit — a tier-1 fleet
-  cruising at 25 % says the growth factor overshoots.
+### Investigating a move to a higher tier
+
+**Workers by memory tier** shows how many running workers used each tier. It sits next to fleet memory
+in **Throughput and worker resources**. A run that stays at its starting size uses only tier 0.
+
+For a run that climbs the ladder, `workItemsEscalated` counts applied moves by destination tier.
+One item can move several times. The applied-action logs identify the items and can reconcile counts
+when a worker or collector exits before export. The coordination index retains the resulting
+`requiredMemoryTier` on each completed item.
+
+For the scheduler's view, inspect the `fleetMonitor` events in the `rfs-tier` stream of the
+`/metrics/OpenSearchMigrations` log group. `tierEligibleItems` includes waiting and in-progress items.
+Use the latest check per migration and tier in each minute when comparing counts. The sweep log
+also records busy workers, lease caps and requested replicas. The workflow records final completion.
 
 ### Validating "Culling the right pod"
 
-The decision to trust not-ready ranking + `pod-deletion-cost` (both preferences, not contracts)
-is checkable because the monitor already holds both sides of the truth — leases and pods:
+The decision to trust `pod-deletion-cost` ranking (a preference, not a contract) is checkable
+because the monitor already holds both sides of the truth — leases and pods:
 
 - **Busy-cull count — the metric that must stay ~0.** A pod that was in the busy set (named in a
   live lease) and is gone from the pod list one sweep later, without its item completing, was
   culled while working. Derivable today by joining consecutive sweep logs with the ReplicaSet's
-  `SuccessfulDelete` events (which distinguish culls from crashes); *small addition*: the sweep
-  computes this join itself and logs `busyCulled: {tier: [pod]}`, since both inputs are already
-  in hand. Nonzero means both ranking criteria missed — pull the deletion-cost map from the same
-  sweep's log to see whether the annotation was wrong or merely outranked.
+  `SuccessfulDelete` events (which distinguish culls from crashes). For a nonzero count, check
+  the deletion-cost map in the same sweep's log to see which costs the monitor assigned.
 - **Cull cost when it does happen**: for a culled pod's item, the gap between the cull and the
   item's next `leaseAcquiredAt`. Roughly zero means the clean-shutdown hook released the lease
   (the designed degradation — one round-trip); a gap near the remaining lease duration means the
   shutdown overran its 390 s grace and the lease expired naturally — the signal to revisit the
   grace budget.
-- **Attrition latency**: sweeps elapsed from a cap lowering to `replicas == desired` on that
-  tier. Long tails here are long *shards*, not scheduler bugs — but the panel is what proves
-  that claim.
-
-New worker-side counters (e.g. an explicit per-tier escalation counter in the `workCoordination`
-scope) are deliberately deferred: everything above is observable from existing sources, and any
-later addition goes through the `METRICS`/`PANELS` tables in `generate-rfs-dashboards.py` so
-Grafana and CloudWatch stay in lockstep.
+- **Attrition latency** measures the sweeps from a cap reduction until `replicas == desired` on
+  that tier. Compare the sweep logs with the live leases to see which shards held workers busy.
 
 ## Testing
 
-- **Unit (java):** sweep classification table (every exit path × dirty/clean lease × verdict
-  present/absent/OOM/non-OOM); escalation script guards and idempotence; acquire protocol
-  decision table (drain / yield / acquire / idle); tier inheritance on successors; exit codes.
+- **Unit (java):** sweep classification table (predecessor outcome × escalate/release, including
+  bare 137, exit 8, and holder-not-reported); crash-list parsing; fatal-error policy (OOME
+  anywhere in a cause chain → 3, other Errors → 8, exceptions pass through); escalation script
+  guards and idempotence; acquire protocol decision table (drain / yield / acquire / idle); tier
+  inheritance on successors; exit codes.
+- **Supervisor (shell, against the real image):** exit-code policy matrix, crash-list trimming
+  and per-launch CLI args, ledger persistence across a simulated group kill, bounded evidence
+  wait with early exit, sweep-only on SIGTERM, feature-off loop unchanged.
 - **Unit (console):** new classification buckets; gating (feature-off output byte-identical);
   terminal rollup aggregation.
-- **Templates (jest, orchestrationSpecs):** per-tier manifest rendering, tier-table computation
-  and clamping, feature-off no-op.
+- **Templates (jest, orchestrationSpecs):** per-tier manifest rendering (state/evidence volumes,
+  no sidecar), tier-table computation and clamping, monitor arithmetic fixtures (allocation,
+  ghost leases, deletion costs, kernel-OOM witness matching), feature-off no-op.
 - **Integration:** LocalStack/k8s test that migrates a snapshot containing one shard whose
-  documents exceed a deliberately tiny tier-0 memory limit; assert the OOM verdict, escalation,
-  tier-1 fleet creation, completion, and status JSON shape. A second variant with a non-OOM
-  crash (kill -9 the worker, producing exit 137 *without* an `OOMKilled` reason — deliberately
-  not OOM evidence under the verdict rule) asserting *no* tier bump and immediate lease recovery.
+  documents exceed a deliberately tiny tier-0 memory limit; assert the escalation, tier-1 fleet
+  creation, completion, and status JSON shape. A second variant with a non-OOM crash (kill -9
+  the worker, producing exit 137 without a rise in the cgroup's oom_kill counter — deliberately
+  not OOM evidence) asserting *no* tier bump and immediate lease recovery.
 
 ## Future work (deliberately out of v1)
 
@@ -677,10 +742,11 @@ Grafana and CloudWatch stay in lockstep.
   floor plus greedy tier-descending budget already covers chain continuity.
 - **Live `maxTotalPods` override.** Today the budget is a config value; surfacing a runtime
   override through the monitor (so `backfill scale` could work again) is future work.
-- **In-java acquire loop** (end of "Acquire protocol"): removes the shell restart wrapper and
-  turns yield into an in-process capped sleep; also removes the yielded-pod resumption lag.
+- **In-java acquire loop** (end of "Acquire protocol"): folds the supervisor's relaunch loop into
+  the JVM (one process takes item after item) and turns yield into an in-process capped sleep;
+  also removes the yielded-pod resumption lag. The shell supervisor must remain for crash
+  isolation — a JVM that OOMed cannot be trusted to continue — but would launch far less often.
 - **Escalation-storm guard**: alert (or pause further tier activation) when > N% of remaining
   shards escalate within one tier — that pattern smells like a leak, not fat shards.
-- **Explicit `busyCulled` sweep log line and per-tier OTel counters** ("Metrics and
-  dashboards"): today derivable from existing sources; add only if operating experience wants
-  them first-class.
+- **Explicit `busyCulled` sweep log line.** Operators can reconstruct a busy cull from sweep logs
+  and Kubernetes deletion events. A dedicated event would make that investigation faster.
