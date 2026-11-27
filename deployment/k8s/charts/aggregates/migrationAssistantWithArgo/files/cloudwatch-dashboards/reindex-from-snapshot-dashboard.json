@@ -1,4 +1,5 @@
 {
+    "periodOverride": "inherit",
     "variables": [
         {
             "type": "property",
@@ -38,7 +39,7 @@
             "width": 24,
             "height": 2,
             "properties": {
-                "markdown": "**How to read this dashboard.** The first section is aligned into three vertical stories: migration results, worker capacity, and target feedback. Read across a row to explain a rate change, then down a column for detail. The second section shows throughput and request shape; later sections are diagnosis and controller internals. Rates are fleet totals unless marked otherwise. CloudWatch fleet gauges are one-minute averages, so worker counts can be fractional during transitions. The controls are specified in RFS/docs/BULK_TRAFFIC_CONTROL.md.",
+                "markdown": "**Reading the fleet charts.** Compare migration throughput with CPU consumed and memory working set by tier. The colored bands show measured usage. The gray band shows how much of each running worker’s limit lies above its measured usage, including the full limit of workers awaiting a reading. EC2 cost depends on node size and runtime. CloudWatch averages four fleet snapshots per minute. An idle fleet reads zero. A gray baseline on application charts identifies an idle fleet or zero reported samples while containers were running. See RFS/docs/BULK_TRAFFIC_CONTROL.md for pipeline controls.",
                 "background": "transparent"
             }
         },
@@ -186,6 +187,35 @@
                             "visible": true,
                             "region": "REGION"
                         }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetWorkers\" namespace=\"placeholder-namespace\"', 'Sum', 60))",
+                            "label": "",
+                            "id": "e6",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF(FILL(e6, -1) == 0, 0)",
+                            "label": "Fleet idle",
+                            "id": "e7",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#879596"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF((FILL(e6, -1) > 0) AND (FILL(DATAPOINT_COUNT([e1,e2,e3,e4,e5]), 0) == 0), 0)",
+                            "label": "Zero reported samples",
+                            "id": "e8",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#60676D"
+                        }
                     ]
                 ],
                 "yAxis": {
@@ -213,7 +243,7 @@
                 "metrics": [
                     [
                         {
-                            "expression": "(SUM(SEARCH('{OpenSearchMigrations,OTelLib,attempt,outcome,qualifier} MetricName=\"bulkAttempts\" OTelLib=\"documentMigration\" outcome=\"ok\" attempt=\"first\"', 'Sum', 60))) / 60",
+                            "expression": "(SUM(SEARCH('{OpenSearchMigrations,OTelLib,attempt,outcome,qualifier} MetricName=\"bulkAttempts\" OTelLib=\"documentMigration\" outcome=\"ok\" attempt=\"first\"', 'Sum', 60)) + 0 * SUM(SEARCH('{OpenSearchMigrations,OTelLib,phase,tier,qualifier} MetricName=\"rfsWorkerPhase\" OTelLib=\"documentMigration\"', 'SampleCount', 60))) / 60",
                             "label": "Accepted first try",
                             "id": "e1",
                             "visible": true,
@@ -222,7 +252,7 @@
                     ],
                     [
                         {
-                            "expression": "(SUM(SEARCH('{OpenSearchMigrations,OTelLib,attempt,outcome,qualifier} MetricName=\"bulkAttempts\" OTelLib=\"documentMigration\" outcome=\"ok\" attempt=\"retry\"', 'Sum', 60))) / 60",
+                            "expression": "(SUM(SEARCH('{OpenSearchMigrations,OTelLib,attempt,outcome,qualifier} MetricName=\"bulkAttempts\" OTelLib=\"documentMigration\" outcome=\"ok\" attempt=\"retry\"', 'Sum', 60)) + 0 * SUM(SEARCH('{OpenSearchMigrations,OTelLib,phase,tier,qualifier} MetricName=\"rfsWorkerPhase\" OTelLib=\"documentMigration\"', 'SampleCount', 60))) / 60",
                             "label": "Accepted after retry",
                             "id": "e2",
                             "visible": true,
@@ -231,7 +261,7 @@
                     ],
                     [
                         {
-                            "expression": "(SUM(SEARCH('{OpenSearchMigrations,OTelLib,attempt,outcome,qualifier} MetricName=\"bulkAttempts\" OTelLib=\"documentMigration\" outcome=\"item_errors\"', 'Sum', 60))) / 60",
+                            "expression": "(SUM(SEARCH('{OpenSearchMigrations,OTelLib,attempt,outcome,qualifier} MetricName=\"bulkAttempts\" OTelLib=\"documentMigration\" outcome=\"item_errors\"', 'Sum', 60)) + 0 * SUM(SEARCH('{OpenSearchMigrations,OTelLib,phase,tier,qualifier} MetricName=\"rfsWorkerPhase\" OTelLib=\"documentMigration\"', 'SampleCount', 60))) / 60",
                             "label": "Response had item errors",
                             "id": "e3",
                             "visible": true,
@@ -240,7 +270,7 @@
                     ],
                     [
                         {
-                            "expression": "(SUM(SEARCH('{OpenSearchMigrations,OTelLib,attempt,outcome,qualifier} MetricName=\"bulkAttempts\" OTelLib=\"documentMigration\" outcome=\"throttled_429\"', 'Sum', 60)) + SUM(SEARCH('{OpenSearchMigrations,OTelLib,attempt,outcome,qualifier} MetricName=\"bulkAttempts\" OTelLib=\"documentMigration\" outcome=\"admission_rejected\"', 'Sum', 60))) / 60",
+                            "expression": "(SUM(SEARCH('{OpenSearchMigrations,OTelLib,attempt,outcome,qualifier} MetricName=\"bulkAttempts\" OTelLib=\"documentMigration\" outcome=\"throttled_429\"', 'Sum', 60)) + SUM(SEARCH('{OpenSearchMigrations,OTelLib,attempt,outcome,qualifier} MetricName=\"bulkAttempts\" OTelLib=\"documentMigration\" outcome=\"admission_rejected\"', 'Sum', 60)) + 0 * SUM(SEARCH('{OpenSearchMigrations,OTelLib,phase,tier,qualifier} MetricName=\"rfsWorkerPhase\" OTelLib=\"documentMigration\"', 'SampleCount', 60))) / 60",
                             "label": "Target throttled",
                             "id": "e4",
                             "visible": true,
@@ -249,7 +279,7 @@
                     ],
                     [
                         {
-                            "expression": "(SUM(SEARCH('{OpenSearchMigrations,OTelLib,attempt,outcome,qualifier} MetricName=\"bulkAttempts\" OTelLib=\"documentMigration\" outcome=\"timeout\"', 'Sum', 60)) + SUM(SEARCH('{OpenSearchMigrations,OTelLib,attempt,outcome,qualifier} MetricName=\"bulkAttempts\" OTelLib=\"documentMigration\" outcome=\"connection_reset\"', 'Sum', 60)) + SUM(SEARCH('{OpenSearchMigrations,OTelLib,attempt,outcome,qualifier} MetricName=\"bulkAttempts\" OTelLib=\"documentMigration\" outcome=\"connect_failed\"', 'Sum', 60))) / 60",
+                            "expression": "(SUM(SEARCH('{OpenSearchMigrations,OTelLib,attempt,outcome,qualifier} MetricName=\"bulkAttempts\" OTelLib=\"documentMigration\" outcome=\"timeout\"', 'Sum', 60)) + SUM(SEARCH('{OpenSearchMigrations,OTelLib,attempt,outcome,qualifier} MetricName=\"bulkAttempts\" OTelLib=\"documentMigration\" outcome=\"connection_reset\"', 'Sum', 60)) + SUM(SEARCH('{OpenSearchMigrations,OTelLib,attempt,outcome,qualifier} MetricName=\"bulkAttempts\" OTelLib=\"documentMigration\" outcome=\"connect_failed\"', 'Sum', 60)) + 0 * SUM(SEARCH('{OpenSearchMigrations,OTelLib,phase,tier,qualifier} MetricName=\"rfsWorkerPhase\" OTelLib=\"documentMigration\"', 'SampleCount', 60))) / 60",
                             "label": "No response",
                             "id": "e5",
                             "visible": true,
@@ -258,11 +288,40 @@
                     ],
                     [
                         {
-                            "expression": "(SUM(SEARCH('{OpenSearchMigrations,OTelLib,attempt,outcome,qualifier} MetricName=\"bulkAttempts\" OTelLib=\"documentMigration\" outcome=\"payload_413\"', 'Sum', 60)) + SUM(SEARCH('{OpenSearchMigrations,OTelLib,attempt,outcome,qualifier} MetricName=\"bulkAttempts\" OTelLib=\"documentMigration\" outcome=\"other_4xx\"', 'Sum', 60)) + SUM(SEARCH('{OpenSearchMigrations,OTelLib,attempt,outcome,qualifier} MetricName=\"bulkAttempts\" OTelLib=\"documentMigration\" outcome=\"5xx\"', 'Sum', 60)) + SUM(SEARCH('{OpenSearchMigrations,OTelLib,attempt,outcome,qualifier} MetricName=\"bulkAttempts\" OTelLib=\"documentMigration\" outcome=\"other_status\"', 'Sum', 60))) / 60",
+                            "expression": "(SUM(SEARCH('{OpenSearchMigrations,OTelLib,attempt,outcome,qualifier} MetricName=\"bulkAttempts\" OTelLib=\"documentMigration\" outcome=\"payload_413\"', 'Sum', 60)) + SUM(SEARCH('{OpenSearchMigrations,OTelLib,attempt,outcome,qualifier} MetricName=\"bulkAttempts\" OTelLib=\"documentMigration\" outcome=\"other_4xx\"', 'Sum', 60)) + SUM(SEARCH('{OpenSearchMigrations,OTelLib,attempt,outcome,qualifier} MetricName=\"bulkAttempts\" OTelLib=\"documentMigration\" outcome=\"5xx\"', 'Sum', 60)) + SUM(SEARCH('{OpenSearchMigrations,OTelLib,attempt,outcome,qualifier} MetricName=\"bulkAttempts\" OTelLib=\"documentMigration\" outcome=\"other_status\"', 'Sum', 60)) + 0 * SUM(SEARCH('{OpenSearchMigrations,OTelLib,phase,tier,qualifier} MetricName=\"rfsWorkerPhase\" OTelLib=\"documentMigration\"', 'SampleCount', 60))) / 60",
                             "label": "Other errors",
                             "id": "e6",
                             "visible": true,
                             "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetWorkers\" namespace=\"placeholder-namespace\"', 'Sum', 60))",
+                            "label": "",
+                            "id": "e7",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF(FILL(e7, -1) == 0, 0)",
+                            "label": "Fleet idle",
+                            "id": "e8",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#879596"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF((FILL(e7, -1) > 0) AND (FILL(SUM(SEARCH('{OpenSearchMigrations,OTelLib,phase,tier,qualifier} MetricName=\"rfsWorkerPhase\" OTelLib=\"documentMigration\"', 'SampleCount', 60)), 0) == 0), 0)",
+                            "label": "Zero reported samples",
+                            "id": "e9",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#60676D"
                         }
                     ]
                 ],
@@ -305,6 +364,35 @@
                             "id": "e2",
                             "visible": true,
                             "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetWorkers\" namespace=\"placeholder-namespace\"', 'Sum', 60))",
+                            "label": "",
+                            "id": "e3",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF(FILL(e3, -1) == 0, 0)",
+                            "label": "Fleet idle",
+                            "id": "e4",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#879596"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF((FILL(e3, -1) > 0) AND (FILL(DATAPOINT_COUNT([e1,e2]), 0) == 0), 0)",
+                            "label": "Zero reported samples",
+                            "id": "e5",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#60676D"
                         }
                     ]
                 ],
@@ -375,6 +463,35 @@
                             "visible": true,
                             "region": "REGION"
                         }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetWorkers\" namespace=\"placeholder-namespace\"', 'Sum', 60))",
+                            "label": "",
+                            "id": "e6",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF(FILL(e6, -1) == 0, 0)",
+                            "label": "Fleet idle",
+                            "id": "e7",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#879596"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF((FILL(e6, -1) > 0) AND (FILL(DATAPOINT_COUNT([e1,e2,e3,e4,e5]), 0) == 0), 0)",
+                            "label": "Zero reported samples",
+                            "id": "e8",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#60676D"
+                        }
                     ]
                 ],
                 "yAxis": {
@@ -425,6 +542,35 @@
                             "id": "e3",
                             "visible": true,
                             "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetWorkers\" namespace=\"placeholder-namespace\"', 'Sum', 60))",
+                            "label": "",
+                            "id": "e4",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF(FILL(e4, -1) == 0, 0)",
+                            "label": "Fleet idle",
+                            "id": "e5",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#879596"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF((FILL(e4, -1) > 0) AND (FILL(DATAPOINT_COUNT([e1,e2,e3]), 0) == 0), 0)",
+                            "label": "Zero reported samples",
+                            "id": "e6",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#60676D"
                         }
                     ]
                 ],
@@ -600,6 +746,35 @@
                             "visible": true,
                             "region": "REGION"
                         }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetWorkers\" namespace=\"placeholder-namespace\"', 'Sum', 60))",
+                            "label": "",
+                            "id": "e9",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF(FILL(e9, -1) == 0, 0)",
+                            "label": "Fleet idle",
+                            "id": "e10",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#879596"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF((FILL(e9, -1) > 0) AND (FILL(DATAPOINT_COUNT([e2,e4,e6,e8]), 0) == 0), 0)",
+                            "label": "Zero reported samples",
+                            "id": "e11",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#60676D"
+                        }
                     ]
                 ],
                 "yAxis": {
@@ -642,6 +817,35 @@
                             "visible": true,
                             "region": "REGION"
                         }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetWorkers\" namespace=\"placeholder-namespace\"', 'Sum', 60))",
+                            "label": "",
+                            "id": "e3",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF(FILL(e3, -1) == 0, 0)",
+                            "label": "Fleet idle",
+                            "id": "e4",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#879596"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF((FILL(e3, -1) > 0) AND (FILL(DATAPOINT_COUNT([e2]), 0) == 0), 0)",
+                            "label": "Zero reported samples",
+                            "id": "e5",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#60676D"
+                        }
                     ]
                 ],
                 "yAxis": {
@@ -660,47 +864,14 @@
             "width": 24,
             "height": 1,
             "properties": {
-                "markdown": "## Throughput and request shape",
-                "background": "transparent"
-            }
-        },
-        {
-            "type": "text",
-            "x": 0,
-            "y": 23,
-            "width": 8,
-            "height": 1,
-            "properties": {
-                "markdown": "### Migration volume",
-                "background": "transparent"
-            }
-        },
-        {
-            "type": "text",
-            "x": 8,
-            "y": 23,
-            "width": 8,
-            "height": 1,
-            "properties": {
-                "markdown": "### Worker resources",
-                "background": "transparent"
-            }
-        },
-        {
-            "type": "text",
-            "x": 16,
-            "y": 23,
-            "width": 8,
-            "height": 1,
-            "properties": {
-                "markdown": "### Request shape",
+                "markdown": "## Throughput and worker resources",
                 "background": "transparent"
             }
         },
         {
             "type": "metric",
             "x": 0,
-            "y": 24,
+            "y": 23,
             "width": 8,
             "height": 6,
             "properties": {
@@ -778,7 +949,7 @@
         {
             "type": "metric",
             "x": 8,
-            "y": 24,
+            "y": 23,
             "width": 8,
             "height": 6,
             "properties": {
@@ -791,74 +962,11 @@
                 "metrics": [
                     [
                         "OpenSearchMigrations",
-                        "kube_pod_container_status_running",
-                        "container",
-                        "bulk-loader",
+                        "rfsFleetCensusSamples",
                         "namespace",
-                        "ma",
-                        "tier",
-                        "0",
+                        "placeholder-namespace",
                         {
                             "id": "m1",
-                            "stat": "Average",
-                            "visible": false,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        "OpenSearchMigrations",
-                        "kube_pod_container_info",
-                        "container",
-                        "bulk-loader",
-                        "namespace",
-                        "ma",
-                        "tier",
-                        "0",
-                        {
-                            "id": "m2",
-                            "stat": "Average",
-                            "visible": false,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        "OpenSearchMigrations",
-                        "kube_pod_container_resource_limits",
-                        "container",
-                        "bulk-loader",
-                        "namespace",
-                        "ma",
-                        "tier",
-                        "0",
-                        "resource",
-                        "cpu",
-                        {
-                            "id": "m3",
-                            "stat": "Average",
-                            "visible": false,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "IF(m2 > 0, m1 * m3 / m2 / 1)",
-                            "label": "",
-                            "id": "e4",
-                            "visible": false,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        "OpenSearchMigrations",
-                        "container_cpu_usage_seconds_by_tier",
-                        "container",
-                        "bulk-loader",
-                        "namespace",
-                        "ma",
-                        "tier",
-                        "0",
-                        {
-                            "id": "m5",
                             "stat": "Sum",
                             "visible": false,
                             "region": "REGION"
@@ -866,92 +974,98 @@
                     ],
                     [
                         {
-                            "expression": "m5 / PERIOD(m5)",
-                            "label": "tier 0 used",
+                            "expression": "FILL(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetCpuUsed\" namespace=\"placeholder-namespace\" NOT (tier=\"0\" OR tier=\"1\" OR tier=\"2\" OR tier=\"3\" OR tier=\"4\" OR tier=\"5\" OR tier=\"6\" OR tier=\"7\" OR tier=\"8\" OR tier=\"9\")', 'Sum', 60), IF(m1 > 0, 0))",
+                            "label": "tier ${PROP('Dim.tier')}",
+                            "id": "e2",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "FILL(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetCpuUsed\" namespace=\"placeholder-namespace\" tier=\"9\"', 'Sum', 60), IF(m1 > 0, 0))",
+                            "label": "tier ${PROP('Dim.tier')}",
+                            "id": "e3",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "FILL(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetCpuUsed\" namespace=\"placeholder-namespace\" tier=\"8\"', 'Sum', 60), IF(m1 > 0, 0))",
+                            "label": "tier ${PROP('Dim.tier')}",
+                            "id": "e4",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "FILL(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetCpuUsed\" namespace=\"placeholder-namespace\" tier=\"7\"', 'Sum', 60), IF(m1 > 0, 0))",
+                            "label": "tier ${PROP('Dim.tier')}",
+                            "id": "e5",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "FILL(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetCpuUsed\" namespace=\"placeholder-namespace\" tier=\"6\"', 'Sum', 60), IF(m1 > 0, 0))",
+                            "label": "tier ${PROP('Dim.tier')}",
                             "id": "e6",
                             "visible": true,
                             "region": "REGION"
                         }
                     ],
                     [
-                        "OpenSearchMigrations",
-                        "kube_pod_container_status_running",
-                        "container",
-                        "bulk-loader",
-                        "namespace",
-                        "ma",
-                        "tier",
-                        "1",
                         {
-                            "id": "m7",
-                            "stat": "Average",
-                            "visible": false,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        "OpenSearchMigrations",
-                        "kube_pod_container_info",
-                        "container",
-                        "bulk-loader",
-                        "namespace",
-                        "ma",
-                        "tier",
-                        "1",
-                        {
-                            "id": "m8",
-                            "stat": "Average",
-                            "visible": false,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        "OpenSearchMigrations",
-                        "kube_pod_container_resource_limits",
-                        "container",
-                        "bulk-loader",
-                        "namespace",
-                        "ma",
-                        "tier",
-                        "1",
-                        "resource",
-                        "cpu",
-                        {
-                            "id": "m9",
-                            "stat": "Average",
-                            "visible": false,
+                            "expression": "FILL(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetCpuUsed\" namespace=\"placeholder-namespace\" tier=\"5\"', 'Sum', 60), IF(m1 > 0, 0))",
+                            "label": "tier ${PROP('Dim.tier')}",
+                            "id": "e7",
+                            "visible": true,
                             "region": "REGION"
                         }
                     ],
                     [
                         {
-                            "expression": "IF(m8 > 0, m7 * m9 / m8 / 1)",
-                            "label": "",
+                            "expression": "FILL(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetCpuUsed\" namespace=\"placeholder-namespace\" tier=\"4\"', 'Sum', 60), IF(m1 > 0, 0))",
+                            "label": "tier ${PROP('Dim.tier')}",
+                            "id": "e8",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "FILL(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetCpuUsed\" namespace=\"placeholder-namespace\" tier=\"3\"', 'Sum', 60), IF(m1 > 0, 0))",
+                            "label": "tier ${PROP('Dim.tier')}",
+                            "id": "e9",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "FILL(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetCpuUsed\" namespace=\"placeholder-namespace\" tier=\"2\"', 'Sum', 60), IF(m1 > 0, 0))",
+                            "label": "tier ${PROP('Dim.tier')}",
                             "id": "e10",
-                            "visible": false,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        "OpenSearchMigrations",
-                        "container_cpu_usage_seconds_by_tier",
-                        "container",
-                        "bulk-loader",
-                        "namespace",
-                        "ma",
-                        "tier",
-                        "1",
-                        {
-                            "id": "m11",
-                            "stat": "Sum",
-                            "visible": false,
+                            "visible": true,
                             "region": "REGION"
                         }
                     ],
                     [
                         {
-                            "expression": "m11 / PERIOD(m11)",
-                            "label": "tier 1 used",
+                            "expression": "FILL(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetCpuUsed\" namespace=\"placeholder-namespace\" tier=\"1\"', 'Sum', 60), IF(m1 > 0, 0))",
+                            "label": "tier ${PROP('Dim.tier')}",
+                            "id": "e11",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "FILL(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetCpuUsed\" namespace=\"placeholder-namespace\" tier=\"0\"', 'Sum', 60), IF(m1 > 0, 0))",
+                            "label": "tier ${PROP('Dim.tier')}",
                             "id": "e12",
                             "visible": true,
                             "region": "REGION"
@@ -959,74 +1073,23 @@
                     ],
                     [
                         "OpenSearchMigrations",
-                        "kube_pod_container_status_running",
-                        "container",
-                        "bulk-loader",
+                        "rfsFleetCpuUnused",
                         "namespace",
-                        "ma",
-                        "tier",
-                        "2",
+                        "placeholder-namespace",
                         {
                             "id": "m13",
-                            "stat": "Average",
+                            "stat": "Sum",
                             "visible": false,
                             "region": "REGION"
                         }
                     ],
                     [
                         "OpenSearchMigrations",
-                        "kube_pod_container_info",
-                        "container",
-                        "bulk-loader",
+                        "rfsFleetCpuAwaitingSample",
                         "namespace",
-                        "ma",
-                        "tier",
-                        "2",
+                        "placeholder-namespace",
                         {
                             "id": "m14",
-                            "stat": "Average",
-                            "visible": false,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        "OpenSearchMigrations",
-                        "kube_pod_container_resource_limits",
-                        "container",
-                        "bulk-loader",
-                        "namespace",
-                        "ma",
-                        "tier",
-                        "2",
-                        "resource",
-                        "cpu",
-                        {
-                            "id": "m15",
-                            "stat": "Average",
-                            "visible": false,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "IF(m14 > 0, m13 * m15 / m14 / 1)",
-                            "label": "",
-                            "id": "e16",
-                            "visible": false,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        "OpenSearchMigrations",
-                        "container_cpu_usage_seconds_by_tier",
-                        "container",
-                        "bulk-loader",
-                        "namespace",
-                        "ma",
-                        "tier",
-                        "2",
-                        {
-                            "id": "m17",
                             "stat": "Sum",
                             "visible": false,
                             "region": "REGION"
@@ -1034,272 +1097,12 @@
                     ],
                     [
                         {
-                            "expression": "m17 / PERIOD(m17)",
-                            "label": "tier 2 used",
-                            "id": "e18",
+                            "expression": "IF(DATAPOINT_COUNT([m13,m14]) == 2, (m13 + m14) / 1)",
+                            "label": "Limit above measured usage",
+                            "id": "e15",
                             "visible": true,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        "OpenSearchMigrations",
-                        "kube_pod_container_status_running",
-                        "container",
-                        "bulk-loader",
-                        "namespace",
-                        "ma",
-                        "tier",
-                        "3",
-                        {
-                            "id": "m19",
-                            "stat": "Average",
-                            "visible": false,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        "OpenSearchMigrations",
-                        "kube_pod_container_info",
-                        "container",
-                        "bulk-loader",
-                        "namespace",
-                        "ma",
-                        "tier",
-                        "3",
-                        {
-                            "id": "m20",
-                            "stat": "Average",
-                            "visible": false,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        "OpenSearchMigrations",
-                        "kube_pod_container_resource_limits",
-                        "container",
-                        "bulk-loader",
-                        "namespace",
-                        "ma",
-                        "tier",
-                        "3",
-                        "resource",
-                        "cpu",
-                        {
-                            "id": "m21",
-                            "stat": "Average",
-                            "visible": false,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "IF(m20 > 0, m19 * m21 / m20 / 1)",
-                            "label": "",
-                            "id": "e22",
-                            "visible": false,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        "OpenSearchMigrations",
-                        "container_cpu_usage_seconds_by_tier",
-                        "container",
-                        "bulk-loader",
-                        "namespace",
-                        "ma",
-                        "tier",
-                        "3",
-                        {
-                            "id": "m23",
-                            "stat": "Sum",
-                            "visible": false,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "m23 / PERIOD(m23)",
-                            "label": "tier 3 used",
-                            "id": "e24",
-                            "visible": true,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        "OpenSearchMigrations",
-                        "kube_pod_container_status_running",
-                        "container",
-                        "bulk-loader",
-                        "namespace",
-                        "ma",
-                        "tier",
-                        "4",
-                        {
-                            "id": "m25",
-                            "stat": "Average",
-                            "visible": false,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        "OpenSearchMigrations",
-                        "kube_pod_container_info",
-                        "container",
-                        "bulk-loader",
-                        "namespace",
-                        "ma",
-                        "tier",
-                        "4",
-                        {
-                            "id": "m26",
-                            "stat": "Average",
-                            "visible": false,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        "OpenSearchMigrations",
-                        "kube_pod_container_resource_limits",
-                        "container",
-                        "bulk-loader",
-                        "namespace",
-                        "ma",
-                        "tier",
-                        "4",
-                        "resource",
-                        "cpu",
-                        {
-                            "id": "m27",
-                            "stat": "Average",
-                            "visible": false,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "IF(m26 > 0, m25 * m27 / m26 / 1)",
-                            "label": "",
-                            "id": "e28",
-                            "visible": false,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        "OpenSearchMigrations",
-                        "container_cpu_usage_seconds_by_tier",
-                        "container",
-                        "bulk-loader",
-                        "namespace",
-                        "ma",
-                        "tier",
-                        "4",
-                        {
-                            "id": "m29",
-                            "stat": "Sum",
-                            "visible": false,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "m29 / PERIOD(m29)",
-                            "label": "tier 4 used",
-                            "id": "e30",
-                            "visible": true,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        "OpenSearchMigrations",
-                        "kube_pod_container_status_running",
-                        "container",
-                        "bulk-loader",
-                        "namespace",
-                        "ma",
-                        "tier",
-                        "5",
-                        {
-                            "id": "m31",
-                            "stat": "Average",
-                            "visible": false,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        "OpenSearchMigrations",
-                        "kube_pod_container_info",
-                        "container",
-                        "bulk-loader",
-                        "namespace",
-                        "ma",
-                        "tier",
-                        "5",
-                        {
-                            "id": "m32",
-                            "stat": "Average",
-                            "visible": false,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        "OpenSearchMigrations",
-                        "kube_pod_container_resource_limits",
-                        "container",
-                        "bulk-loader",
-                        "namespace",
-                        "ma",
-                        "tier",
-                        "5",
-                        "resource",
-                        "cpu",
-                        {
-                            "id": "m33",
-                            "stat": "Average",
-                            "visible": false,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "IF(m32 > 0, m31 * m33 / m32 / 1)",
-                            "label": "",
-                            "id": "e34",
-                            "visible": false,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        "OpenSearchMigrations",
-                        "container_cpu_usage_seconds_by_tier",
-                        "container",
-                        "bulk-loader",
-                        "namespace",
-                        "ma",
-                        "tier",
-                        "5",
-                        {
-                            "id": "m35",
-                            "stat": "Sum",
-                            "visible": false,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "m35 / PERIOD(m35)",
-                            "label": "tier 5 used",
-                            "id": "e36",
-                            "visible": true,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "SUM([e4, e10, e16, e22, e28, e34]) - SUM([e6, e12, e18, e24, e30, e36])",
-                            "label": "allocated, unused",
-                            "id": "e37",
-                            "visible": true,
-                            "region": "REGION"
+                            "region": "REGION",
+                            "color": "#879596"
                         }
                     ]
                 ],
@@ -1315,7 +1118,7 @@
         {
             "type": "metric",
             "x": 16,
-            "y": 24,
+            "y": 23,
             "width": 8,
             "height": 6,
             "properties": {
@@ -1406,6 +1209,35 @@
                             "visible": true,
                             "region": "REGION"
                         }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetWorkers\" namespace=\"placeholder-namespace\"', 'Sum', 60))",
+                            "label": "",
+                            "id": "e10",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF(FILL(e10, -1) == 0, 0)",
+                            "label": "Fleet idle",
+                            "id": "e11",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#879596"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF((FILL(e10, -1) > 0) AND (FILL(DATAPOINT_COUNT([e3,e6,e9]), 0) == 0), 0)",
+                            "label": "Zero reported samples",
+                            "id": "e12",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#60676D"
+                        }
                     ]
                 ],
                 "yAxis": {
@@ -1420,7 +1252,7 @@
         {
             "type": "metric",
             "x": 0,
-            "y": 30,
+            "y": 29,
             "width": 8,
             "height": 6,
             "properties": {
@@ -1460,9 +1292,313 @@
             }
         },
         {
+            "type": "metric",
+            "x": 8,
+            "y": 29,
+            "width": 8,
+            "height": 6,
+            "properties": {
+                "title": "RFS memory used vs allocated (GiB)",
+                "view": "timeSeries",
+                "stacked": true,
+                "region": "REGION",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        "OpenSearchMigrations",
+                        "rfsFleetCensusSamples",
+                        "namespace",
+                        "placeholder-namespace",
+                        {
+                            "id": "m1",
+                            "stat": "Sum",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "FILL(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetMemoryUsed\" namespace=\"placeholder-namespace\" NOT (tier=\"0\" OR tier=\"1\" OR tier=\"2\" OR tier=\"3\" OR tier=\"4\" OR tier=\"5\" OR tier=\"6\" OR tier=\"7\" OR tier=\"8\" OR tier=\"9\")', 'Sum', 60) / 1073741824, IF(m1 > 0, 0))",
+                            "label": "tier ${PROP('Dim.tier')}",
+                            "id": "e2",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "FILL(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetMemoryUsed\" namespace=\"placeholder-namespace\" tier=\"9\"', 'Sum', 60) / 1073741824, IF(m1 > 0, 0))",
+                            "label": "tier ${PROP('Dim.tier')}",
+                            "id": "e3",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "FILL(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetMemoryUsed\" namespace=\"placeholder-namespace\" tier=\"8\"', 'Sum', 60) / 1073741824, IF(m1 > 0, 0))",
+                            "label": "tier ${PROP('Dim.tier')}",
+                            "id": "e4",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "FILL(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetMemoryUsed\" namespace=\"placeholder-namespace\" tier=\"7\"', 'Sum', 60) / 1073741824, IF(m1 > 0, 0))",
+                            "label": "tier ${PROP('Dim.tier')}",
+                            "id": "e5",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "FILL(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetMemoryUsed\" namespace=\"placeholder-namespace\" tier=\"6\"', 'Sum', 60) / 1073741824, IF(m1 > 0, 0))",
+                            "label": "tier ${PROP('Dim.tier')}",
+                            "id": "e6",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "FILL(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetMemoryUsed\" namespace=\"placeholder-namespace\" tier=\"5\"', 'Sum', 60) / 1073741824, IF(m1 > 0, 0))",
+                            "label": "tier ${PROP('Dim.tier')}",
+                            "id": "e7",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "FILL(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetMemoryUsed\" namespace=\"placeholder-namespace\" tier=\"4\"', 'Sum', 60) / 1073741824, IF(m1 > 0, 0))",
+                            "label": "tier ${PROP('Dim.tier')}",
+                            "id": "e8",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "FILL(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetMemoryUsed\" namespace=\"placeholder-namespace\" tier=\"3\"', 'Sum', 60) / 1073741824, IF(m1 > 0, 0))",
+                            "label": "tier ${PROP('Dim.tier')}",
+                            "id": "e9",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "FILL(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetMemoryUsed\" namespace=\"placeholder-namespace\" tier=\"2\"', 'Sum', 60) / 1073741824, IF(m1 > 0, 0))",
+                            "label": "tier ${PROP('Dim.tier')}",
+                            "id": "e10",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "FILL(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetMemoryUsed\" namespace=\"placeholder-namespace\" tier=\"1\"', 'Sum', 60) / 1073741824, IF(m1 > 0, 0))",
+                            "label": "tier ${PROP('Dim.tier')}",
+                            "id": "e11",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "FILL(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetMemoryUsed\" namespace=\"placeholder-namespace\" tier=\"0\"', 'Sum', 60) / 1073741824, IF(m1 > 0, 0))",
+                            "label": "tier ${PROP('Dim.tier')}",
+                            "id": "e12",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        "OpenSearchMigrations",
+                        "rfsFleetMemoryUnused",
+                        "namespace",
+                        "placeholder-namespace",
+                        {
+                            "id": "m13",
+                            "stat": "Sum",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        "OpenSearchMigrations",
+                        "rfsFleetMemoryAwaitingSample",
+                        "namespace",
+                        "placeholder-namespace",
+                        {
+                            "id": "m14",
+                            "stat": "Sum",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF(DATAPOINT_COUNT([m13,m14]) == 2, (m13 + m14) / 1073741824)",
+                            "label": "Limit above measured usage",
+                            "id": "e15",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#879596"
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "GiB",
+                        "showUnits": false,
+                        "min": 0
+                    }
+                }
+            }
+        },
+        {
+            "type": "metric",
+            "x": 16,
+            "y": 29,
+            "width": 8,
+            "height": 6,
+            "properties": {
+                "title": "Workers by memory tier",
+                "view": "timeSeries",
+                "stacked": true,
+                "region": "REGION",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                    [
+                        "OpenSearchMigrations",
+                        "rfsFleetCensusSamples",
+                        "namespace",
+                        "placeholder-namespace",
+                        {
+                            "id": "m1",
+                            "stat": "Sum",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "FILL(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetWorkers\" namespace=\"placeholder-namespace\" NOT (tier=\"0\" OR tier=\"1\" OR tier=\"2\" OR tier=\"3\" OR tier=\"4\" OR tier=\"5\" OR tier=\"6\" OR tier=\"7\" OR tier=\"8\" OR tier=\"9\")', 'Sum', 60), IF(m1 > 0, 0))",
+                            "label": "tier ${PROP('Dim.tier')}",
+                            "id": "e2",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "FILL(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetWorkers\" namespace=\"placeholder-namespace\" tier=\"9\"', 'Sum', 60), IF(m1 > 0, 0))",
+                            "label": "tier ${PROP('Dim.tier')}",
+                            "id": "e3",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "FILL(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetWorkers\" namespace=\"placeholder-namespace\" tier=\"8\"', 'Sum', 60), IF(m1 > 0, 0))",
+                            "label": "tier ${PROP('Dim.tier')}",
+                            "id": "e4",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "FILL(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetWorkers\" namespace=\"placeholder-namespace\" tier=\"7\"', 'Sum', 60), IF(m1 > 0, 0))",
+                            "label": "tier ${PROP('Dim.tier')}",
+                            "id": "e5",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "FILL(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetWorkers\" namespace=\"placeholder-namespace\" tier=\"6\"', 'Sum', 60), IF(m1 > 0, 0))",
+                            "label": "tier ${PROP('Dim.tier')}",
+                            "id": "e6",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "FILL(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetWorkers\" namespace=\"placeholder-namespace\" tier=\"5\"', 'Sum', 60), IF(m1 > 0, 0))",
+                            "label": "tier ${PROP('Dim.tier')}",
+                            "id": "e7",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "FILL(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetWorkers\" namespace=\"placeholder-namespace\" tier=\"4\"', 'Sum', 60), IF(m1 > 0, 0))",
+                            "label": "tier ${PROP('Dim.tier')}",
+                            "id": "e8",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "FILL(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetWorkers\" namespace=\"placeholder-namespace\" tier=\"3\"', 'Sum', 60), IF(m1 > 0, 0))",
+                            "label": "tier ${PROP('Dim.tier')}",
+                            "id": "e9",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "FILL(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetWorkers\" namespace=\"placeholder-namespace\" tier=\"2\"', 'Sum', 60), IF(m1 > 0, 0))",
+                            "label": "tier ${PROP('Dim.tier')}",
+                            "id": "e10",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "FILL(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetWorkers\" namespace=\"placeholder-namespace\" tier=\"1\"', 'Sum', 60), IF(m1 > 0, 0))",
+                            "label": "tier ${PROP('Dim.tier')}",
+                            "id": "e11",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "FILL(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetWorkers\" namespace=\"placeholder-namespace\" tier=\"0\"', 'Sum', 60), IF(m1 > 0, 0))",
+                            "label": "tier ${PROP('Dim.tier')}",
+                            "id": "e12",
+                            "visible": true,
+                            "region": "REGION"
+                        }
+                    ]
+                ],
+                "yAxis": {
+                    "left": {
+                        "label": "count",
+                        "showUnits": false,
+                        "min": 0
+                    }
+                }
+            }
+        },
+        {
             "type": "text",
             "x": 0,
-            "y": 36,
+            "y": 35,
             "width": 24,
             "height": 1,
             "properties": {
@@ -1473,7 +1609,7 @@
         {
             "type": "metric",
             "x": 0,
-            "y": 37,
+            "y": 36,
             "width": 8,
             "height": 6,
             "properties": {
@@ -1546,6 +1682,35 @@
                             "visible": true,
                             "region": "REGION"
                         }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetWorkers\" namespace=\"placeholder-namespace\"', 'Sum', 60))",
+                            "label": "",
+                            "id": "e8",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF(FILL(e8, -1) == 0, 0)",
+                            "label": "Fleet idle",
+                            "id": "e9",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#879596"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF((FILL(e8, -1) > 0) AND (FILL(DATAPOINT_COUNT([e1,e2,e3,e4,e5,e6,e7]), 0) == 0), 0)",
+                            "label": "Zero reported samples",
+                            "id": "e10",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#60676D"
+                        }
                     ]
                 ],
                 "yAxis": {
@@ -1560,7 +1725,7 @@
         {
             "type": "metric",
             "x": 8,
-            "y": 37,
+            "y": 36,
             "width": 8,
             "height": 6,
             "properties": {
@@ -1624,6 +1789,35 @@
                             "visible": true,
                             "region": "REGION"
                         }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetWorkers\" namespace=\"placeholder-namespace\"', 'Sum', 60))",
+                            "label": "",
+                            "id": "e7",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF(FILL(e7, -1) == 0, 0)",
+                            "label": "Fleet idle",
+                            "id": "e8",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#879596"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF((FILL(e7, -1) > 0) AND (FILL(DATAPOINT_COUNT([e2,e4,e6]), 0) == 0), 0)",
+                            "label": "Zero reported samples",
+                            "id": "e9",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#60676D"
+                        }
                     ]
                 ],
                 "yAxis": {
@@ -1638,7 +1832,7 @@
         {
             "type": "metric",
             "x": 16,
-            "y": 37,
+            "y": 36,
             "width": 8,
             "height": 6,
             "properties": {
@@ -1729,6 +1923,35 @@
                             "visible": true,
                             "region": "REGION"
                         }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetWorkers\" namespace=\"placeholder-namespace\"', 'Sum', 60))",
+                            "label": "",
+                            "id": "e10",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF(FILL(e10, -1) == 0, 0)",
+                            "label": "Fleet idle",
+                            "id": "e11",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#879596"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF((FILL(e10, -1) > 0) AND (FILL(DATAPOINT_COUNT([e3,e6,e9]), 0) == 0), 0)",
+                            "label": "Zero reported samples",
+                            "id": "e12",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#60676D"
+                        }
                     ]
                 ],
                 "yAxis": {
@@ -1743,7 +1966,7 @@
         {
             "type": "metric",
             "x": 0,
-            "y": 43,
+            "y": 42,
             "width": 8,
             "height": 6,
             "properties": {
@@ -1798,6 +2021,35 @@
                             "visible": true,
                             "region": "REGION"
                         }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetWorkers\" namespace=\"placeholder-namespace\"', 'Sum', 60))",
+                            "label": "",
+                            "id": "e6",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF(FILL(e6, -1) == 0, 0)",
+                            "label": "Fleet idle",
+                            "id": "e7",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#879596"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF((FILL(e6, -1) > 0) AND (FILL(DATAPOINT_COUNT([e1,e2,e3,e4,e5]), 0) == 0), 0)",
+                            "label": "Zero reported samples",
+                            "id": "e8",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#60676D"
+                        }
                     ]
                 ],
                 "yAxis": {
@@ -1812,7 +2064,7 @@
         {
             "type": "metric",
             "x": 8,
-            "y": 43,
+            "y": 42,
             "width": 8,
             "height": 6,
             "properties": {
@@ -1876,6 +2128,35 @@
                             "visible": true,
                             "region": "REGION"
                         }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetWorkers\" namespace=\"placeholder-namespace\"', 'Sum', 60))",
+                            "label": "",
+                            "id": "e7",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF(FILL(e7, -1) == 0, 0)",
+                            "label": "Fleet idle",
+                            "id": "e8",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#879596"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF((FILL(e7, -1) > 0) AND (FILL(DATAPOINT_COUNT([e2,e4,e6]), 0) == 0), 0)",
+                            "label": "Zero reported samples",
+                            "id": "e9",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#60676D"
+                        }
                     ]
                 ],
                 "yAxis": {
@@ -1890,7 +2171,7 @@
         {
             "type": "metric",
             "x": 16,
-            "y": 43,
+            "y": 42,
             "width": 8,
             "height": 6,
             "properties": {
@@ -1990,6 +2271,35 @@
                             "visible": true,
                             "region": "REGION"
                         }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetWorkers\" namespace=\"placeholder-namespace\"', 'Sum', 60))",
+                            "label": "",
+                            "id": "e11",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF(FILL(e11, -1) == 0, 0)",
+                            "label": "Fleet idle",
+                            "id": "e12",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#879596"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF((FILL(e11, -1) > 0) AND (FILL(DATAPOINT_COUNT([e2,e4,e6,e8,e10]), 0) == 0), 0)",
+                            "label": "Zero reported samples",
+                            "id": "e13",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#60676D"
+                        }
                     ]
                 ],
                 "yAxis": {
@@ -2004,7 +2314,7 @@
         {
             "type": "metric",
             "x": 0,
-            "y": 49,
+            "y": 48,
             "width": 8,
             "height": 6,
             "properties": {
@@ -2059,6 +2369,35 @@
                             "visible": true,
                             "region": "REGION"
                         }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetWorkers\" namespace=\"placeholder-namespace\"', 'Sum', 60))",
+                            "label": "",
+                            "id": "e6",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF(FILL(e6, -1) == 0, 0)",
+                            "label": "Fleet idle",
+                            "id": "e7",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#879596"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF((FILL(e6, -1) > 0) AND (FILL(DATAPOINT_COUNT([e1,e4,e5]), 0) == 0), 0)",
+                            "label": "Zero reported samples",
+                            "id": "e8",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#60676D"
+                        }
                     ]
                 ],
                 "yAxis": {
@@ -2073,7 +2412,7 @@
         {
             "type": "metric",
             "x": 8,
-            "y": 49,
+            "y": 48,
             "width": 8,
             "height": 6,
             "properties": {
@@ -2155,6 +2494,35 @@
                             "visible": true,
                             "region": "REGION"
                         }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetWorkers\" namespace=\"placeholder-namespace\"', 'Sum', 60))",
+                            "label": "",
+                            "id": "e9",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF(FILL(e9, -1) == 0, 0)",
+                            "label": "Fleet idle",
+                            "id": "e10",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#879596"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF((FILL(e9, -1) > 0) AND (FILL(DATAPOINT_COUNT([e3,e6,e7,e8]), 0) == 0), 0)",
+                            "label": "Zero reported samples",
+                            "id": "e11",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#60676D"
+                        }
                     ]
                 ],
                 "yAxis": {
@@ -2169,7 +2537,7 @@
         {
             "type": "metric",
             "x": 16,
-            "y": 49,
+            "y": 48,
             "width": 8,
             "height": 6,
             "properties": {
@@ -2233,6 +2601,35 @@
                             "visible": true,
                             "region": "REGION"
                         }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetWorkers\" namespace=\"placeholder-namespace\"', 'Sum', 60))",
+                            "label": "",
+                            "id": "e7",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF(FILL(e7, -1) == 0, 0)",
+                            "label": "Fleet idle",
+                            "id": "e8",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#879596"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF((FILL(e7, -1) > 0) AND (FILL(SUM(SEARCH('{OpenSearchMigrations,OTelLib,attempt,outcome,qualifier} MetricName=\"bulkAttempts\" OTelLib=\"documentMigration\"', 'Sum', 60)), 0) == 0), 0)",
+                            "label": "No reported bulk attempts",
+                            "id": "e9",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#60676D"
+                        }
                     ]
                 ],
                 "yAxis": {
@@ -2247,7 +2644,7 @@
         {
             "type": "metric",
             "x": 0,
-            "y": 55,
+            "y": 54,
             "width": 8,
             "height": 6,
             "properties": {
@@ -2294,6 +2691,35 @@
                             "visible": true,
                             "region": "REGION"
                         }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetWorkers\" namespace=\"placeholder-namespace\"', 'Sum', 60))",
+                            "label": "",
+                            "id": "e4",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF(FILL(e4, -1) == 0, 0)",
+                            "label": "Fleet idle",
+                            "id": "e5",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#879596"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF((FILL(e4, -1) > 0) AND (FILL(DATAPOINT_COUNT([e3]), 0) == 0), 0)",
+                            "label": "Zero reported samples",
+                            "id": "e6",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#60676D"
+                        }
                     ]
                 ],
                 "yAxis": {
@@ -2308,7 +2734,7 @@
         {
             "type": "metric",
             "x": 8,
-            "y": 55,
+            "y": 54,
             "width": 8,
             "height": 6,
             "properties": {
@@ -2408,6 +2834,35 @@
                             "visible": true,
                             "region": "REGION"
                         }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetWorkers\" namespace=\"placeholder-namespace\"', 'Sum', 60))",
+                            "label": "",
+                            "id": "e11",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF(FILL(e11, -1) == 0, 0)",
+                            "label": "Fleet idle",
+                            "id": "e12",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#879596"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF((FILL(e11, -1) > 0) AND (FILL(DATAPOINT_COUNT([e2,e4,e6,e8,e10]), 0) == 0), 0)",
+                            "label": "Zero reported samples",
+                            "id": "e13",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#60676D"
+                        }
                     ]
                 ],
                 "yAxis": {
@@ -2420,258 +2875,13 @@
             }
         },
         {
-            "type": "text",
-            "x": 0,
-            "y": 61,
-            "width": 24,
-            "height": 1,
-            "properties": {
-                "markdown": "## Memory-tier scaling",
-                "background": "transparent"
-            }
-        },
-        {
-            "type": "metric",
-            "x": 0,
-            "y": 62,
-            "width": 8,
-            "height": 6,
-            "properties": {
-                "title": "Workers by memory tier",
-                "view": "timeSeries",
-                "stacked": true,
-                "region": "REGION",
-                "period": 60,
-                "stat": "Sum",
-                "metrics": [
-                    [
-                        {
-                            "expression": "(SUM(SEARCH('{OpenSearchMigrations,OTelLib,phase,tier,qualifier} MetricName=\"rfsWorkerPhase\" OTelLib=\"documentMigration\" tier=\"0\"', 'Sum', 60)) - SUM(SEARCH('{OpenSearchMigrations,OTelLib,phase,tier,qualifier} MetricName=\"rfsWorkerPhase\" OTelLib=\"documentMigration\" tier=\"0\" phase=\"exited\"', 'Sum', 60))) / 60",
-                            "label": "tier 0",
-                            "id": "e1",
-                            "visible": true,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "(SUM(SEARCH('{OpenSearchMigrations,OTelLib,phase,tier,qualifier} MetricName=\"rfsWorkerPhase\" OTelLib=\"documentMigration\" tier=\"1\"', 'Sum', 60)) - SUM(SEARCH('{OpenSearchMigrations,OTelLib,phase,tier,qualifier} MetricName=\"rfsWorkerPhase\" OTelLib=\"documentMigration\" tier=\"1\" phase=\"exited\"', 'Sum', 60))) / 60",
-                            "label": "tier 1",
-                            "id": "e2",
-                            "visible": true,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "(SUM(SEARCH('{OpenSearchMigrations,OTelLib,phase,tier,qualifier} MetricName=\"rfsWorkerPhase\" OTelLib=\"documentMigration\" tier=\"2\"', 'Sum', 60)) - SUM(SEARCH('{OpenSearchMigrations,OTelLib,phase,tier,qualifier} MetricName=\"rfsWorkerPhase\" OTelLib=\"documentMigration\" tier=\"2\" phase=\"exited\"', 'Sum', 60))) / 60",
-                            "label": "tier 2",
-                            "id": "e3",
-                            "visible": true,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "(SUM(SEARCH('{OpenSearchMigrations,OTelLib,phase,tier,qualifier} MetricName=\"rfsWorkerPhase\" OTelLib=\"documentMigration\" tier=\"3\"', 'Sum', 60)) - SUM(SEARCH('{OpenSearchMigrations,OTelLib,phase,tier,qualifier} MetricName=\"rfsWorkerPhase\" OTelLib=\"documentMigration\" tier=\"3\" phase=\"exited\"', 'Sum', 60))) / 60",
-                            "label": "tier 3",
-                            "id": "e4",
-                            "visible": true,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "(SUM(SEARCH('{OpenSearchMigrations,OTelLib,phase,tier,qualifier} MetricName=\"rfsWorkerPhase\" OTelLib=\"documentMigration\" tier=\"4\"', 'Sum', 60)) - SUM(SEARCH('{OpenSearchMigrations,OTelLib,phase,tier,qualifier} MetricName=\"rfsWorkerPhase\" OTelLib=\"documentMigration\" tier=\"4\" phase=\"exited\"', 'Sum', 60))) / 60",
-                            "label": "tier 4",
-                            "id": "e5",
-                            "visible": true,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "(SUM(SEARCH('{OpenSearchMigrations,OTelLib,phase,tier,qualifier} MetricName=\"rfsWorkerPhase\" OTelLib=\"documentMigration\" tier=\"5\"', 'Sum', 60)) - SUM(SEARCH('{OpenSearchMigrations,OTelLib,phase,tier,qualifier} MetricName=\"rfsWorkerPhase\" OTelLib=\"documentMigration\" tier=\"5\" phase=\"exited\"', 'Sum', 60))) / 60",
-                            "label": "tier 5",
-                            "id": "e6",
-                            "visible": true,
-                            "region": "REGION"
-                        }
-                    ]
-                ],
-                "yAxis": {
-                    "left": {
-                        "label": "count",
-                        "showUnits": false,
-                        "min": 0
-                    }
-                }
-            }
-        },
-        {
-            "type": "metric",
-            "x": 8,
-            "y": 62,
-            "width": 8,
-            "height": 6,
-            "properties": {
-                "title": "Maximum work items in progress per tier",
-                "view": "timeSeries",
-                "stacked": false,
-                "region": "REGION",
-                "period": 60,
-                "stat": "Sum",
-                "metrics": [
-                    [
-                        {
-                            "expression": "AVG(SEARCH('{OpenSearchMigrations,OTelLib,tier,qualifier} MetricName=\"tierLeaseCap\" OTelLib=\"fleetMonitor\" tier=\"0\"', 'Average', 60))",
-                            "label": "max in progress t0",
-                            "id": "e1",
-                            "visible": true,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "AVG(SEARCH('{OpenSearchMigrations,OTelLib,tier,qualifier} MetricName=\"tierLeaseCap\" OTelLib=\"fleetMonitor\" tier=\"1\"', 'Average', 60))",
-                            "label": "max in progress t1",
-                            "id": "e2",
-                            "visible": true,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "AVG(SEARCH('{OpenSearchMigrations,OTelLib,tier,qualifier} MetricName=\"tierLeaseCap\" OTelLib=\"fleetMonitor\" tier=\"2\"', 'Average', 60))",
-                            "label": "max in progress t2",
-                            "id": "e3",
-                            "visible": true,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "AVG(SEARCH('{OpenSearchMigrations,OTelLib,tier,qualifier} MetricName=\"tierLeaseCap\" OTelLib=\"fleetMonitor\" tier=\"3\"', 'Average', 60))",
-                            "label": "max in progress t3",
-                            "id": "e4",
-                            "visible": true,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "AVG(SEARCH('{OpenSearchMigrations,OTelLib,tier,qualifier} MetricName=\"tierLeaseCap\" OTelLib=\"fleetMonitor\" tier=\"4\"', 'Average', 60))",
-                            "label": "max in progress t4",
-                            "id": "e5",
-                            "visible": true,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "AVG(SEARCH('{OpenSearchMigrations,OTelLib,tier,qualifier} MetricName=\"tierLeaseCap\" OTelLib=\"fleetMonitor\" tier=\"5\"', 'Average', 60))",
-                            "label": "max in progress t5",
-                            "id": "e6",
-                            "visible": true,
-                            "region": "REGION"
-                        }
-                    ]
-                ],
-                "yAxis": {
-                    "left": {
-                        "label": "count",
-                        "showUnits": false,
-                        "min": 0
-                    }
-                }
-            }
-        },
-        {
             "type": "metric",
             "x": 16,
-            "y": 62,
+            "y": 54,
             "width": 8,
             "height": 6,
             "properties": {
-                "title": "Busy workers per tier",
-                "view": "timeSeries",
-                "stacked": true,
-                "region": "REGION",
-                "period": 60,
-                "stat": "Sum",
-                "metrics": [
-                    [
-                        {
-                            "expression": "AVG(SEARCH('{OpenSearchMigrations,OTelLib,tier,qualifier} MetricName=\"tierBusyPods\" OTelLib=\"fleetMonitor\" tier=\"0\"', 'Average', 60))",
-                            "label": "busy t0",
-                            "id": "e1",
-                            "visible": true,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "AVG(SEARCH('{OpenSearchMigrations,OTelLib,tier,qualifier} MetricName=\"tierBusyPods\" OTelLib=\"fleetMonitor\" tier=\"1\"', 'Average', 60))",
-                            "label": "busy t1",
-                            "id": "e2",
-                            "visible": true,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "AVG(SEARCH('{OpenSearchMigrations,OTelLib,tier,qualifier} MetricName=\"tierBusyPods\" OTelLib=\"fleetMonitor\" tier=\"2\"', 'Average', 60))",
-                            "label": "busy t2",
-                            "id": "e3",
-                            "visible": true,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "AVG(SEARCH('{OpenSearchMigrations,OTelLib,tier,qualifier} MetricName=\"tierBusyPods\" OTelLib=\"fleetMonitor\" tier=\"3\"', 'Average', 60))",
-                            "label": "busy t3",
-                            "id": "e4",
-                            "visible": true,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "AVG(SEARCH('{OpenSearchMigrations,OTelLib,tier,qualifier} MetricName=\"tierBusyPods\" OTelLib=\"fleetMonitor\" tier=\"4\"', 'Average', 60))",
-                            "label": "busy t4",
-                            "id": "e5",
-                            "visible": true,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "AVG(SEARCH('{OpenSearchMigrations,OTelLib,tier,qualifier} MetricName=\"tierBusyPods\" OTelLib=\"fleetMonitor\" tier=\"5\"', 'Average', 60))",
-                            "label": "busy t5",
-                            "id": "e6",
-                            "visible": true,
-                            "region": "REGION"
-                        }
-                    ]
-                ],
-                "yAxis": {
-                    "left": {
-                        "label": "count",
-                        "showUnits": false,
-                        "min": 0
-                    }
-                }
-            }
-        },
-        {
-            "type": "metric",
-            "x": 0,
-            "y": 68,
-            "width": 8,
-            "height": 6,
-            "properties": {
-                "title": "Target worker count per tier",
+                "title": "Fleet resource sampling per minute",
                 "view": "timeSeries",
                 "stacked": false,
                 "region": "REGION",
@@ -2679,189 +2889,42 @@
                 "stat": "Sum",
                 "metrics": [
                     [
+                        "OpenSearchMigrations",
+                        "rfsFleetCensusSamples",
+                        "namespace",
+                        "placeholder-namespace",
                         {
-                            "expression": "AVG(SEARCH('{OpenSearchMigrations,OTelLib,tier,qualifier} MetricName=\"tierReplicasDesired\" OTelLib=\"fleetMonitor\" tier=\"0\"', 'Average', 60))",
-                            "label": "target t0",
-                            "id": "e1",
+                            "id": "m1",
+                            "stat": "Sum",
                             "visible": true,
-                            "region": "REGION"
+                            "region": "REGION",
+                            "label": "fleet snapshots"
                         }
                     ],
                     [
+                        "OpenSearchMigrations",
+                        "rfsFleetCpuMissingWorkers",
+                        "namespace",
+                        "placeholder-namespace",
                         {
-                            "expression": "AVG(SEARCH('{OpenSearchMigrations,OTelLib,tier,qualifier} MetricName=\"tierReplicasDesired\" OTelLib=\"fleetMonitor\" tier=\"1\"', 'Average', 60))",
-                            "label": "target t1",
-                            "id": "e2",
+                            "id": "m2",
+                            "stat": "Sum",
                             "visible": true,
-                            "region": "REGION"
+                            "region": "REGION",
+                            "label": "workers awaiting CPU"
                         }
                     ],
                     [
+                        "OpenSearchMigrations",
+                        "rfsFleetMemoryMissingWorkers",
+                        "namespace",
+                        "placeholder-namespace",
                         {
-                            "expression": "AVG(SEARCH('{OpenSearchMigrations,OTelLib,tier,qualifier} MetricName=\"tierReplicasDesired\" OTelLib=\"fleetMonitor\" tier=\"2\"', 'Average', 60))",
-                            "label": "target t2",
-                            "id": "e3",
+                            "id": "m3",
+                            "stat": "Sum",
                             "visible": true,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "AVG(SEARCH('{OpenSearchMigrations,OTelLib,tier,qualifier} MetricName=\"tierReplicasDesired\" OTelLib=\"fleetMonitor\" tier=\"3\"', 'Average', 60))",
-                            "label": "target t3",
-                            "id": "e4",
-                            "visible": true,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "AVG(SEARCH('{OpenSearchMigrations,OTelLib,tier,qualifier} MetricName=\"tierReplicasDesired\" OTelLib=\"fleetMonitor\" tier=\"4\"', 'Average', 60))",
-                            "label": "target t4",
-                            "id": "e5",
-                            "visible": true,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "AVG(SEARCH('{OpenSearchMigrations,OTelLib,tier,qualifier} MetricName=\"tierReplicasDesired\" OTelLib=\"fleetMonitor\" tier=\"5\"', 'Average', 60))",
-                            "label": "target t5",
-                            "id": "e6",
-                            "visible": true,
-                            "region": "REGION"
-                        }
-                    ]
-                ],
-                "yAxis": {
-                    "left": {
-                        "label": "count",
-                        "showUnits": false,
-                        "min": 0
-                    }
-                }
-            }
-        },
-        {
-            "type": "metric",
-            "x": 8,
-            "y": 68,
-            "width": 8,
-            "height": 6,
-            "properties": {
-                "title": "Work items remaining per tier",
-                "view": "timeSeries",
-                "stacked": false,
-                "region": "REGION",
-                "period": 60,
-                "stat": "Sum",
-                "metrics": [
-                    [
-                        {
-                            "expression": "AVG(SEARCH('{OpenSearchMigrations,OTelLib,tier,qualifier} MetricName=\"tierEligibleItems\" OTelLib=\"fleetMonitor\" tier=\"0\"', 'Average', 60))",
-                            "label": "remaining t0",
-                            "id": "e1",
-                            "visible": true,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "AVG(SEARCH('{OpenSearchMigrations,OTelLib,tier,qualifier} MetricName=\"tierEligibleItems\" OTelLib=\"fleetMonitor\" tier=\"1\"', 'Average', 60))",
-                            "label": "remaining t1",
-                            "id": "e2",
-                            "visible": true,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "AVG(SEARCH('{OpenSearchMigrations,OTelLib,tier,qualifier} MetricName=\"tierEligibleItems\" OTelLib=\"fleetMonitor\" tier=\"2\"', 'Average', 60))",
-                            "label": "remaining t2",
-                            "id": "e3",
-                            "visible": true,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "AVG(SEARCH('{OpenSearchMigrations,OTelLib,tier,qualifier} MetricName=\"tierEligibleItems\" OTelLib=\"fleetMonitor\" tier=\"3\"', 'Average', 60))",
-                            "label": "remaining t3",
-                            "id": "e4",
-                            "visible": true,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "AVG(SEARCH('{OpenSearchMigrations,OTelLib,tier,qualifier} MetricName=\"tierEligibleItems\" OTelLib=\"fleetMonitor\" tier=\"4\"', 'Average', 60))",
-                            "label": "remaining t4",
-                            "id": "e5",
-                            "visible": true,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "AVG(SEARCH('{OpenSearchMigrations,OTelLib,tier,qualifier} MetricName=\"tierEligibleItems\" OTelLib=\"fleetMonitor\" tier=\"5\"', 'Average', 60))",
-                            "label": "remaining t5",
-                            "id": "e6",
-                            "visible": true,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "AVG(SEARCH('{OpenSearchMigrations,OTelLib,tier,qualifier} MetricName=\"tierWaitingItems\" OTelLib=\"fleetMonitor\" tier=\"0\"', 'Average', 60))",
-                            "label": "unassigned t0",
-                            "id": "e7",
-                            "visible": true,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "AVG(SEARCH('{OpenSearchMigrations,OTelLib,tier,qualifier} MetricName=\"tierWaitingItems\" OTelLib=\"fleetMonitor\" tier=\"1\"', 'Average', 60))",
-                            "label": "unassigned t1",
-                            "id": "e8",
-                            "visible": true,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "AVG(SEARCH('{OpenSearchMigrations,OTelLib,tier,qualifier} MetricName=\"tierWaitingItems\" OTelLib=\"fleetMonitor\" tier=\"2\"', 'Average', 60))",
-                            "label": "unassigned t2",
-                            "id": "e9",
-                            "visible": true,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "AVG(SEARCH('{OpenSearchMigrations,OTelLib,tier,qualifier} MetricName=\"tierWaitingItems\" OTelLib=\"fleetMonitor\" tier=\"3\"', 'Average', 60))",
-                            "label": "unassigned t3",
-                            "id": "e10",
-                            "visible": true,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "AVG(SEARCH('{OpenSearchMigrations,OTelLib,tier,qualifier} MetricName=\"tierWaitingItems\" OTelLib=\"fleetMonitor\" tier=\"4\"', 'Average', 60))",
-                            "label": "unassigned t4",
-                            "id": "e11",
-                            "visible": true,
-                            "region": "REGION"
-                        }
-                    ],
-                    [
-                        {
-                            "expression": "AVG(SEARCH('{OpenSearchMigrations,OTelLib,tier,qualifier} MetricName=\"tierWaitingItems\" OTelLib=\"fleetMonitor\" tier=\"5\"', 'Average', 60))",
-                            "label": "unassigned t5",
-                            "id": "e12",
-                            "visible": true,
-                            "region": "REGION"
+                            "region": "REGION",
+                            "label": "workers awaiting memory"
                         }
                     ]
                 ],
@@ -2877,7 +2940,7 @@
         {
             "type": "text",
             "x": 0,
-            "y": 74,
+            "y": 60,
             "width": 24,
             "height": 1,
             "properties": {
@@ -2888,7 +2951,7 @@
         {
             "type": "metric",
             "x": 0,
-            "y": 75,
+            "y": 61,
             "width": 8,
             "height": 6,
             "properties": {
@@ -2967,7 +3030,7 @@
         {
             "type": "metric",
             "x": 8,
-            "y": 75,
+            "y": 61,
             "width": 8,
             "height": 6,
             "properties": {
@@ -3023,7 +3086,7 @@
         {
             "type": "metric",
             "x": 16,
-            "y": 75,
+            "y": 61,
             "width": 8,
             "height": 6,
             "properties": {
@@ -3102,7 +3165,7 @@
         {
             "type": "metric",
             "x": 0,
-            "y": 81,
+            "y": 67,
             "width": 8,
             "height": 6,
             "properties": {
@@ -3182,7 +3245,7 @@
         {
             "type": "text",
             "x": 0,
-            "y": 87,
+            "y": 73,
             "width": 24,
             "height": 1,
             "properties": {
@@ -3193,7 +3256,7 @@
         {
             "type": "metric",
             "x": 0,
-            "y": 88,
+            "y": 74,
             "width": 8,
             "height": 6,
             "properties": {
@@ -3230,11 +3293,55 @@
                             "visible": true,
                             "region": "REGION"
                         }
+                    ],
+                    [
+                        {
+                            "expression": "(SUM(SEARCH('{OpenSearchMigrations,OTelLib,qualifier} MetricName=\"bulkAttemptGap\" OTelLib=\"documentMigration\"', 'SampleCount', 60)) + 0 * SUM(SEARCH('{OpenSearchMigrations,OTelLib,phase,tier,qualifier} MetricName=\"rfsWorkerPhase\" OTelLib=\"documentMigration\"', 'Sum', 60))) / 60 * 60",
+                            "label": "Observed retries/min",
+                            "id": "e4",
+                            "visible": true,
+                            "region": "REGION",
+                            "yAxis": "right"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetWorkers\" namespace=\"placeholder-namespace\"', 'Sum', 60))",
+                            "label": "",
+                            "id": "e5",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF(FILL(e5, -1) == 0, 0)",
+                            "label": "Fleet idle",
+                            "id": "e6",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#879596"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF((FILL(e5, -1) > 0) AND (FILL(DATAPOINT_COUNT([e3,e4]), 0) == 0), 0)",
+                            "label": "Zero reported samples",
+                            "id": "e7",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#60676D"
+                        }
                     ]
                 ],
                 "yAxis": {
                     "left": {
                         "label": "s",
+                        "showUnits": false,
+                        "min": 0
+                    },
+                    "right": {
+                        "label": "per min",
                         "showUnits": false,
                         "min": 0
                     }
@@ -3244,7 +3351,7 @@
         {
             "type": "metric",
             "x": 8,
-            "y": 88,
+            "y": 74,
             "width": 8,
             "height": 6,
             "properties": {
@@ -3257,11 +3364,40 @@
                 "metrics": [
                     [
                         {
-                            "expression": "SEARCH('{OpenSearchMigrations,OTelLib,reason,qualifier} MetricName=\"bulkDocsTargetUnavailable\" OTelLib=\"documentMigration\"', 'Sum', 60) / 60 * 60",
+                            "expression": "REMOVE_EMPTY(SEARCH('{OpenSearchMigrations,OTelLib,reason,qualifier} MetricName=\"bulkDocsTargetUnavailable\" OTelLib=\"documentMigration\"', 'Sum', 60) / 60 * 60)",
                             "label": "",
                             "id": "e1",
                             "visible": true,
                             "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetWorkers\" namespace=\"placeholder-namespace\"', 'Sum', 60))",
+                            "label": "",
+                            "id": "e2",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF(FILL(e2, -1) == 0, 0)",
+                            "label": "Fleet idle",
+                            "id": "e3",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#879596"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF((FILL(e2, -1) > 0) AND (FILL(DATAPOINT_COUNT([e1]), 0) == 0), 0)",
+                            "label": "Zero reported samples",
+                            "id": "e4",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#60676D"
                         }
                     ]
                 ],
@@ -3277,7 +3413,7 @@
         {
             "type": "metric",
             "x": 16,
-            "y": 88,
+            "y": 74,
             "width": 8,
             "height": 6,
             "properties": {
@@ -3296,6 +3432,35 @@
                             "visible": true,
                             "region": "REGION"
                         }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetWorkers\" namespace=\"placeholder-namespace\"', 'Sum', 60))",
+                            "label": "",
+                            "id": "e2",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF(FILL(e2, -1) == 0, 0)",
+                            "label": "Fleet idle",
+                            "id": "e3",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#879596"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF((FILL(e2, -1) > 0) AND (FILL(DATAPOINT_COUNT([e1]), 0) == 0), 0)",
+                            "label": "Zero reported samples",
+                            "id": "e4",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#60676D"
+                        }
                     ]
                 ],
                 "yAxis": {
@@ -3310,7 +3475,7 @@
         {
             "type": "metric",
             "x": 0,
-            "y": 94,
+            "y": 80,
             "width": 8,
             "height": 6,
             "properties": {
@@ -3365,6 +3530,35 @@
                             "visible": true,
                             "region": "REGION"
                         }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetWorkers\" namespace=\"placeholder-namespace\"', 'Sum', 60))",
+                            "label": "",
+                            "id": "e6",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF(FILL(e6, -1) == 0, 0)",
+                            "label": "Fleet idle",
+                            "id": "e7",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#879596"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF((FILL(e6, -1) > 0) AND (FILL(DATAPOINT_COUNT([e3,e5]), 0) == 0), 0)",
+                            "label": "Zero reported samples",
+                            "id": "e8",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#60676D"
+                        }
                     ]
                 ],
                 "yAxis": {
@@ -3379,7 +3573,7 @@
         {
             "type": "metric",
             "x": 8,
-            "y": 94,
+            "y": 80,
             "width": 8,
             "height": 6,
             "properties": {
@@ -3463,7 +3657,7 @@
         {
             "type": "text",
             "x": 0,
-            "y": 100,
+            "y": 86,
             "width": 24,
             "height": 1,
             "properties": {
@@ -3474,7 +3668,7 @@
         {
             "type": "metric",
             "x": 0,
-            "y": 101,
+            "y": 87,
             "width": 8,
             "height": 6,
             "properties": {
@@ -3487,11 +3681,40 @@
                 "metrics": [
                     [
                         {
-                            "expression": "SEARCH('{OpenSearchMigrations,OTelLib,reason,qualifier} MetricName=\"bulkDocsGaveUp\" OTelLib=\"documentMigration\"', 'Sum', 60) / 60 * 60",
+                            "expression": "REMOVE_EMPTY(SEARCH('{OpenSearchMigrations,OTelLib,reason,qualifier} MetricName=\"bulkDocsGaveUp\" OTelLib=\"documentMigration\"', 'Sum', 60) / 60 * 60)",
                             "label": "",
                             "id": "e1",
                             "visible": true,
                             "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetWorkers\" namespace=\"placeholder-namespace\"', 'Sum', 60))",
+                            "label": "",
+                            "id": "e2",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF(FILL(e2, -1) == 0, 0)",
+                            "label": "Fleet idle",
+                            "id": "e3",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#879596"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF((FILL(e2, -1) > 0) AND (FILL(DATAPOINT_COUNT([e1]), 0) == 0), 0)",
+                            "label": "Zero reported samples",
+                            "id": "e4",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#60676D"
                         }
                     ]
                 ],
@@ -3507,7 +3730,7 @@
         {
             "type": "metric",
             "x": 8,
-            "y": 101,
+            "y": 87,
             "width": 8,
             "height": 6,
             "properties": {
@@ -3535,6 +3758,35 @@
                             "visible": true,
                             "region": "REGION"
                         }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetWorkers\" namespace=\"placeholder-namespace\"', 'Sum', 60))",
+                            "label": "",
+                            "id": "e3",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF(FILL(e3, -1) == 0, 0)",
+                            "label": "Fleet idle",
+                            "id": "e4",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#879596"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF((FILL(e3, -1) > 0) AND (FILL(SUM(SEARCH('{OpenSearchMigrations,OTelLib,attempt,outcome,qualifier} MetricName=\"bulkAttempts\" OTelLib=\"documentMigration\"', 'Sum', 60)), 0) == 0), 0)",
+                            "label": "No reported bulk attempts",
+                            "id": "e5",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#60676D"
+                        }
                     ]
                 ],
                 "yAxis": {
@@ -3549,7 +3801,7 @@
         {
             "type": "text",
             "x": 0,
-            "y": 107,
+            "y": 93,
             "width": 24,
             "height": 1,
             "properties": {
@@ -3560,7 +3812,7 @@
         {
             "type": "metric",
             "x": 0,
-            "y": 108,
+            "y": 94,
             "width": 8,
             "height": 6,
             "properties": {
@@ -3573,11 +3825,40 @@
                 "metrics": [
                     [
                         {
-                            "expression": "SEARCH('{OpenSearchMigrations,OTelLib,attempt,outcome,qualifier} MetricName=\"bulkAttempts\" OTelLib=\"documentMigration\"', 'Sum', 60) / 60",
+                            "expression": "REMOVE_EMPTY(SEARCH('{OpenSearchMigrations,OTelLib,attempt,outcome,qualifier} MetricName=\"bulkAttempts\" OTelLib=\"documentMigration\"', 'Sum', 60) / 60)",
                             "label": "",
                             "id": "e1",
                             "visible": true,
                             "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetWorkers\" namespace=\"placeholder-namespace\"', 'Sum', 60))",
+                            "label": "",
+                            "id": "e2",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF(FILL(e2, -1) == 0, 0)",
+                            "label": "Fleet idle",
+                            "id": "e3",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#879596"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF((FILL(e2, -1) > 0) AND (FILL(DATAPOINT_COUNT([e1]), 0) == 0), 0)",
+                            "label": "Zero reported samples",
+                            "id": "e4",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#60676D"
                         }
                     ]
                 ],
@@ -3593,7 +3874,7 @@
         {
             "type": "metric",
             "x": 8,
-            "y": 108,
+            "y": 94,
             "width": 8,
             "height": 6,
             "properties": {
@@ -3657,6 +3938,35 @@
                             "visible": true,
                             "region": "REGION"
                         }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetWorkers\" namespace=\"placeholder-namespace\"', 'Sum', 60))",
+                            "label": "",
+                            "id": "e7",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF(FILL(e7, -1) == 0, 0)",
+                            "label": "Fleet idle",
+                            "id": "e8",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#879596"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF((FILL(e7, -1) > 0) AND (FILL(DATAPOINT_COUNT([e2,e4,e6]), 0) == 0), 0)",
+                            "label": "Zero reported samples",
+                            "id": "e9",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#60676D"
+                        }
                     ]
                 ],
                 "yAxis": {
@@ -3671,7 +3981,7 @@
         {
             "type": "metric",
             "x": 16,
-            "y": 108,
+            "y": 94,
             "width": 8,
             "height": 6,
             "properties": {
@@ -3764,7 +4074,7 @@
         {
             "type": "metric",
             "x": 0,
-            "y": 114,
+            "y": 100,
             "width": 8,
             "height": 6,
             "properties": {
@@ -3837,6 +4147,35 @@
                             "visible": true,
                             "region": "REGION"
                         }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetWorkers\" namespace=\"placeholder-namespace\"', 'Sum', 60))",
+                            "label": "",
+                            "id": "e8",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF(FILL(e8, -1) == 0, 0)",
+                            "label": "Fleet idle",
+                            "id": "e9",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#879596"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF((FILL(e8, -1) > 0) AND (FILL(DATAPOINT_COUNT([e1,e4,e7]), 0) == 0), 0)",
+                            "label": "Zero reported samples",
+                            "id": "e10",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#60676D"
+                        }
                     ]
                 ],
                 "yAxis": {
@@ -3851,7 +4190,7 @@
         {
             "type": "metric",
             "x": 8,
-            "y": 114,
+            "y": 100,
             "width": 8,
             "height": 6,
             "properties": {
@@ -3864,11 +4203,40 @@
                 "metrics": [
                     [
                         {
-                            "expression": "SEARCH('{OpenSearchMigrations,OTelLib,reason,qualifier} MetricName=\"bulkBatchSplits\" OTelLib=\"documentMigration\"', 'Sum', 60) / 60 * 60",
+                            "expression": "REMOVE_EMPTY(SEARCH('{OpenSearchMigrations,OTelLib,reason,qualifier} MetricName=\"bulkBatchSplits\" OTelLib=\"documentMigration\"', 'Sum', 60) / 60 * 60)",
                             "label": "",
                             "id": "e1",
                             "visible": true,
                             "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "SUM(SEARCH('{OpenSearchMigrations,namespace,tier} MetricName=\"rfsFleetWorkers\" namespace=\"placeholder-namespace\"', 'Sum', 60))",
+                            "label": "",
+                            "id": "e2",
+                            "visible": false,
+                            "region": "REGION"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF(FILL(e2, -1) == 0, 0)",
+                            "label": "Fleet idle",
+                            "id": "e3",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#879596"
+                        }
+                    ],
+                    [
+                        {
+                            "expression": "IF((FILL(e2, -1) > 0) AND (FILL(DATAPOINT_COUNT([e1]), 0) == 0), 0)",
+                            "label": "Zero reported samples",
+                            "id": "e4",
+                            "visible": true,
+                            "region": "REGION",
+                            "color": "#60676D"
                         }
                     ]
                 ],

@@ -4,23 +4,13 @@ import {parse as parseYaml} from "yaml";
 import {renderWorkflowTemplate} from "@opensearch-migrations/argo-workflow-builders";
 import {DocumentBulkLoad} from "../src/workflowTemplates/documentBulkLoad";
 
-// Container metrics (cAdvisor, kube-state-metrics) carry no pod labels, so the OTel collector derives each
+// Container metrics from cAdvisor carry no pod labels, so the OTel collector derives each
 // RFS worker's memory tier from its pod name (valuesEks.yaml metric_relabel_configs). This pins that regex
 // against the Deployment names these templates actually render, plus Kubernetes' pod-name suffixes, so a
 // rename on either side fails here instead of silently dropping workers from the per-tier dashboards.
 
 const VALUES_EKS = path.resolve(__dirname,
     "../../../../deployment/k8s/charts/aggregates/migrationAssistantWithArgo/valuesEks.yaml");
-
-function collectorTierRegexes(): RegExp[] {
-    const text = fs.readFileSync(VALUES_EKS, "utf-8");
-    const patterns = [...text.matchAll(/regex: '(\.\*-rfs-t\(\[0-9\]\+\)[^']*)'/g)].map(m => m[1]);
-    // The cAdvisor and kube-state-metrics scrape jobs must agree.
-    expect(patterns.length).toBe(2);
-    expect(new Set(patterns).size).toBe(1);
-    // Prometheus relabel regexes are fully anchored.
-    return patterns.map(p => new RegExp(`^(?:${p})$`));
-}
 
 // The rendered name is an Argo expression such as
 // {{=toJSON(inputs.parameters.sessionName+'-rfs'+'-t'+inputs.parameters.memoryTier)}}; evaluate it with
@@ -47,15 +37,19 @@ function podNames(deploymentName: string): string[] {
 const SESSIONS = ["rfs-0006fca8c38d4f89", "my-migration", "rfs-t9-looks-like-a-tier"];
 
 describe("RFS pod names carry the memory tier the collector labels them with", () => {
-    const regexes = collectorTierRegexes();
+    const values = parseYaml(fs.readFileSync(VALUES_EKS, "utf-8").replace(/\{\{.*?\}\}/g, ""));
+    const config = parseYaml(values.metrics.collectorConfig);
+    const cadvisor = config.receivers.prometheus.config.scrape_configs.find((job: any) => job.job_name === "cadvisor");
+    const tierRules = cadvisor.metric_relabel_configs.filter((rule: any) => rule.target_label === "tier");
+    const podRule = tierRules.find((rule: any) => rule.source_labels.join(",") === "pod");
+    // Prometheus relabel regexes are fully anchored.
+    const tierRegex = new RegExp(`^(?:${podRule.regex})$`);
 
     it.each(SESSIONS.flatMap(session => ["0", "1", "2", "12"].map(tier => [session, tier])))(
         "session %s, tier %s: every worker pod name yields its tier", (sessionName, memoryTier) => {
             const deployment = renderedDeploymentName("createrfstierdeployment", {sessionName, memoryTier});
             for (const pod of podNames(deployment)) {
-                for (const regex of regexes) {
-                    expect(pod.match(regex)?.[1]).toBe(memoryTier);
-                }
+                expect(pod.match(tierRegex)?.[1]).toBe(memoryTier);
             }
         });
 
@@ -63,23 +57,14 @@ describe("RFS pod names carry the memory tier the collector labels them with", (
         + "bulk-loader to tier 0)", sessionName => {
         const deployment = renderedDeploymentName("createrfsdeployment", {sessionName});
         for (const pod of podNames(deployment)) {
-            for (const regex of regexes) {
-                expect(pod).not.toMatch(regex);
-            }
+            expect(pod).not.toMatch(tierRegex);
         }
     });
 
-    it("keeps the default-to-tier-0 rule beside each tier regex", () => {
-        const values = parseYaml(fs.readFileSync(VALUES_EKS, "utf-8").replace(/\{\{.*?\}\}/g, ""));
-        const config = parseYaml(values.metrics.collectorConfig);
-        const jobs = [
-            config.receivers.prometheus.config.scrape_configs[0],
-            config.receivers["prometheus/ksm-cloudwatch"].config.scrape_configs[0],
-        ];
-        for (const job of jobs) {
-            const defaults = job.metric_relabel_configs.filter((rule: any) =>
-                rule.target_label === "tier" && rule.regex === "bulk-loader;");
-            expect(defaults).toEqual([expect.objectContaining({replacement: "0"})]);
-        }
+    it("defaults an unlabeled bulk-loader to tier 0 after matching the pod name", () => {
+        expect(tierRules).toEqual([
+            expect.objectContaining({source_labels: ["pod"], replacement: "$$1"}),
+            expect.objectContaining({source_labels: ["container", "tier"], regex: "bulk-loader;", replacement: "0"}),
+        ]);
     });
 });

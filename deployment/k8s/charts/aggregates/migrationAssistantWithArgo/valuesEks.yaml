@@ -113,46 +113,6 @@ metrics:
                   target_label: tier
                   replacement: '0'
     # {{ if .Values.metrics.cloudWatch.enabled }}
-      # CloudWatch-only scrape of kube-state-metrics for the RFS fleet: which bulk-loader containers are running,
-      # and their configured limits. cAdvisor only sees containers that have started; kube-state-metrics also sees
-      # pods still waiting for a node. It runs as one replica, so exactly one collector (the one on its node)
-      # scrapes it.
-      prometheus/ksm-cloudwatch:
-        config:
-          scrape_configs:
-            - job_name: 'ksm-cloudwatch'
-              scrape_interval: 30s
-              kubernetes_sd_configs:
-                - role: pod
-              relabel_configs:
-                - source_labels: [__meta_kubernetes_pod_node_name]
-                  action: keep
-                  regex: ${K8S_NODE_NAME}
-                - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
-                  action: keep
-                  regex: kube-state-metrics
-                - source_labels: [__meta_kubernetes_pod_container_port_name]
-                  action: keep
-                  regex: http
-              metric_relabel_configs:
-                - source_labels: [container]
-                  action: keep
-                  regex: bulk-loader
-                - source_labels: [__name__, resource]
-                  action: keep
-                  regex: 'kube_pod_container_status_running;|kube_pod_container_info;|kube_pod_container_resource_limits;(cpu|memory)'
-                # RFS memory-tier workers carry their tier in the pod name (<session>-rfs-t<n>-<rs>-<pod>, from
-                # getRfsTierDeploymentName; pinned by rfsTierPodNames.test.ts); RFS workers without memory scaling
-                # are tier 0, matching the tier the workers report on their own metrics.
-                - source_labels: [pod]
-                  regex: '.*-rfs-t([0-9]+)-[a-z0-9]{1,10}-[a-z0-9]{5}'
-                  target_label: tier
-                  replacement: '$$1'  # $$ escapes the collector's own env-var expansion
-                - source_labels: [container, tier]
-                  regex: 'bulk-loader;'
-                  target_label: tier
-                  replacement: '0'
-
       # CloudWatch-only scrape of kubelet PVC statistics. Prometheus continues
       # to use kube-prometheus-stack's kubelet scrape and joins these series to
       # Strimzi PVC labels; CloudWatch has no Kubernetes label join, so the
@@ -281,7 +241,7 @@ metrics:
           match_type: strict
       metricstransform/cadvisor:
         transforms:
-          # Per-tier copy for the RFS dashboards, taken before the update below rewrites the original.
+          # Keep the per-tier CPU counter for comparisons with the fleet sampler.
           - include: container_cpu_usage_seconds_total
             action: insert
             new_name: container_cpu_usage_seconds_by_tier
@@ -310,21 +270,6 @@ metrics:
             operations:
               - action: aggregate_labels
                 label_set: [container, namespace]
-                aggregation_type: sum
-      metricstransform/ksm:
-        transforms:
-          - include: ^kube_pod_container_(status_running|info)$
-            match_type: regexp
-            action: update
-            operations:
-              - action: aggregate_labels
-                label_set: [container, namespace, tier]
-                aggregation_type: sum
-          - include: kube_pod_container_resource_limits
-            action: update
-            operations:
-              - action: aggregate_labels
-                label_set: [container, namespace, tier, resource]
                 aggregation_type: sum
     # {{ end }}
       resource/remove_telemetry_sdk_attributes:
@@ -388,22 +333,13 @@ metrics:
               - container_cpu_usage_seconds_total
               - container_cpu_cfs_periods_total_sum
               - container_cpu_cfs_throttled_periods_total_sum
-          # The RFS fleet by memory tier: cAdvisor CPU summed per node, and kube-state-metrics running containers
-          # and limits (one exporter, so already fleet totals). At most one series per tier.
+          # Cumulative CPU converted to deltas and summed by tier for comparison with fleet snapshots.
           - dimensions: [[container, namespace, tier]]
             label_matchers:
               - label_names: [container]
                 regex: '^bulk-loader$'
             metric_name_selectors:
               - container_cpu_usage_seconds_by_tier
-              - kube_pod_container_status_running
-              - kube_pod_container_info
-          - dimensions: [[container, namespace, tier, resource]]
-            label_matchers:
-              - label_names: [container]
-                regex: '^bulk-loader$'
-            metric_name_selectors:
-              - kube_pod_container_resource_limits
           # Broker disk throughput, which on EKS is EBS throughput against each volume's provisioned limit.
           # Kept only for brokers, whose StatefulSet pod names are stable and bounded. Device is a dimension
           # because the exporter drops points that collide on the same dimensions in one batch.
@@ -472,10 +408,6 @@ metrics:
         metrics/cadvisor:
           receivers: [prometheus]
           processors: [cumulativetodelta/cadvisor, metricstransform/cadvisor, batch]
-          exporters: [awsemf/cadvisor]
-        metrics/ksm-cloudwatch:
-          receivers: [prometheus/ksm-cloudwatch]
-          processors: [metricstransform/ksm, batch]
           exporters: [awsemf/cadvisor]
     # {{ end }}
         metrics/cadvisor-prometheus:
