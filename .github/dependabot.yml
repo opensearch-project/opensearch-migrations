@@ -106,9 +106,7 @@ updates:
 
   - package-ecosystem: "pip"
     directories:
-      - "/migrationConsole/lib/console_link"
-      - "/migrationConsole/cluster_tools"
-      - "/migrationConsole/lib/integ_test"
+      - "/migrationConsole"   # one Pipfile.lock shared by console_link, cluster_tools and integ_test
       - "/libraries/testAutomation"
       - "/test/cleanupDeployment"
       - "/TrafficCapture/dockerSolution/src/main/docker/elasticsearchTestConsole"

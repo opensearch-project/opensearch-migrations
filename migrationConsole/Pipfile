@@ -1,0 +1,58 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+# Shared by console_link, cluster_tools and integ_test (all installed into the console image).
+# Local projects use `file`, not `path`: Dependabot runs `git init` for `path` deps' setup.py.
+
+[packages]
+console-link = {file = "lib/console_link", editable = true}
+cluster-tools = {file = "cluster_tools", editable = true}
+# urllib3 is a transitive dependency, pinned here for CVE management (CVE-2025-66471, CVE-2025-66418)
+urllib3 = ">=2.7.0"
+requests = ">=2.34.2"
+kubernetes = ">=30.1.0"
+boto3 = "*"
+google-cloud-storage = "*"
+pyyaml = "*"
+"ruamel.yaml" = "*"
+Click = "*"
+cerberus = "*"
+awscli = "*"
+pydantic = "==2.12.2"
+rich = "==14.2.0"
+textual = "==7.0.0"
+ijson = "*"
+psutil = "*"
+azure-storage-blob = "*"
+azure-identity = "*"
+argparse = "*"
+argcomplete = "*"
+# integ_test (run in the console with `pytest /root/lib/integ_test/...`)
+certifi = ">=2026.6.17"
+charset-normalizer = ">=3.4.9"
+idna = ">=3.18"
+iniconfig = ">=2.0.0"
+packaging = ">=26.2"
+pluggy = ">=1.0.0"
+pytest = ">=9.1.1"
+pytest-xdist = ">=3.3.1"
+requests-aws4auth = "*"
+pytest-sugar = "*"
+
+[dev-packages]
+pytest-mock = "*"
+requests-mock = "*"
+coverage = "*"
+moto = "*"
+testcontainers = {extras = ["k3s", "opensearch"], version = "*"}
+pytest-asyncio = "*"
+
+[requires]
+python_version = "3.11"
+
+[scripts]
+# Run from a project directory, e.g. `cd lib/console_link && pipenv run test`
+test = "coverage run -m pytest"
+coverage = "coverage"
