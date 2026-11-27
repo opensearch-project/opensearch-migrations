@@ -25,7 +25,7 @@ from .testrun_utils import ARGO_GROUP, ARGO_VERSION, WORKFLOW_PLURAL, runner_sel
 logger = logging.getLogger(__name__)
 
 STRIMZI_GROUP = "kafka.strimzi.io"
-STRIMZI_VERSION = "v1beta2"
+STRIMZI_VERSION = "v1"
 TERMINAL_PHASES = {"Succeeded", "Failed", "Error", "Terminated"}
 FAILED_PHASES = TERMINAL_PHASES - {"Succeeded"}
 POD_SELECTORS = {

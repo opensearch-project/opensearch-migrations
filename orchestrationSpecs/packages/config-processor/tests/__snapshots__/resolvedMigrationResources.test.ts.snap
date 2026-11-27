@@ -57,7 +57,7 @@ exports[`resolved migration resources extracts resolved resource parameters from
           "type": "persistent-claim",
         },
       },
-      "version": "4.0.0",
+      "version": "4.2.2",
     },
   },
   {

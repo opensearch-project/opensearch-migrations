@@ -177,16 +177,15 @@ bounded metric set to CloudWatch. Grafana and CloudWatch panels cover:
 - combined broker/controller request-handler utilization; and
 - JVM heap, garbage collection, CPU, and process uptime.
 
-The managed Kafka 4.0 deployment uses G1 garbage collection. The CloudWatch GC
+The managed Kafka 4.2 deployment uses G1 garbage collection. The CloudWatch GC
 panel names the three G1 collectors explicitly; a customer-supplied JVM
 collector override requires corresponding dashboard changes.
 
-Kafka 4.0 combined-role brokers expose `RequestHandlerAvgIdlePercent` as the
-sum of the broker and controller request-handler pool idle fractions. The
+Since Kafka 4.2 (KIP-1207), `RequestHandlerAvgIdlePercent` on combined-role
+brokers is already a 0–1 fraction across the broker and controller pools. The
 Grafana and CloudWatch utilization panels and the
-`MigrationAssistantKafkaRequestHandlersSaturated` alert divide that value by two
-before converting it to busy percent. This keeps the displayed value on a 0–100% scale for the
-Migration Assistant-managed dual-role broker pool.
+`MigrationAssistantKafkaRequestHandlersSaturated` alert convert it to busy
+percent directly.
 
 Collection can be disabled explicitly:
 

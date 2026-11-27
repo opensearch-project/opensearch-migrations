@@ -171,7 +171,7 @@ data:
                 summary: "Kafka produce or fetch requests are throttled by more than one second"
 
             - alert: MigrationAssistantKafkaRequestHandlersSaturated
-              expr: 100 * (1 - avg by (namespace, pod) (kafka_server_request_handler_idle_ratio{namespace="{{ .Release.Namespace }}"}) / 2) > 80
+              expr: 100 * (1 - avg by (namespace, pod) (kafka_server_request_handler_idle_ratio{namespace="{{ .Release.Namespace }}"})) > 80
               for: 15m
               labels:
                 severity: warning

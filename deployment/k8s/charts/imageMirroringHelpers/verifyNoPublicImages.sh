@@ -1,17 +1,19 @@
-#!/bin/sh
+#!/bin/bash
 # =============================================================================
 # verifyNoPublicImages.sh
 #
 # Verifies that helm template output with ECR values has no references to
 # public registries. Run after generating private-ecr-values.yaml.
 #
-# Usage: ./verify-no-public-images.sh <ecr-host>
+# Usage: ./verifyNoPublicImages.sh <ecr-host>
 # =============================================================================
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-CHART_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+CHART_DIR="$(cd "$SCRIPT_DIR/../aggregates/migrationAssistantWithArgo" && pwd)"
 ECR="${1:-}"
+# Render for the EKS version MA deploys (Chart.yaml kubeVersion); helm 3's default is older and fails it.
+KUBE_VERSION="${KUBE_VERSION:-1.35.0}"
 
 if [ -z "$ECR" ]; then
   echo "Usage: $0 <ecr-host>" >&2
@@ -19,10 +21,10 @@ if [ -z "$ECR" ]; then
 fi
 
 VALUES_FILE=$(mktemp)
-"$SCRIPT_DIR/generatePrivateEcrValues.sh" "$ECR" > "$VALUES_FILE"
+"$CHART_DIR/scripts/generatePrivateEcrValues.sh" "$ECR" > "$VALUES_FILE"
 
 echo "Rendering helm template with ECR values..."
-RENDERED=$(helm template test "$CHART_DIR" \
+RENDERED=$(helm template test "$CHART_DIR" --kube-version "$KUBE_VERSION" \
   -f "$CHART_DIR/values.yaml" \
   -f "$CHART_DIR/valuesEks.yaml" \
   -f "$VALUES_FILE" \
