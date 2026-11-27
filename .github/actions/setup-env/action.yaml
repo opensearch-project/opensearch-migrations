@@ -26,6 +26,16 @@ runs:
         cache-disabled: ${{ inputs.gradle-cache-enabled != 'true' }}
         cache-read-only: ${{ inputs.gradle-cache-read-only }}
 
+    # Gradle gives up on a repository request after 3 attempts over about 3 seconds, then disables the
+    # repository for the rest of the build. Maven Central often rate-limits CI's parallel jobs (HTTP 429), and a
+    # brief network error fails a job the same way. Retry HTTP 408, 429 and 5xx responses and socket errors up to
+    # 7 times, backing off 1, 2, 4, ... 32 seconds. Gradle doesn't retry 403 or 404.
+    - name: Retry transient Gradle repository errors for longer
+      shell: bash
+      run: |
+        mkdir -p "${GRADLE_USER_HOME:-$HOME/.gradle}"
+        echo "systemProp.org.gradle.internal.repository.max.tentatives=7" >> "${GRADLE_USER_HOME:-$HOME/.gradle}/gradle.properties"
+
     # The wrapper tries the distribution download once, so a single read timeout, connection reset,
     # or HTTP 5xx from services.gradle.org fails the job. Jobs often start on a cold Gradle cache.
     - name: Download Gradle wrapper distribution
