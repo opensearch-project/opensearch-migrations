@@ -222,7 +222,7 @@ OTEL_SCOPE_NAME = "fleetMonitor"
 DEFAULT_METRICS_ENDPOINT = "http://otel-collector:4318/v1/metrics"
 
 
-def build_fleet_metrics_payload(tiers, allocation, now_ns):
+def build_fleet_metrics_payload(tiers, allocation, migration_uid, now_ns):
     """OTLP/JSON gauges for one sweep: the monitor's per-tier truth (cap, desired replicas, busy,
     ghosts, eligible, waiting), dimensioned by tier like the worker metrics, so dashboards can
     overlay what the scheduler decided on what the workers did. Pure; the caller posts it."""
@@ -242,7 +242,10 @@ def build_fleet_metrics_payload(tiers, allocation, now_ns):
             points.append({
                 "timeUnixNano": str(now_ns),
                 "asDouble": float(value_of(state, tier)),
-                "attributes": [{"key": "tier", "value": {"stringValue": str(tier)}}],
+                "attributes": [
+                    {"key": "tier", "value": {"stringValue": str(tier)}},
+                    {"key": "migration", "value": {"stringValue": migration_uid}},
+                ],
             })
         metrics.append({"name": name, "unit": "count", "gauge": {"dataPoints": points}})
     return {"resourceMetrics": [{
@@ -251,7 +254,7 @@ def build_fleet_metrics_payload(tiers, allocation, now_ns):
     }]}
 
 
-def emit_fleet_metrics(tiers, allocation):
+def emit_fleet_metrics(tiers, allocation, migration_uid):
     """Post the sweep's gauges through the same collector pipeline worker metrics ride (OTLP/HTTP;
     the collector stamps the qualifier dimension). Metrics must never block scheduling."""
     import requests
@@ -259,7 +262,7 @@ def emit_fleet_metrics(tiers, allocation):
     if not endpoint:
         return
     try:
-        payload = build_fleet_metrics_payload(tiers, allocation, time.time_ns())
+        payload = build_fleet_metrics_payload(tiers, allocation, migration_uid, time.time_ns())
         requests.post(endpoint, json=payload, timeout=5).raise_for_status()
     except Exception as e:  # noqa: BLE001
         logger.warning("Fleet metrics emission failed (%s); continuing the sweep", e)
@@ -503,7 +506,7 @@ def main():
     result = compute_allocation(sweep_input)
     logger.info("Sweep input: %s", json.dumps(sweep_input, sort_keys=True))
     logger.info("Allocation: %s", json.dumps(result, sort_keys=True))
-    emit_fleet_metrics(tiers, result)
+    emit_fleet_metrics(tiers, result, sm_uid)
 
     # Publish the caps: the declarative allocation workers consume at every acquire boundary.
     publish_lease_caps(cluster, index, result["caps"])
