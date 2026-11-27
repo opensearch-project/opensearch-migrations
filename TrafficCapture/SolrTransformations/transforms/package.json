@@ -22,8 +22,8 @@
     "esbuild": "^0.28.1",
     "eslint": "^10.8.0",
     "eslint-config-prettier": "^10.1.8",
-    "peggy": "^5.1.0",
-    "prettier": "^3.9.6",
+    "peggy": "^5.1.1",
+    "prettier": "^3.10.1",
     "vitest": "^5.0.1"
   },
   "optionalDependencies": {
