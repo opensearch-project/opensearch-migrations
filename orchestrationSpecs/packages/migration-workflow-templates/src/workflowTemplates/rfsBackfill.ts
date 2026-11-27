@@ -27,13 +27,6 @@ import {minAvailableForSingleReplicaDependency, scalingFromOptions} from "./comm
 import {RFS_MEMORY_TIER_LABEL} from "./commonUtils/resourceLabels";
 import {CONTAINER_NAMES} from "../containerNames";
 
-// ── Memory-tier scaling plumbing ────────────────────────────────────────────
-// The workflow is the POLICY AUTHOR only: at setup it renders the complete per-tier Deployment
-// manifests and the tier table into a ConfigMap, creates the tier-0 runtime, and applies the
-// monitor CronJob. All fleet reconciliation (per-sweep sizing, tier activation/reactivation,
-// budget arbitration, terminal status) lives in the monitor. No per-tier workflow steps, no
-// loops, no recursion: after setup, the workflow only waits on the SnapshotMigration CR.
-
 export function getRfsTierPolicyConfigMapName(sessionName: BaseExpression<string>) {
     return expr.concat(sessionName, expr.literal("-rfs-tier-policy"));
 }
@@ -51,10 +44,8 @@ export const RfsBackfill = WorkflowBuilder.create({
 
     .addParams(CommonWorkflowParameters)
 
-    // Renders the per-tier Deployment + PDB manifests and the fleet policy into the tier-policy
-    // ConfigMap by deriving each tier from the LIVE tier-0 objects (so the stored shapes can
-    // never drift from what actually runs), then re-applies nothing: the monitor creates and
-    // scales tier fleets from this ConfigMap on its sweeps.
+    // Derive each tier from the live tier-0 Deployment and PDB. The monitor consumes these
+    // manifests and owns replica changes after setup.
     .addTemplate("renderTierPolicy", t => t
         .addRequiredInput("sessionName", typeToken<string>())
         .addRequiredInput("crdName", typeToken<string>())
@@ -84,8 +75,7 @@ export const RfsBackfill = WorkflowBuilder.create({
         .addRetryParameters(CONTAINER_TEMPLATE_RETRY_STRATEGY)
     )
 
-    // Owns RFS lifecycle setup for one SnapshotMigration. Moved from DocumentBulkLoad's
-    // setupAndRunBulkLoad so fullMigration's node tree stays small and all RFS matters live here.
+    // Create the runtime once per SnapshotMigration, then wait while the monitor reconciles it.
     .addTemplate("setupAndRunRfsBackfill", t => t
         .addRequiredInput("sourceVersion", typeToken<z.infer<typeof CLUSTER_VERSION_STRING>>())
         .addRequiredInput("sourceLabel", typeToken<string>())
@@ -171,7 +161,7 @@ export const RfsBackfill = WorkflowBuilder.create({
                     {when: {templateExp: createRfsCluster}}
                 )
 
-                // Feature off: today's single-deployment runtime, byte for byte.
+                // A migration without tier scaling uses the ordinary Deployment.
                 .addStep("startHistoricalBackfillFromConfig", DocumentBulkLoad, "startHistoricalBackfillFromConfig", c =>
                     c.register({
                         ...selectInputsForRegister(b, c),
@@ -180,8 +170,8 @@ export const RfsBackfill = WorkflowBuilder.create({
                     {when: {templateExp: expr.not(scalingEnabled)}}
                 )
 
-                // Feature on: tier-0 runtime (sidecar witness, tier label, tier env), replicas
-                // bootstrap at 1; the monitor's first sweep after shard_setup right-sizes it.
+                // Start tier 0 at the full pod budget so provisioning can overlap shard setup.
+                // The monitor first adjusts replicas after the setup lease completes.
                 .addStep("startTierZeroBackfillFromConfig", DocumentBulkLoad, "startTierZeroBackfillFromConfig", c =>
                     c.register({
                         ...selectInputsForRegister(b, c),

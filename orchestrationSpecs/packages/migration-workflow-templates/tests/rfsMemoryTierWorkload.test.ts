@@ -18,13 +18,6 @@ function parseManifest(manifest: string): any {
     return parseYaml(quoted);
 }
 
-function manifestFor(templateName: string): any {
-    const rendered = renderWorkflowTemplate(DocumentBulkLoad as any) as any;
-    const found = rendered.spec.templates.find((candidate: any) => candidate.name === templateName);
-    expect(found?.resource?.manifest).toBeDefined();
-    return parseManifest(found.resource.manifest);
-}
-
 function rawManifestFor(templateName: string): string {
     const rendered = renderWorkflowTemplate(DocumentBulkLoad as any) as any;
     const found = rendered.spec.templates.find((candidate: any) => candidate.name === templateName);
@@ -33,8 +26,8 @@ function rawManifestFor(templateName: string): string {
 }
 
 describe("per-tier RFS deployment manifest", () => {
-    const deployment = manifestFor("createrfstierdeployment");
-    const pdb = manifestFor("createrfstierpoddisruptionbudget");
+    const deployment = parseManifest(rawManifestFor("createrfstierdeployment"));
+    const pdb = parseManifest(rawManifestFor("createrfstierpoddisruptionbudget"));
 
     it("names the tier deployment <session>-rfs-t<n>", () => {
         expect(deployment.metadata.name).toContain("'-rfs'+'-t'");
