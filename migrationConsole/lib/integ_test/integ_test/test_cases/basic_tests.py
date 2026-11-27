@@ -253,6 +253,7 @@ class Test0002SingleDocumentBackfillWithRfsCoordinatorCluster(MATestBase):
         # The step view can't be checked here: the migration workflow is deleted once it finishes.
         backfill = self._assert_resource_view_reports_backfill()
         self._assert_field(backfill, "phase", "CompletedWithErrors")
+        self._assert_failed_document_counted(backfill)
         logger.info("Failed document observed through the console: %s", record)
 
     def _snapshot_migration_uid(self) -> str:
@@ -334,6 +335,22 @@ class Test0002SingleDocumentBackfillWithRfsCoordinatorCluster(MATestBase):
                 f"Backfill reported CompletedWithErrors with shardsMigrated={migrated} != "
                 f"shardsTotal={total}: {summary}"
             )
+
+    def _assert_failed_document_counted(self, backfill: dict):
+        """The work items' committed metrics count the one failing document, under the shard it lives in, and the
+        resource view shows it. Which shard that is depends on the source's routing, so it isn't asserted."""
+        summary = backfill.get("summary") or {}
+        counts = (summary.get("documentsFailed"), summary.get("documentsFailedNonRetryable"),
+                  summary.get("documentsFailedRetriesExhausted"))
+        if counts != (1, 1, 0):
+            raise AssertionError(f"Expected 1 non-retryable failed document, got {counts}: {backfill}")
+        shards = (backfill.get("failures") or {}).get("shards") or []
+        if [(s.get("index"), s.get("nonRetryable"), s.get("retriesExhausted")) for s in shards] != [
+                (self.index_name, 1, 0)]:
+            raise AssertionError(f"Expected one shard of {self.index_name} with 1 failed document: {backfill}")
+        resource_view = workflow_status_output("--resource-view")
+        if "failed documents: 1 (non-retryable 1, retries exhausted 0)" not in resource_view:
+            raise AssertionError(f"The resource view doesn't show the failed document: {resource_view}")
 
     def _backfill_status(self) -> dict:
         """SnapshotMigration.status.documentBackfill, or {} until the workflow creates the resource."""
