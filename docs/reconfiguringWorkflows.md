@@ -271,6 +271,7 @@ Downstream dependencies that consume the proxy's checksum:
 | `spec.kafkaClusterName` | **Gated** | Changes which Kafka cluster receives captured traffic | Yes (rolling) | ❌ | ❌ |
 | `spec.kafkaTopicName` | **Gated** | Changes which topic receives captured traffic | Yes (rolling) | ❌ | ❌ |
 | `spec.tls.mode` | **Gated**  | TLS mode switch requires cert/secret changes | Yes (rolling) | ❌ | ❌ |
+| `spec.sslProtocols` | **Gated**  | Changes which TLS versions clients may use | Yes (rolling) | ❌ | ❌ |
 | `spec.podReplicas` | Safe       | Scaling is safe, Deployment handles rolling | No | ❌ | ❌ |
 | `spec.resources` | Safe       | Resource limits/requests | Yes (rolling) | ❌ | ❌ |
 | `spec.internetFacing` | Impossible | Changes load balancer scheme; recreate Service | N/A | ❌ | ❌ |

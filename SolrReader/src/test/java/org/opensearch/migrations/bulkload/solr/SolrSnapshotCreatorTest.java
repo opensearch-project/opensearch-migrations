@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
@@ -17,6 +18,7 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -186,6 +188,36 @@ class SolrSnapshotCreatorTest {
             var creator = creatorWithContextPath("");
             creator.createSnapshot();
             assertEquals(List.of("/admin/collections"), requestedPaths);
+        }
+    }
+
+    // Seen in CI: running, running, then one notfound as the finished task leaves the running map.
+    @Test
+    void transientNotFoundKeepsPollingButRepeatedNotFoundFails() throws IOException {
+        var states = new ConcurrentLinkedQueue<>(List.of(
+            "running", "running", "notfound", "completed", "notfound", "notfound", "notfound"));
+        var server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/", exchange -> {
+            var body = ("{\"status\":{\"state\":\"" + states.poll() + "\"}}").getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.start();
+        try {
+            var baseUrl = "http://127.0.0.1:" + server.getAddress().getPort();
+            var connectionContext = new ConnectionContext.SourceArgs() {{
+                host = baseUrl;
+                insecure = true;
+            }}.toConnectionContext();
+            var creator = new SolrSnapshotCreator(baseUrl, "snap1", null, List.of("coll1"), connectionContext);
+            for (var expected : List.of(false, false, false, true, false, false)) {
+                assertEquals(expected, creator.isSnapshotFinished());
+            }
+            assertThrows(SolrSnapshotCreator.SolrBackupFailed.class, creator::isSnapshotFinished);
+        } finally {
+            server.stop(0);
         }
     }
 }

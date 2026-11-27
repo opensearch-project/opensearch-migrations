@@ -129,7 +129,7 @@ source:
 
   extraContainers:
     - name: nginx
-      image: public.ecr.aws/nginx/nginx:1.30-alpine
+      image: public.ecr.aws/nginx/nginx:1.30.8-alpine3.24
       # Listens on 9200, which the chart already declares on the elasticsearch container.
       readinessProbe:
         tcpSocket:

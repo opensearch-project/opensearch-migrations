@@ -27,7 +27,7 @@ ecrAuth:
 charts:
   cert-manager:
     repository: "oci://${ECR}/charts/cert-manager"
-    version: "v1.17.2"
+    version: "v1.17.4"
     values:
       image:
         repository: "${M}/quay.io/jetstack/cert-manager-controller"
@@ -89,22 +89,32 @@ charts:
   kube-prometheus-stack:
     repository: "oci://${ECR}/charts/kube-prometheus-stack"
     values:
+      crds:
+        upgradeJob:
+          image:
+            busybox:
+              registry: "${M}/mirror.gcr.io"
+              repository: library/busybox
+            kubectl:
+              registry: "${M}/registry.k8s.io"
       prometheusOperator:
         image:
           registry: "${M}/quay.io"
         admissionWebhooks:
           patch:
             image:
-              registry: "${M}/registry.k8s.io"
+              registry: "${M}/ghcr.io"
         prometheusConfigReloader:
           image:
             registry: "${M}/quay.io"
+        thanosImage:
+          registry: "${M}/quay.io"
       prometheus:
         prometheusSpec:
           image:
             registry: "${M}/quay.io"
           thanos:
-            image: "${M}/quay.io/thanos/thanos:v0.38.0"
+            image: "${M}/quay.io/thanos/thanos:v0.42.5"
       alertmanager:
         alertmanagerSpec:
           image:
@@ -128,10 +138,6 @@ charts:
         sidecar:
           image:
             registry: "${M}/quay.io"
-        testFramework:
-          image:
-            repository: "${M}/mirror.gcr.io/bats/bats"
-            tag: "v1.4.1"
 
   opentelemetry-operator:
     repository: "oci://${ECR}/charts/opentelemetry-operator"
@@ -160,10 +166,6 @@ charts:
       sidecar:
         image:
           registry: "${M}/quay.io"
-      testFramework:
-        image:
-          repository: "${M}/mirror.gcr.io/bats/bats"
-          tag: "v1.4.1"
 
   jaeger:
     repository: "oci://${ECR}/charts/jaeger"
@@ -194,7 +196,7 @@ charts:
 
   aws-privateca-issuer:
     repository: "oci://${ECR}/charts/aws-privateca-issuer"
-    version: "v1.4.0"
+    version: "v1.4.1"
     values:
       image:
         repository: "${M}/public.ecr.aws/k1n1h4h4/cert-manager-aws-privateca-issuer"
@@ -214,19 +216,19 @@ charts:
 
   ack-acmpca-controller:
     repository: "oci://${ECR}/charts/acmpca-chart"
-    version: "1.2.2"
+    version: "1.8.0"
     values:
       image:
         repository: "${M}/public.ecr.aws/aws-controllers-k8s/acmpca-controller"
-        tag: "1.2.2"
+        tag: "1.8.0"
 
   ack-cloudwatch-controller:
     repository: "oci://${ECR}/charts/cloudwatch-chart"
-    version: "1.4.2"
+    version: "1.12.0"
     values:
       image:
         repository: "${M}/public.ecr.aws/aws-controllers-k8s/cloudwatch-controller"
-        tag: "1.4.2"
+        tag: "1.12.0"
 
 # --- Direct template image overrides ---
 defaultBucketConfiguration:
