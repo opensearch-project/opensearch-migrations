@@ -39,7 +39,7 @@
             "width": 24,
             "height": 2,
             "properties": {
-                "markdown": "**Reading the fleet charts.** Compare migration throughput with CPU consumed and memory working set by tier. The colored bands show measured usage. The gray band shows how much of each running worker’s limit lies above its measured usage, including the full limit of workers awaiting a reading. EC2 cost depends on node size and runtime. CloudWatch averages four fleet snapshots per minute. An idle fleet reads zero. A gray baseline on application charts identifies an idle fleet or zero reported samples while containers were running. See RFS/docs/BULK_TRAFFIC_CONTROL.md for pipeline controls.",
+                "markdown": "**Reading the fleet charts.** Compare migration throughput with CPU consumed and memory working set by tier. The colored bands show measured usage. The gray band shows how much of each running worker’s limit lies above its measured usage, including the full limit of workers awaiting a reading. EC2 cost depends on node size and runtime. CloudWatch averages the successful fleet snapshots each minute (up to four). An idle fleet reads zero. A gray baseline on application charts identifies an idle fleet or zero reported samples while containers were running. See RFS/docs/BULK_TRAFFIC_CONTROL.md for pipeline controls.",
                 "background": "transparent"
             }
         },

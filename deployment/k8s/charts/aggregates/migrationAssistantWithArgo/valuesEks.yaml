@@ -241,14 +241,6 @@ metrics:
           match_type: strict
       metricstransform/cadvisor:
         transforms:
-          # Keep the per-tier CPU counter for comparisons with the fleet sampler.
-          - include: container_cpu_usage_seconds_total
-            action: insert
-            new_name: container_cpu_usage_seconds_by_tier
-            operations:
-              - action: aggregate_labels
-                label_set: [container, namespace, tier]
-                aggregation_type: sum
           - include: container_cpu_usage_seconds_total
             action: update
             operations:
@@ -333,13 +325,6 @@ metrics:
               - container_cpu_usage_seconds_total
               - container_cpu_cfs_periods_total_sum
               - container_cpu_cfs_throttled_periods_total_sum
-          # Cumulative CPU converted to deltas and summed by tier for comparison with fleet snapshots.
-          - dimensions: [[container, namespace, tier]]
-            label_matchers:
-              - label_names: [container]
-                regex: '^bulk-loader$'
-            metric_name_selectors:
-              - container_cpu_usage_seconds_by_tier
           # Broker disk throughput, which on EKS is EBS throughput against each volume's provisioned limit.
           # Kept only for brokers, whose StatefulSet pod names are stable and bounded. Device is a dimension
           # because the exporter drops points that collide on the same dimensions in one batch.

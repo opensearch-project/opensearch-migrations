@@ -914,7 +914,7 @@ SECTIONS = [
                   Gauge("pipelinePreparationChunkDocuments", "Documents per preparation chunk", "avg"),
               ]),
         Panel("Fleet resource sampling per minute",
-              "Each collector takes four fleet snapshots per minute. Worker counts show the average number "
+              "The sampler takes up to four fleet snapshots per minute. Worker counts show the average number "
               "awaiting a fresh CPU or memory sample during those snapshots.",
               "count", [FleetSampling()], cw_only=True),
     ]),
@@ -1056,8 +1056,8 @@ READING_GUIDE = (
     "**Reading the fleet charts.** Compare migration throughput with CPU consumed and memory working set by tier. "
     "The colored bands show measured usage. The gray band shows how much of each running worker’s limit lies "
     "above its measured usage, including the full limit of workers awaiting a reading. EC2 cost depends on "
-    "node size and runtime. CloudWatch averages four "
-    "fleet snapshots per minute. An idle fleet reads zero. A gray baseline on "
+    "node size and runtime. CloudWatch averages the successful "
+    "fleet snapshots each minute (up to four). An idle fleet reads zero. A gray baseline on "
     "application charts identifies an idle fleet or zero reported samples while containers were running. "
     "See RFS/docs/BULK_TRAFFIC_CONTROL.md for pipeline controls.")
 

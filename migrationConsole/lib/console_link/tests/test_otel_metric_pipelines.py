@@ -100,8 +100,6 @@ def test_eks_cadvisor_cpu_is_summed_per_node_from_deltas_before_emf():
     transforms = collector["processors"]["metricstransform/cadvisor"]["transforms"]
     cpu = [t for t in transforms if t["include"] == "container_cpu_usage_seconds_total"]
     assert [(t["action"], t["operations"]) for t in cpu] == [
-        ("insert", [{"action": "aggregate_labels", "label_set": ["container", "namespace", "tier"],
-                     "aggregation_type": "sum"}]),
         ("update", [{"action": "aggregate_labels", "label_set": ["container", "namespace"],
                      "aggregation_type": "sum"}]),
     ]
