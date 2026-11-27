@@ -1,11 +1,13 @@
 import functools
 import json
 import logging
+import os
 import subprocess
 import time
 import boto3
 from botocore.config import Config as BotoConfig
 from botocore.exceptions import ConnectTimeoutError, EndpointConnectionError
+from botocore.session import get_session
 import pytest
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Iterable, Iterator, List, Tuple
@@ -184,26 +186,15 @@ def _any_candidate_has_recent_data(
 
 
 def _cloudwatch_client(region: str):
-    """CloudWatch client that prefers the pod's IAM identity over localstack placeholder creds.
-
-    When localstack is enabled the console env carries static AWS_ACCESS_KEY_ID/SECRET of
-    "test" so in-cluster S3 calls work; those shadow EKS Pod Identity in the default
-    credential chain and break real AWS calls. Resolve credentials with the placeholder env
-    masked whenever a container-credentials endpoint is available.
-    """
-    import os
+    """Use the pod identity for real CloudWatch when LocalStack supplies test credentials."""
+    make_client = boto3.client
+    if os.environ.get("AWS_ACCESS_KEY_ID") == "test" and os.environ.get("AWS_CONTAINER_CREDENTIALS_FULL_URI"):
+        # Skip placeholder credentials only for this client. Other test threads still need them for S3.
+        session = get_session()
+        session.get_component("credential_provider").remove("env")
+        make_client = boto3.Session(botocore_session=session).client
     config = BotoConfig(connect_timeout=10, read_timeout=10, retries={"max_attempts": 1})
-    placeholder = os.environ.get("AWS_ACCESS_KEY_ID") == "test"
-    if placeholder and os.environ.get("AWS_CONTAINER_CREDENTIALS_FULL_URI"):
-        masked = {k: os.environ.pop(k, None)
-                  for k in ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN")}
-        try:
-            session = boto3.Session()
-            session.get_credentials()  # resolve (and cache) container credentials while masked
-            return session.client("cloudwatch", region_name=region, config=config)
-        finally:
-            os.environ.update({k: v for k, v in masked.items() if v is not None})
-    return boto3.client("cloudwatch", region_name=region, config=config)
+    return make_client("cloudwatch", region_name=region, config=config)
 
 
 def assert_cloudwatch_capture_replay_metrics_for_workflow_run(
