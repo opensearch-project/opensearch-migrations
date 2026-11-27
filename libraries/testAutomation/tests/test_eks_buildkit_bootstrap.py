@@ -1,6 +1,7 @@
 """Exercise BuildKit startup failures without Docker or a Kubernetes cluster."""
 
 import os
+import stat
 import subprocess
 from pathlib import Path
 
@@ -11,7 +12,7 @@ BACKEND = Path(__file__).parents[3] / "buildImages/backends/eksKubernetesBuildki
 
 HARNESS = r"""
 export MIGRATIONS_REPO_ROOT_DIR="$REPO_ROOT"
-export KUBE_CONTEXT=migration-eks-test
+export KUBE_CONTEXT="${KUBE_CONTEXT-migration-eks-test}"
 source "$BACKEND"
 printf '0' > "$STATE_DIR/clock"
 printf '0' > "$STATE_DIR/attempts"
@@ -27,11 +28,12 @@ run_with_optional_timeout() {
   shift
   "$@"
 }
-kubectl() { record "kubectl $*"; }
+kubectl() { record "kubectl $*"; [[ "$*" != "config current-context" ]] || echo "${AMBIENT_CONTEXT:-}"; }
 docker() {
   record "docker $*"
   # Match the older Kubernetes driver on Jenkins: unknown options fail at create.
   if [[ "$1 $2" == "buildx create" ]]; then
+    record "create-kubeconfig ${KUBECONFIG-}"
     local arg
     for arg in "$@"; do
       case "$arg" in
@@ -55,6 +57,7 @@ docker() {
   printf 'Nodes:\nName: builder-amd64\nStatus: running\nName: builder-arm64\nStatus: running\n'
 }
 ensure_eks_buildx_builder
+echo "exported BUILDX_BUILDER=${BUILDX_BUILDER-}"
 """
 
 RELEASE_HARNESS = r"""
@@ -84,6 +87,7 @@ def run_bootstrap(tmp_path, **overrides):
         "STATE_DIR": str(tmp_path),
         "BUILDKIT_BOOTSTRAP_TIMEOUT": "900s",
         "BUILDKIT_BOOTSTRAP_ATTEMPTS": "2",
+        "BUILDKIT_KUBECONFIG_DIR": str(tmp_path / "kubeconfigs"),
         **overrides,
     }
     completed = subprocess.run(
@@ -139,7 +143,7 @@ def test_retries_until_both_native_builders_are_running(tmp_path, failure_rc):
     assert completed.returncode == 0, completed.stderr
     inspections = [call for call in calls if call.startswith("docker buildx inspect ")]
     assert len(inspections) == 2
-    assert all(call == "docker buildx inspect builder-migration-eks-test --bootstrap" for call in inspections)
+    assert all(call == "docker buildx inspect builder-migration-eks-test-pinned --bootstrap" for call in inspections)
     assert "sleep 10" in calls
     assert "timeout 900s" in calls
     assert "timeout 890s" in calls
@@ -159,7 +163,7 @@ def test_deadline_also_dumps_provisioning_diagnostics(tmp_path):
     )
     assert completed.returncode != 0
     assert "did not complete within 900s" in completed.stderr
-    assert calls.count("docker buildx inspect builder-migration-eks-test --bootstrap") == 1
+    assert calls.count("docker buildx inspect builder-migration-eks-test-pinned --bootstrap") == 1
     assert "kubectl --context=migration-eks-test describe nodeclaims" in calls
     assert not any(call.startswith("sleep ") for call in calls)
 
@@ -176,13 +180,13 @@ def test_older_driver_retries_cold_start_within_the_configured_deadline(tmp_path
     assert "timeout 300s" in calls
     assert "timeout 170s" in calls
     assert calls.count("sleep 10") == 1
-    assert calls.count("docker buildx inspect builder-migration-eks-test --bootstrap") == 2
+    assert calls.count("docker buildx inspect builder-migration-eks-test-pinned --bootstrap") == 2
 
 
 def test_ready_builder_does_not_retry(tmp_path):
     completed, calls = run_bootstrap(tmp_path, READY_ON_ATTEMPT="1")
     assert completed.returncode == 0, completed.stderr
-    assert calls.count("docker buildx inspect builder-migration-eks-test --bootstrap") == 1
+    assert calls.count("docker buildx inspect builder-migration-eks-test-pinned --bootstrap") == 1
     assert not any(call.startswith("sleep ") for call in calls)
 
 
@@ -207,3 +211,25 @@ def test_missing_or_unhealthy_native_nodes_are_not_accepted(status):
         env={**os.environ, "BACKEND": str(BACKEND), "MIGRATIONS_REPO_ROOT_DIR": str(BACKEND.parents[2])},
     )
     assert completed.returncode != 0
+
+
+def test_builder_is_pinned_to_kube_context_and_selected_only_for_this_shell(tmp_path):
+    completed, calls = run_bootstrap(tmp_path, READY_ON_ATTEMPT="1", KUBECONFIG="/a.yaml:/b.yaml")
+    assert completed.returncode == 0, completed.stderr
+    kubeconfig = tmp_path / "kubeconfigs/builder-migration-eks-test-pinned.kubeconfig"
+    assert "kubectl config view --minify --flatten --context=migration-eks-test" in calls
+    assert stat.S_IMODE(kubeconfig.stat().st_mode) == 0o600
+    assert [c for c in calls if c.startswith("create-kubeconfig")] == [f"create-kubeconfig {kubeconfig}"] * 2
+    assert not any(c.startswith("docker buildx use") for c in calls)
+    assert "exported BUILDX_BUILDER=builder-migration-eks-test-pinned" in completed.stdout
+
+
+def test_without_kube_context_name_and_kubeconfig_are_unchanged(tmp_path):
+    completed, calls = run_bootstrap(
+        tmp_path, READY_ON_ATTEMPT="1", KUBE_CONTEXT="", AMBIENT_CONTEXT="migration-eks-ambient",
+        KUBECONFIG="/caller.yaml",
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert not any(c.startswith("kubectl config view") for c in calls)
+    assert [c for c in calls if c.startswith("create-kubeconfig")] == ["create-kubeconfig /caller.yaml"] * 2
+    assert "docker buildx rm builder-migration-eks-ambient" in calls

@@ -131,12 +131,12 @@ class TestDeleteCrd:
 
         mock_delete_owned.assert_called_once_with(
             'ma',
-            'core.strimzi.io/v1beta2',
+            'core.strimzi.io/v1',
             'strimzipodsets',
             'default-dual-role',
         )
         assert any(
-            call.args == ('ma', 'core.strimzi.io/v1beta2', 'strimzipodsets',
+            call.args == ('ma', 'core.strimzi.io/v1', 'strimzipodsets',
                           'strimzi.io/cluster', 'default')
             for call in mock_wait_for_owned.call_args_list
         )

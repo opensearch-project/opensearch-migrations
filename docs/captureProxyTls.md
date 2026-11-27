@@ -173,6 +173,37 @@ from PEM files via CLI flags:
 The legacy `--sslConfigFile` flag (OpenSearch security plugin YAML format) is still
 supported for backward compatibility but is not recommended for new deployments.
 
+## TLS protocol versions
+
+When TLS is loaded from PEM files (`--sslCertChainFile`), the proxy accepts TLS 1.3 and
+TLS 1.2 from clients by default. TLS 1.1 and TLS 1.0 are not offered, regardless of the
+JVM's own security policy.
+
+In a workflow configuration, set `sslProtocols` under the proxy's `proxyConfig`. It
+defaults to `TLSv1.3,TLSv1.2`, and values other than the supported ones are rejected when
+the configuration is validated:
+
+```yaml
+proxyConfig:
+  listenPort: 9201
+  sslProtocols: "TLSv1.3,TLSv1.2"
+```
+
+When running the proxy directly, pass a comma-separated list to the command line:
+
+```
+--sslProtocols TLSv1.3,TLSv1.2,TLSv1.1
+```
+
+Supported values are `TLSv1.3`, `TLSv1.2`, `TLSv1.1` and `TLSv1`. Any other value, or an
+empty list, fails at startup. The proxy logs a warning when `TLSv1.1` or `TLSv1` is
+enabled.
+
+TLS 1.1 and TLS 1.0 are insecure and should only be enabled for clients that cannot be
+upgraded. The JVM also blocks them through the `jdk.tls.disabledAlgorithms` security
+property, so they only work if that property is relaxed as well, for example with a
+`java.security` override file passed using `-Djava.security.properties`.
+
 ## Sample configurations
 
 - [`proxyWithSelfSignedTls.wf.yaml`](../orchestrationSpecs/packages/config-processor/scripts/samples/proxyWithSelfSignedTls.wf.yaml) — local CA issuer (kind, non-AWS)
