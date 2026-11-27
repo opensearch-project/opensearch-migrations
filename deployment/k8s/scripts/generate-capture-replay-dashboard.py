@@ -634,11 +634,11 @@ def kafka_broker_handlers():
         yleft={"min": 0, "max": 100, "label": "busy %", "showUnits": False},
     )
     idle = kafka_broker_search("kafka_server_request_handler_idle_ratio", "Average")
-    # Kafka 4.0 combined-role brokers add the broker and controller request
-    # handler idle fractions into this legacy metric. Normalize the two pools
-    # back to a 0..1 fraction before converting it to busy percent.
-    w.e(f"100 * (1 - AVG({idle}) / 2)", "Fleet average busy")
-    w.e(f"100 * (1 - MIN({idle}) / 2)", "Busiest broker")
+    # Since Kafka 4.2 (KIP-1207) this legacy metric divides idle time by the
+    # thread count of both the broker and controller request-handler pools, so
+    # combined-role brokers already report a 0..1 fraction.
+    w.e(f"100 * (1 - AVG({idle}))", "Fleet average busy")
+    w.e(f"100 * (1 - MIN({idle}))", "Busiest broker")
     return w
 
 
@@ -1039,9 +1039,8 @@ def layout_kafka_brokers(ws, y):
     y += 1
     ws.append(text(
         "One-minute managed-broker JMX metrics exported to CloudWatch. Request/error dimensions are limited to "
-        "Produce, FetchConsumer, and FetchFollower; topic and partition labels are not exported. Kafka 4.0 "
-        "combined-role brokers report the request-handler idle fractions for both broker and controller pools, "
-        "so the saturation panel normalizes their sum by two.",
+        "Produce, FetchConsumer, and FetchFollower; topic and partition labels are not exported. The "
+        "request-handler saturation panel covers both the broker and controller pools of combined-role brokers.",
         0, y, 24,
     ))
     y += 1

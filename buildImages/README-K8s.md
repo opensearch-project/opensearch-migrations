@@ -15,8 +15,8 @@ For the Docker-hosted local flow used by kind, see [README.md](README.md). The l
 `aws-bootstrap.sh --build` does the following:
 1. Sources `buildImages/backends/eksKubernetesBuildkit.sh` and calls `setup_build_backend`.
 2. `setup_build_backend` installs the `buildImages` helm chart in the `buildkit` namespace (creates the `build-nodepool` Karpenter NodePool, RBAC, and the build-images Job template) with `awsEKSEnabled=true`, `multiArchNative=true`, and `deployBuildkitPods=false` — buildkit Pods are managed by the `kubernetes` buildx driver, not the chart.
-3. `ensure_eks_buildx_builder` creates a `docker buildx` builder named `builder-${KUBE_CONTEXT}` with one node per architecture (`builder-amd64` / `builder-arm64`). Each node is a `--driver=kubernetes` instance pinned to its arch via `nodeselector` and tolerating the `build-nodepool` taint. Bootstrap allows 900s overall by default (`BUILDKIT_BOOTSTRAP_TIMEOUT`) and requires both nodes to report `running`. Unsuccessful inspect commands, including those that exit successfully with inactive nodes, are retried within the same deadline. Each inspect command is bounded by the remaining time when `timeout` or `gtimeout` is available. This works with older Buildx versions that do not support a Kubernetes driver timeout option. On exhaustion, pod and node-provisioning diagnostics are printed.
-4. `gradlew :buildImages:${BUILD_TARGET} -PregistryEndpoint=$MIGRATIONS_ECR_REGISTRY -Pbuilder=builder-${KUBE_CONTEXT}` builds and pushes each image directly to ECR.
+3. `ensure_eks_buildx_builder` creates a `docker buildx` builder named `builder-${KUBE_CONTEXT}-pinned` with one node per architecture (`builder-amd64` / `builder-arm64`). Each node is a `--driver=kubernetes` instance pinned to its arch via `nodeselector` and tolerating the `build-nodepool` taint. The builder gets its own kubeconfig holding only `KUBE_CONTEXT` (under `~/.kube/buildx`), so its pods land on that context whatever the current-context is, and it is selected through `BUILDX_BUILDER` rather than `docker buildx use`. Bootstrap allows 900s overall by default (`BUILDKIT_BOOTSTRAP_TIMEOUT`) and requires both nodes to report `running`. Unsuccessful inspect commands, including those that exit successfully with inactive nodes, are retried within the same deadline. Each inspect command is bounded by the remaining time when `timeout` or `gtimeout` is available. This works with older Buildx versions that do not support a Kubernetes driver timeout option. On exhaustion, pod and node-provisioning diagnostics are printed.
+4. `gradlew :buildImages:${BUILD_TARGET} -PregistryEndpoint=$MIGRATIONS_ECR_REGISTRY -Pbuilder=builder-${KUBE_CONTEXT}-pinned` builds and pushes each image directly to ECR.
 5. After the build, the bootstrap script removes the buildx builder, which terminates the buildkit Pods so the `build-nodepool` can scale back to zero.
 
 If the current `KUBE_CONTEXT` does not match `eks:|gke_|aks-|migration-eks-`, `eksKubernetesBuildkit.sh` aborts and points you at `dockerHostedBuildkit.sh` — the cloud backend is not a fallback for local clusters.
@@ -35,7 +35,7 @@ aws ecr get-login-password --region "${AWS_REGION}" \
 
 ./gradlew buildImagesToRegistry \
   -PregistryEndpoint="${MIGRATIONS_ECR_REGISTRY}" \
-  -Pbuilder="builder-${KUBE_CONTEXT//[^a-zA-Z0-9_-]/-}"
+  -Pbuilder="builder-${KUBE_CONTEXT//[^a-zA-Z0-9_-]/-}-pinned"
 ```
 
 Verify images landed in ECR:
@@ -49,7 +49,7 @@ aws ecr list-images --repository-name "$(echo "${MIGRATIONS_ECR_REGISTRY}" | cut
 Remove the buildx builder when done — this terminates the buildkit Pods so `build-nodepool` can scale to zero:
 
 ```bash
-docker buildx rm "builder-${KUBE_CONTEXT//[^a-zA-Z0-9_-]/-}"
+docker buildx rm "builder-${KUBE_CONTEXT//[^a-zA-Z0-9_-]/-}-pinned"
 ```
 
 To remove the helm release entirely:

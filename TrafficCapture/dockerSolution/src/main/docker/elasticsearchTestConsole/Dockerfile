@@ -1,6 +1,7 @@
 # Global ARGs (must be before first FROM to be usable in FROM lines)
-ARG BUILDER_IMAGE=docker.io/library/amazonlinux:2023
-ARG RUNTIME_IMAGE=docker.io/library/amazonlinux:2023
+# Pinned by release tag and digest; dnf installs from that image's own AL2023 release.
+ARG BUILDER_IMAGE=docker.io/library/amazonlinux:2023.12.20261120.0@sha256:edd3297df7d444ab9a7896b763d5305d4bab57d2fb3943e831c1713b97d32d9d
+ARG RUNTIME_IMAGE=docker.io/library/amazonlinux:2023.12.20261120.0@sha256:edd3297df7d444ab9a7896b763d5305d4bab57d2fb3943e831c1713b97d32d9d
 
 # ---------- 1) Builder ----------
 FROM ${BUILDER_IMAGE} AS builder

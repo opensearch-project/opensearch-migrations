@@ -4140,7 +4140,7 @@
             "width": 24,
             "height": 1,
             "properties": {
-                "markdown": "One-minute managed-broker JMX metrics exported to CloudWatch. Request/error dimensions are limited to Produce, FetchConsumer, and FetchFollower; topic and partition labels are not exported. Kafka 4.0 combined-role brokers report the request-handler idle fractions for both broker and controller pools, so the saturation panel normalizes their sum by two.",
+                "markdown": "One-minute managed-broker JMX metrics exported to CloudWatch. Request/error dimensions are limited to Produce, FetchConsumer, and FetchFollower; topic and partition labels are not exported. The request-handler saturation panel covers both the broker and controller pools of combined-role brokers.",
                 "background": "transparent"
             }
         },
@@ -4339,7 +4339,7 @@
                 "metrics": [
                     [
                         {
-                            "expression": "100 * (1 - AVG(SEARCH('{OpenSearchMigrations,EKSClusterName,qualifier,namespace,kafka_cluster,pod} EKSClusterName=\"EKS_CLUSTER_NAME\" qualifier=\"MA_QUALIFIER\" namespace=\"MA_NAMESPACE\" MetricName=\"kafka_server_request_handler_idle_ratio\"', 'Average', 60)) / 2)",
+                            "expression": "100 * (1 - AVG(SEARCH('{OpenSearchMigrations,EKSClusterName,qualifier,namespace,kafka_cluster,pod} EKSClusterName=\"EKS_CLUSTER_NAME\" qualifier=\"MA_QUALIFIER\" namespace=\"MA_NAMESPACE\" MetricName=\"kafka_server_request_handler_idle_ratio\"', 'Average', 60)))",
                             "id": "e1",
                             "visible": true,
                             "label": "Fleet average busy"
@@ -4347,7 +4347,7 @@
                     ],
                     [
                         {
-                            "expression": "100 * (1 - MIN(SEARCH('{OpenSearchMigrations,EKSClusterName,qualifier,namespace,kafka_cluster,pod} EKSClusterName=\"EKS_CLUSTER_NAME\" qualifier=\"MA_QUALIFIER\" namespace=\"MA_NAMESPACE\" MetricName=\"kafka_server_request_handler_idle_ratio\"', 'Average', 60)) / 2)",
+                            "expression": "100 * (1 - MIN(SEARCH('{OpenSearchMigrations,EKSClusterName,qualifier,namespace,kafka_cluster,pod} EKSClusterName=\"EKS_CLUSTER_NAME\" qualifier=\"MA_QUALIFIER\" namespace=\"MA_NAMESPACE\" MetricName=\"kafka_server_request_handler_idle_ratio\"', 'Average', 60)))",
                             "id": "e2",
                             "visible": true,
                             "label": "Busiest broker"

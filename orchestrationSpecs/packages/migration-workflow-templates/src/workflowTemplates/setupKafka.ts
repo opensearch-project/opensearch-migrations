@@ -223,7 +223,7 @@ function makeManagedKafkaSpecNoAuth(args: {
     return expr.mergeDicts(
         expr.makeDict({
             version: args.version,
-            metadataVersion: "4.0-IV3",
+            metadataVersion: "4.2-IV1",
             listeners: expr.toArray(makePlainListener(), makeTlsListener()),
             metricsConfig: makeManagedKafkaMetricsConfig(),
         }),
@@ -241,7 +241,7 @@ function makeManagedKafkaSpecScram(args: {
     return expr.mergeDicts(
         expr.makeDict({
             version: args.version,
-            metadataVersion: "4.0-IV3",
+            metadataVersion: "4.2-IV1",
             listeners: expr.toArray(makeScramListener()),
             metricsConfig: makeManagedKafkaMetricsConfig(),
         }),
