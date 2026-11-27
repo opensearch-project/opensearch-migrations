@@ -2630,7 +2630,7 @@
           "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: SnapshotMigration\nmetadata:\n  name: {{=toJSON(inputs.parameters.resourceName)}}\n",
           "action": "get",
           "successCondition": "{{='status.phase == Completed, status.'+inputs.parameters.checksumField+' == '+inputs.parameters.configChecksum}}",
-          "failureCondition": "status.phase == Error"
+          "failureCondition": "status.phase in (Error, Failed)"
         },
         "retryStrategy": {
           "limit": "20",

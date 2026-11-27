@@ -392,64 +392,38 @@ class Cluster:
         logger.info(f"Executing command: {display_command}")
         subprocess.run(command, shell=True)
 
-    def fetch_all_documents(self, index_name: str, batch_size: int = 100) -> Generator[Dict[str, Any], None, None]:
-        """
-        Generator that fetches all documents from the specified index in batches
-        """
-
-        session = requests.Session()
-
-        # Step 1: Initiate the scroll
+    def scroll_hit_pages(self, index_name: str, search: dict) -> Generator[list, None, None]:
+        """Yield pages from the same search snapshot and release the latest scroll ID on exit."""
         path = f"/{index_name}/_search?scroll=1m"
-        headers = {'Content-Type': 'application/json'}
-        body = json.dumps({"size": batch_size, "query": {"match_all": {}}})
-        response = self.call_api(
-            path=path,
-            method=HttpMethod.POST,
-            data=body,
-            headers=headers,
-            session=session
-        )
+        body = search
+        scroll_id = None
+        headers = {"Content-Type": "application/json"}
+        with requests.Session() as session:
+            try:
+                while True:
+                    page = self.call_api(path, method=HttpMethod.POST, data=json.dumps(body),
+                                         headers=headers, session=session).json()
+                    next_id = page.get("_scroll_id")
+                    scroll_id = next_id or scroll_id
+                    if page.get("timed_out") or page.get("_shards", {}).get("failed", 0):
+                        raise RuntimeError(f"Incomplete search response from {index_name}")
+                    hits = page["hits"]["hits"]
+                    if not hits:
+                        break
+                    yield hits
+                    if not next_id:
+                        break
+                    path = "/_search/scroll"
+                    body = {"scroll": "1m", "scroll_id": next_id}
+            finally:
+                if scroll_id:
+                    self.call_api("/_search/scroll", method=HttpMethod.DELETE,
+                                  data=json.dumps({"scroll_id": scroll_id}), headers=headers,
+                                  session=session, raise_error=False)
 
-        response_json = response.json()
-        scroll_id = response_json.get('_scroll_id')
-        hits = response_json.get('hits', {}).get('hits', [])
-
-        # Yield the first batch of documents
-        if hits:
-            yield {hit['_id']: hit['_source'] for hit in hits}
-
-        # Step 2: Continue scrolling until no more documents
-        while scroll_id and hits:
-            path = "/_search/scroll"
-            body = json.dumps({"scroll": "1m", "scroll_id": scroll_id})
-            response = self.call_api(
-                path=path,
-                method=HttpMethod.POST,
-                data=body,
-                headers=headers,
-                session=session
-            )
-
-            response_json = response.json()
-            scroll_id = response_json.get('_scroll_id')
-            hits = response_json.get('hits', {}).get('hits', [])
-
-            if hits:
-                yield {hit['_id']: hit['_source'] for hit in hits}
-
-        # Step 3: Cleanup the scroll if necessary
-        if scroll_id:
-            path = "/_search/scroll"
-            body = json.dumps({"scroll_id": scroll_id})
-            self.call_api(
-                path=path,
-                method=HttpMethod.DELETE,
-                data=body,
-                headers=headers,
-                session=session,
-                raise_error=False
-            )
+    def fetch_all_documents(self, index_name: str, batch_size: int = 100) -> Generator[Dict[str, Any], None, None]:
+        for hits in self.scroll_hit_pages(index_name, {"size": batch_size, "query": {"match_all": {}}}):
+            yield {hit["_id"]: hit["_source"] for hit in hits}
 
 
 class SourceCluster(Cluster):

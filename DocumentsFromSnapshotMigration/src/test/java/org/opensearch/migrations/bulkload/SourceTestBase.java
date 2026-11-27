@@ -279,7 +279,7 @@ public class SourceTestBase {
                     target.getUrl(), clockJitter, testContext,
                     sourceVersion, targetVersion, transformationConfig, allowlist
                 );
-                if (workResult == CompletionStatus.NOTHING_DONE) {
+                if (workResult.acquiredNoWork()) {
                     throw new ExpectedMigrationWorkTerminationException(
                         new RfsMigrateDocuments.NoWorkLeftException("Pipeline returned NOTHING_DONE"),
                         runNumber

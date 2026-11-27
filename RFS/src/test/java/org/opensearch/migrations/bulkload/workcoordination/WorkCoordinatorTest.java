@@ -287,11 +287,17 @@ public class WorkCoordinatorTest {
             );
             Assertions.assertEquals(NUM_DOCS, seenWorkerItems.size(), "Not all work items were processed");
 
-            // Validate that no further work is available
+            // Validate that no further work is available.  While items are merely leased the
+            // outcome is "nothing available"; once everything is complete the precheck reports
+            // the stronger "no work left anywhere".
             try (var workCoordinator = factory.get(httpClientSupplier.get(), 3600, "NONE")) {
                 var nextWorkItem = workCoordinator.acquireNextWorkItem(EXPIRATION, testContext::createAcquireNextItemContext);
                 log.atInfo().setMessage("Next work item picked={}").addArgument(nextWorkItem).log();
-                Assertions.assertInstanceOf(IWorkCoordinator.NoAvailableWorkToBeDone.class, nextWorkItem);
+                if (markAsComplete) {
+                    Assertions.assertInstanceOf(IWorkCoordinator.NoWorkLeftToAcquire.class, nextWorkItem);
+                } else {
+                    Assertions.assertInstanceOf(IWorkCoordinator.NoAvailableWorkToBeDone.class, nextWorkItem);
+                }
             } catch (OpenSearchWorkCoordinator.PotentialClockDriftDetectedException e) {
                 log.atError().setCause(e)
                         .setMessage("Unexpected clock drift error. Got response: {}")

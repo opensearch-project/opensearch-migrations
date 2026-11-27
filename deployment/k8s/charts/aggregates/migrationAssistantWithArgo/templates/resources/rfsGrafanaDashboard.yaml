@@ -86,13 +86,13 @@ data:
           },
           "options": {
             "mode": "markdown",
-            "content": "**How to read this dashboard.** The first section is aligned into three vertical stories: migration results, worker capacity, and target feedback. Read across a row to explain a rate change, then down a column for detail. The second section shows throughput and request shape; later sections are diagnosis and controller internals. Rates are fleet totals unless marked otherwise. CloudWatch fleet gauges are one-minute averages, so worker counts can be fractional during transitions. The controls are specified in RFS/docs/BULK_TRAFFIC_CONTROL.md."
+            "content": "**Migration progress.** Source processed includes recorded failures. Failed documents are final outcomes. Retries can produce several item errors for one document.  \n**Worker resources.** Colored bands show measured usage by tier. Gray fills the remaining container limit, including workers awaiting a reading. CloudWatch averages up to four fleet snapshots per minute. An idle fleet reads zero. Gray baselines on application charts mark an idle fleet or missing application samples."
           }
         },
         {
           "type": "row",
           "id": 2,
-          "title": "Operator overview",
+          "title": "Migration overview",
           "collapsed": false,
           "gridPos": {
             "h": 1,
@@ -115,7 +115,7 @@ data:
           },
           "options": {
             "mode": "markdown",
-            "content": "### Migration results"
+            "content": "### Migration progress"
           }
         },
         {
@@ -153,8 +153,8 @@ data:
         {
           "type": "timeseries",
           "id": 6,
-          "title": "Documents migrated per second",
-          "description": "Documents successfully written to the target, fleet total per second. A sustained drop matters only after comparing it with the worker-capacity and target-feedback panels in the same row.",
+          "title": "Source documents processed per second",
+          "description": "Source documents in batches that advanced, including documents recorded as failures. Compare with Failed documents per minute to see whether documents need attention.",
           "datasource": {
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
@@ -163,7 +163,7 @@ data:
             {
               "refId": "A",
               "expr": "(sum(max by (exported_instance) (rate(pipelineDocsMigrated_count_total{otel_scope_name=\"documentMigration\"}[$__rate_interval])))) or vector(0)",
-              "legendFormat": "Documents/s",
+              "legendFormat": "Source processed",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${DS_PROMETHEUS}"
@@ -287,7 +287,7 @@ data:
           "type": "timeseries",
           "id": 8,
           "title": "Target request outcomes (attempts/s)",
-          "description": "Bulk HTTP requests per second, grouped into operator-facing outcomes. The stack is ordered with requests accepted on the first try at the bottom, then requests accepted after retry, item errors, target throttling, no response, and other errors. A growing upper portion means more request work is being repeated or rejected. The detailed first-versus-retry outcome matrix is in the expert section.",
+          "description": "Bulk HTTP requests per second, grouped into operator-facing outcomes. The stack is ordered with requests accepted on the first try at the bottom, then requests accepted after retry, item errors, target throttling, no response, and other errors. A growing upper portion means more request work is being repeated or rejected. The detailed first-versus-retry outcome matrix is in Flow-control internals.",
           "datasource": {
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
@@ -295,7 +295,7 @@ data:
           "targets": [
             {
               "refId": "A",
-              "expr": "(sum(max by (exported_instance,attempt,outcome) (rate(bulkAttempts_count_total{otel_scope_name=\"documentMigration\",attempt=\"first\",outcome=\"ok\"}[$__rate_interval])))) or vector(0)",
+              "expr": "(sum((((max by (exported_instance,attempt,outcome) (last_over_time(bulkAttempts_count_total{otel_scope_name=\"documentMigration\",outcome=\"ok\",attempt=\"first\"}[$__rate_interval])) - max by (exported_instance,attempt,outcome) (bulkAttempts_count_total{otel_scope_name=\"documentMigration\",outcome=\"ok\",attempt=\"first\"} offset $__rate_interval)) or max by (exported_instance,attempt,outcome) (last_over_time(bulkAttempts_count_total{otel_scope_name=\"documentMigration\",outcome=\"ok\",attempt=\"first\"}[$__rate_interval]))) / ($__rate_interval_ms / 1000))) or vector(0))",
               "legendFormat": "Accepted first try",
               "datasource": {
                 "type": "prometheus",
@@ -304,7 +304,7 @@ data:
             },
             {
               "refId": "B",
-              "expr": "(sum(max by (exported_instance,attempt,outcome) (rate(bulkAttempts_count_total{otel_scope_name=\"documentMigration\",attempt=\"retry\",outcome=\"ok\"}[$__rate_interval])))) or vector(0)",
+              "expr": "(sum((((max by (exported_instance,attempt,outcome) (last_over_time(bulkAttempts_count_total{otel_scope_name=\"documentMigration\",outcome=\"ok\",attempt=\"retry\"}[$__rate_interval])) - max by (exported_instance,attempt,outcome) (bulkAttempts_count_total{otel_scope_name=\"documentMigration\",outcome=\"ok\",attempt=\"retry\"} offset $__rate_interval)) or max by (exported_instance,attempt,outcome) (last_over_time(bulkAttempts_count_total{otel_scope_name=\"documentMigration\",outcome=\"ok\",attempt=\"retry\"}[$__rate_interval]))) / ($__rate_interval_ms / 1000))) or vector(0))",
               "legendFormat": "Accepted after retry",
               "datasource": {
                 "type": "prometheus",
@@ -313,7 +313,7 @@ data:
             },
             {
               "refId": "C",
-              "expr": "(sum(max by (exported_instance,attempt,outcome) (rate(bulkAttempts_count_total{otel_scope_name=\"documentMigration\",outcome=\"item_errors\"}[$__rate_interval])))) or vector(0)",
+              "expr": "(sum((((max by (exported_instance,attempt,outcome) (last_over_time(bulkAttempts_count_total{otel_scope_name=\"documentMigration\",outcome=\"item_errors\"}[$__rate_interval])) - max by (exported_instance,attempt,outcome) (bulkAttempts_count_total{otel_scope_name=\"documentMigration\",outcome=\"item_errors\"} offset $__rate_interval)) or max by (exported_instance,attempt,outcome) (last_over_time(bulkAttempts_count_total{otel_scope_name=\"documentMigration\",outcome=\"item_errors\"}[$__rate_interval]))) / ($__rate_interval_ms / 1000))) or vector(0))",
               "legendFormat": "Response had item errors",
               "datasource": {
                 "type": "prometheus",
@@ -322,7 +322,7 @@ data:
             },
             {
               "refId": "D",
-              "expr": "(sum(max by (exported_instance,attempt,outcome) (rate(bulkAttempts_count_total{otel_scope_name=\"documentMigration\",outcome=\"throttled_429\"}[$__rate_interval]))) + sum(max by (exported_instance,attempt,outcome) (rate(bulkAttempts_count_total{otel_scope_name=\"documentMigration\",outcome=\"admission_rejected\"}[$__rate_interval])))) or vector(0)",
+              "expr": "(sum((((max by (exported_instance,attempt,outcome) (last_over_time(bulkAttempts_count_total{otel_scope_name=\"documentMigration\",outcome=\"throttled_429\"}[$__rate_interval])) - max by (exported_instance,attempt,outcome) (bulkAttempts_count_total{otel_scope_name=\"documentMigration\",outcome=\"throttled_429\"} offset $__rate_interval)) or max by (exported_instance,attempt,outcome) (last_over_time(bulkAttempts_count_total{otel_scope_name=\"documentMigration\",outcome=\"throttled_429\"}[$__rate_interval]))) / ($__rate_interval_ms / 1000))) or vector(0)) + (sum((((max by (exported_instance,attempt,outcome) (last_over_time(bulkAttempts_count_total{otel_scope_name=\"documentMigration\",outcome=\"admission_rejected\"}[$__rate_interval])) - max by (exported_instance,attempt,outcome) (bulkAttempts_count_total{otel_scope_name=\"documentMigration\",outcome=\"admission_rejected\"} offset $__rate_interval)) or max by (exported_instance,attempt,outcome) (last_over_time(bulkAttempts_count_total{otel_scope_name=\"documentMigration\",outcome=\"admission_rejected\"}[$__rate_interval]))) / ($__rate_interval_ms / 1000))) or vector(0))",
               "legendFormat": "Target throttled",
               "datasource": {
                 "type": "prometheus",
@@ -331,7 +331,7 @@ data:
             },
             {
               "refId": "E",
-              "expr": "(sum(max by (exported_instance,attempt,outcome) (rate(bulkAttempts_count_total{otel_scope_name=\"documentMigration\",outcome=\"timeout\"}[$__rate_interval]))) + sum(max by (exported_instance,attempt,outcome) (rate(bulkAttempts_count_total{otel_scope_name=\"documentMigration\",outcome=\"connection_reset\"}[$__rate_interval]))) + sum(max by (exported_instance,attempt,outcome) (rate(bulkAttempts_count_total{otel_scope_name=\"documentMigration\",outcome=\"connect_failed\"}[$__rate_interval])))) or vector(0)",
+              "expr": "(sum((((max by (exported_instance,attempt,outcome) (last_over_time(bulkAttempts_count_total{otel_scope_name=\"documentMigration\",outcome=\"timeout\"}[$__rate_interval])) - max by (exported_instance,attempt,outcome) (bulkAttempts_count_total{otel_scope_name=\"documentMigration\",outcome=\"timeout\"} offset $__rate_interval)) or max by (exported_instance,attempt,outcome) (last_over_time(bulkAttempts_count_total{otel_scope_name=\"documentMigration\",outcome=\"timeout\"}[$__rate_interval]))) / ($__rate_interval_ms / 1000))) or vector(0)) + (sum((((max by (exported_instance,attempt,outcome) (last_over_time(bulkAttempts_count_total{otel_scope_name=\"documentMigration\",outcome=\"connection_reset\"}[$__rate_interval])) - max by (exported_instance,attempt,outcome) (bulkAttempts_count_total{otel_scope_name=\"documentMigration\",outcome=\"connection_reset\"} offset $__rate_interval)) or max by (exported_instance,attempt,outcome) (last_over_time(bulkAttempts_count_total{otel_scope_name=\"documentMigration\",outcome=\"connection_reset\"}[$__rate_interval]))) / ($__rate_interval_ms / 1000))) or vector(0)) + (sum((((max by (exported_instance,attempt,outcome) (last_over_time(bulkAttempts_count_total{otel_scope_name=\"documentMigration\",outcome=\"connect_failed\"}[$__rate_interval])) - max by (exported_instance,attempt,outcome) (bulkAttempts_count_total{otel_scope_name=\"documentMigration\",outcome=\"connect_failed\"} offset $__rate_interval)) or max by (exported_instance,attempt,outcome) (last_over_time(bulkAttempts_count_total{otel_scope_name=\"documentMigration\",outcome=\"connect_failed\"}[$__rate_interval]))) / ($__rate_interval_ms / 1000))) or vector(0))",
               "legendFormat": "No response",
               "datasource": {
                 "type": "prometheus",
@@ -340,7 +340,7 @@ data:
             },
             {
               "refId": "F",
-              "expr": "(sum(max by (exported_instance,attempt,outcome) (rate(bulkAttempts_count_total{otel_scope_name=\"documentMigration\",outcome=\"payload_413\"}[$__rate_interval]))) + sum(max by (exported_instance,attempt,outcome) (rate(bulkAttempts_count_total{otel_scope_name=\"documentMigration\",outcome=\"other_4xx\"}[$__rate_interval]))) + sum(max by (exported_instance,attempt,outcome) (rate(bulkAttempts_count_total{otel_scope_name=\"documentMigration\",outcome=\"5xx\"}[$__rate_interval]))) + sum(max by (exported_instance,attempt,outcome) (rate(bulkAttempts_count_total{otel_scope_name=\"documentMigration\",outcome=\"other_status\"}[$__rate_interval])))) or vector(0)",
+              "expr": "(sum((((max by (exported_instance,attempt,outcome) (last_over_time(bulkAttempts_count_total{otel_scope_name=\"documentMigration\",outcome=\"payload_413\"}[$__rate_interval])) - max by (exported_instance,attempt,outcome) (bulkAttempts_count_total{otel_scope_name=\"documentMigration\",outcome=\"payload_413\"} offset $__rate_interval)) or max by (exported_instance,attempt,outcome) (last_over_time(bulkAttempts_count_total{otel_scope_name=\"documentMigration\",outcome=\"payload_413\"}[$__rate_interval]))) / ($__rate_interval_ms / 1000))) or vector(0)) + (sum((((max by (exported_instance,attempt,outcome) (last_over_time(bulkAttempts_count_total{otel_scope_name=\"documentMigration\",outcome=\"other_4xx\"}[$__rate_interval])) - max by (exported_instance,attempt,outcome) (bulkAttempts_count_total{otel_scope_name=\"documentMigration\",outcome=\"other_4xx\"} offset $__rate_interval)) or max by (exported_instance,attempt,outcome) (last_over_time(bulkAttempts_count_total{otel_scope_name=\"documentMigration\",outcome=\"other_4xx\"}[$__rate_interval]))) / ($__rate_interval_ms / 1000))) or vector(0)) + (sum((((max by (exported_instance,attempt,outcome) (last_over_time(bulkAttempts_count_total{otel_scope_name=\"documentMigration\",outcome=\"5xx\"}[$__rate_interval])) - max by (exported_instance,attempt,outcome) (bulkAttempts_count_total{otel_scope_name=\"documentMigration\",outcome=\"5xx\"} offset $__rate_interval)) or max by (exported_instance,attempt,outcome) (last_over_time(bulkAttempts_count_total{otel_scope_name=\"documentMigration\",outcome=\"5xx\"}[$__rate_interval]))) / ($__rate_interval_ms / 1000))) or vector(0)) + (sum((((max by (exported_instance,attempt,outcome) (last_over_time(bulkAttempts_count_total{otel_scope_name=\"documentMigration\",outcome=\"other_status\"}[$__rate_interval])) - max by (exported_instance,attempt,outcome) (bulkAttempts_count_total{otel_scope_name=\"documentMigration\",outcome=\"other_status\"} offset $__rate_interval)) or max by (exported_instance,attempt,outcome) (last_over_time(bulkAttempts_count_total{otel_scope_name=\"documentMigration\",outcome=\"other_status\"}[$__rate_interval]))) / ($__rate_interval_ms / 1000))) or vector(0))",
               "legendFormat": "Other errors",
               "datasource": {
                 "type": "prometheus",
@@ -383,8 +383,8 @@ data:
         {
           "type": "timeseries",
           "id": 9,
-          "title": "Documents requiring manual action (per minute)",
-          "description": "Documents that did not migrate and were recorded as terminal failures, by failure class. NON_RETRYABLE is a document/request problem that retrying cannot fix; RETRYABLE_EXHAUSTED was given up after its retry policy. These are the documents an operator must inspect and replay or correct. Target throttles and temporary unavailability do not appear here unless a document ultimately fails.",
+          "title": "Failed documents per minute",
+          "description": "Documents RFS stopped trying to migrate. The stack shows the total that need inspection. A non-retryable error requires a correction. For documents that reached the retry limit, see the reason breakdown in Retries and document failures.",
           "datasource": {
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
@@ -393,7 +393,7 @@ data:
             {
               "refId": "A",
               "expr": "(sum(max by (exported_instance,failureClass) (rate(bulkDocumentsFailed_count_total{otel_scope_name=\"documentMigration\",failureClass=\"NON_RETRYABLE\"}[$__rate_interval]))) * 60) or vector(0)",
-              "legendFormat": "Cannot be retried",
+              "legendFormat": "Non-retryable error",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${DS_PROMETHEUS}"
@@ -402,7 +402,7 @@ data:
             {
               "refId": "B",
               "expr": "(sum(max by (exported_instance,failureClass) (rate(bulkDocumentsFailed_count_total{otel_scope_name=\"documentMigration\",failureClass=\"RETRYABLE_EXHAUSTED\"}[$__rate_interval]))) * 60) or vector(0)",
-              "legendFormat": "Retries exhausted",
+              "legendFormat": "Retry limit reached",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${DS_PROMETHEUS}"
@@ -453,7 +453,7 @@ data:
           "targets": [
             {
               "refId": "A",
-              "expr": "sum((max by (exported_instance) (bulkWorkersByLimitUtilization_count{otel_scope_name=\"documentMigration\",range=\"0-24%\"})) and on (exported_instance) (max by (exported_instance,phase) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0))",
+              "expr": "sum((max by (exported_instance) (bulkWorkersByLimitUtilization_count{otel_scope_name=\"documentMigration\",range=\"0-24%\"})) and on (exported_instance) (max by (exported_instance,phase,tier) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0))",
               "legendFormat": "0–24%",
               "datasource": {
                 "type": "prometheus",
@@ -462,7 +462,7 @@ data:
             },
             {
               "refId": "B",
-              "expr": "sum((max by (exported_instance) (bulkWorkersByLimitUtilization_count{otel_scope_name=\"documentMigration\",range=\"25-49%\"})) and on (exported_instance) (max by (exported_instance,phase) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0))",
+              "expr": "sum((max by (exported_instance) (bulkWorkersByLimitUtilization_count{otel_scope_name=\"documentMigration\",range=\"25-49%\"})) and on (exported_instance) (max by (exported_instance,phase,tier) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0))",
               "legendFormat": "25–49%",
               "datasource": {
                 "type": "prometheus",
@@ -471,7 +471,7 @@ data:
             },
             {
               "refId": "C",
-              "expr": "sum((max by (exported_instance) (bulkWorkersByLimitUtilization_count{otel_scope_name=\"documentMigration\",range=\"50-74%\"})) and on (exported_instance) (max by (exported_instance,phase) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0))",
+              "expr": "sum((max by (exported_instance) (bulkWorkersByLimitUtilization_count{otel_scope_name=\"documentMigration\",range=\"50-74%\"})) and on (exported_instance) (max by (exported_instance,phase,tier) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0))",
               "legendFormat": "50–74%",
               "datasource": {
                 "type": "prometheus",
@@ -480,7 +480,7 @@ data:
             },
             {
               "refId": "D",
-              "expr": "sum((max by (exported_instance) (bulkWorkersByLimitUtilization_count{otel_scope_name=\"documentMigration\",range=\"75-99%\"})) and on (exported_instance) (max by (exported_instance,phase) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0))",
+              "expr": "sum((max by (exported_instance) (bulkWorkersByLimitUtilization_count{otel_scope_name=\"documentMigration\",range=\"75-99%\"})) and on (exported_instance) (max by (exported_instance,phase,tier) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0))",
               "legendFormat": "75–99%",
               "datasource": {
                 "type": "prometheus",
@@ -489,7 +489,7 @@ data:
             },
             {
               "refId": "E",
-              "expr": "sum((max by (exported_instance) (bulkWorkersByLimitUtilization_count{otel_scope_name=\"documentMigration\",range=\"100%\"})) and on (exported_instance) (max by (exported_instance,phase) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0))",
+              "expr": "sum((max by (exported_instance) (bulkWorkersByLimitUtilization_count{otel_scope_name=\"documentMigration\",range=\"100%\"})) and on (exported_instance) (max by (exported_instance,phase,tier) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0))",
               "legendFormat": "100%",
               "datasource": {
                 "type": "prometheus",
@@ -602,8 +602,8 @@ data:
         {
           "type": "timeseries",
           "id": 12,
-          "title": "Documents sent vs migrated per second",
-          "description": "Documents included in bulk requests on every attempt, documents successfully migrated, and the subset sent again during retries. Sent can briefly lead migrated while requests are in flight. Sustained re-sends or a widening sent-versus-migrated gap means retries or failures are consuming target capacity.",
+          "title": "Source progress and target sends (docs/s)",
+          "description": "Sent counts target operations on every bulk attempt, including re-sends. Source processed counts source documents as their batches advance, including recorded failures. Retries, transformations and requests still in flight can all cause these rates to differ.",
           "datasource": {
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
@@ -611,7 +611,7 @@ data:
           "targets": [
             {
               "refId": "A",
-              "expr": "(sum(max by (exported_instance) (rate(bulkRequestDocuments_count_sum{otel_scope_name=\"documentMigration\"}[$__rate_interval])))) or vector(0)",
+              "expr": "(sum((((max by (exported_instance) (last_over_time(bulkRequestDocuments_count_sum{otel_scope_name=\"documentMigration\"}[$__rate_interval])) - max by (exported_instance) (bulkRequestDocuments_count_sum{otel_scope_name=\"documentMigration\"} offset $__rate_interval)) or max by (exported_instance) (last_over_time(bulkRequestDocuments_count_sum{otel_scope_name=\"documentMigration\"}[$__rate_interval]))) / ($__rate_interval_ms / 1000)))) or vector(0)",
               "legendFormat": "Sent",
               "datasource": {
                 "type": "prometheus",
@@ -621,7 +621,7 @@ data:
             {
               "refId": "B",
               "expr": "(sum(max by (exported_instance) (rate(pipelineDocsMigrated_count_total{otel_scope_name=\"documentMigration\"}[$__rate_interval])))) or vector(0)",
-              "legendFormat": "Migrated",
+              "legendFormat": "Source processed",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${DS_PROMETHEUS}"
@@ -674,7 +674,7 @@ data:
           "targets": [
             {
               "refId": "A",
-              "expr": "sum((max by (exported_instance) (bulkInFlight_count{otel_scope_name=\"documentMigration\"})) and on (exported_instance) (max by (exported_instance,phase) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0))",
+              "expr": "sum((max by (exported_instance) (bulkInFlight_count{otel_scope_name=\"documentMigration\"})) and on (exported_instance) (max by (exported_instance,phase,tier) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0))",
               "legendFormat": "Requests in flight",
               "datasource": {
                 "type": "prometheus",
@@ -683,7 +683,7 @@ data:
             },
             {
               "refId": "B",
-              "expr": "sum((max by (exported_instance) (bulkLimit_count{otel_scope_name=\"documentMigration\"})) and on (exported_instance) (max by (exported_instance,phase) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0))",
+              "expr": "sum((max by (exported_instance) (bulkLimit_count{otel_scope_name=\"documentMigration\"})) and on (exported_instance) (max by (exported_instance,phase,tier) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0))",
               "legendFormat": "Current adaptive limit",
               "datasource": {
                 "type": "prometheus",
@@ -692,7 +692,7 @@ data:
             },
             {
               "refId": "C",
-              "expr": "sum((max by (exported_instance) (bulkLimitMax_count{otel_scope_name=\"documentMigration\"})) and on (exported_instance) (max by (exported_instance,phase) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0))",
+              "expr": "sum((max by (exported_instance) (bulkLimitMax_count{otel_scope_name=\"documentMigration\"})) and on (exported_instance) (max by (exported_instance,phase,tier) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0))",
               "legendFormat": "Configured maximum",
               "datasource": {
                 "type": "prometheus",
@@ -701,7 +701,7 @@ data:
             },
             {
               "refId": "D",
-              "expr": "sum((max by (exported_instance) (bulkSlotWaiters_count{otel_scope_name=\"documentMigration\"})) and on (exported_instance) (max by (exported_instance,phase) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0))",
+              "expr": "sum((max by (exported_instance) (bulkSlotWaiters_count{otel_scope_name=\"documentMigration\"})) and on (exported_instance) (max by (exported_instance,phase,tier) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0))",
               "legendFormat": "Waiting for a limit slot",
               "datasource": {
                 "type": "prometheus",
@@ -746,7 +746,7 @@ data:
           "targets": [
             {
               "refId": "A",
-              "expr": "sum((max by (exported_instance) (bulkDocsWaitingOnTarget_count{otel_scope_name=\"documentMigration\"})) and on (exported_instance) (max by (exported_instance,phase) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0))",
+              "expr": "sum((max by (exported_instance) (bulkDocsWaitingOnTarget_count{otel_scope_name=\"documentMigration\"})) and on (exported_instance) (max by (exported_instance,phase,tier) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0))",
               "legendFormat": "Paused documents",
               "datasource": {
                 "type": "prometheus",
@@ -782,7 +782,7 @@ data:
         {
           "type": "row",
           "id": 15,
-          "title": "Throughput and request shape",
+          "title": "Throughput and worker resources",
           "collapsed": false,
           "gridPos": {
             "h": 1,
@@ -793,58 +793,10 @@ data:
           "panels": []
         },
         {
-          "type": "text",
-          "id": 16,
-          "title": "",
-          "transparent": true,
-          "gridPos": {
-            "h": 1,
-            "w": 8,
-            "x": 0,
-            "y": 23
-          },
-          "options": {
-            "mode": "markdown",
-            "content": "### Migration volume"
-          }
-        },
-        {
-          "type": "text",
-          "id": 17,
-          "title": "",
-          "transparent": true,
-          "gridPos": {
-            "h": 1,
-            "w": 8,
-            "x": 8,
-            "y": 23
-          },
-          "options": {
-            "mode": "markdown",
-            "content": "### Worker resources"
-          }
-        },
-        {
-          "type": "text",
-          "id": 18,
-          "title": "",
-          "transparent": true,
-          "gridPos": {
-            "h": 1,
-            "w": 8,
-            "x": 16,
-            "y": 23
-          },
-          "options": {
-            "mode": "markdown",
-            "content": "### Request shape"
-          }
-        },
-        {
           "type": "timeseries",
-          "id": 19,
+          "id": 16,
           "title": "Document and bulk request bytes (MiB/s)",
-          "description": "Three different byte boundaries, shown as absolute rates. Migrated document source is the original document-source payload successfully advanced by the pipeline; it excludes bulk action metadata and NDJSON framing. Uncompressed bulk NDJSON is the assembled request body for every attempt, including metadata, framing, and retries. Bulk request body sent is that same body after optional compression. Compare the two request lines to see compression; compare document send/re-send rates above to separate retries from request overhead.",
+          "description": "Three different byte boundaries, shown as absolute rates. Processed source bytes are the original payload of source documents in batches that advanced, including recorded failures. Uncompressed bulk NDJSON is the assembled request body for every attempt, including metadata, framing, and retries. Bulk request body sent is that same body after optional compression. Compare the two request lines to see compression; compare document send/re-send rates above to separate retries from request overhead.",
           "datasource": {
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
@@ -853,7 +805,7 @@ data:
             {
               "refId": "A",
               "expr": "(sum(max by (exported_instance) (rate(pipelineBytesMigrated_bytes_total{otel_scope_name=\"documentMigration\"}[$__rate_interval]))) * 9.53674e-07) or vector(0)",
-              "legendFormat": "Migrated document source",
+              "legendFormat": "Processed source bytes",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${DS_PROMETHEUS}"
@@ -861,7 +813,7 @@ data:
             },
             {
               "refId": "B",
-              "expr": "(sum(max by (exported_instance) (rate(bulkRequestBytes_bytes_sum{otel_scope_name=\"documentMigration\"}[$__rate_interval]))) / 1048576) or vector(0)",
+              "expr": "(sum((((max by (exported_instance) (last_over_time(bulkRequestBytes_bytes_sum{otel_scope_name=\"documentMigration\"}[$__rate_interval])) - max by (exported_instance) (bulkRequestBytes_bytes_sum{otel_scope_name=\"documentMigration\"} offset $__rate_interval)) or max by (exported_instance) (last_over_time(bulkRequestBytes_bytes_sum{otel_scope_name=\"documentMigration\"}[$__rate_interval]))) / ($__rate_interval_ms / 1000))) / 1048576) or vector(0)",
               "legendFormat": "Uncompressed bulk NDJSON",
               "datasource": {
                 "type": "prometheus",
@@ -870,7 +822,7 @@ data:
             },
             {
               "refId": "C",
-              "expr": "(sum(max by (exported_instance) (rate(bulkRequestSentBytes_bytes_sum{otel_scope_name=\"documentMigration\"}[$__rate_interval]))) / 1048576) or vector(0)",
+              "expr": "(sum((((max by (exported_instance) (last_over_time(bulkRequestSentBytes_bytes_sum{otel_scope_name=\"documentMigration\"}[$__rate_interval])) - max by (exported_instance) (bulkRequestSentBytes_bytes_sum{otel_scope_name=\"documentMigration\"} offset $__rate_interval)) or max by (exported_instance) (last_over_time(bulkRequestSentBytes_bytes_sum{otel_scope_name=\"documentMigration\"}[$__rate_interval]))) / ($__rate_interval_ms / 1000))) / 1048576) or vector(0)",
               "legendFormat": "Bulk request body sent",
               "datasource": {
                 "type": "prometheus",
@@ -882,7 +834,7 @@ data:
             "h": 6,
             "w": 8,
             "x": 0,
-            "y": 24
+            "y": 23
           },
           "fieldConfig": {
             "defaults": {
@@ -905,9 +857,9 @@ data:
         },
         {
           "type": "timeseries",
-          "id": 20,
-          "title": "RFS CPU utilization (%)",
-          "description": "Bulk-loader CPU usage divided by its configured CPU limit. This panel and RFS memory are vertically aligned under the request allowance panel so worker resource saturation can be compared with unused allowance. Both dashboards show the fleet's share of total configured CPU; Grafana also shows the hottest pod. CloudWatch cannot calculate the hottest pod because EKS aggregates CPU by node before export.",
+          "id": 17,
+          "title": "RFS CPU used vs allocated (cores)",
+          "description": "Average CPU cores consumed by workers in each tier. The gray band adds the portion of each running worker’s CPU limit above its measured usage. CPU requests determine placement. Compare throttling and throughput to diagnose a CPU bottleneck.",
           "datasource": {
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
@@ -915,8 +867,8 @@ data:
           "targets": [
             {
               "refId": "A",
-              "expr": "100 * sum(max by (pod) (rate(container_cpu_usage_seconds_total{job=\"otel-collector\",exported_job=~\"cadvisor|kubelet-cadvisor\",namespace=\"$namespace\",container=\"bulk-loader\",container!=\"POD\",image!=\"\"}[$__rate_interval]))) / sum((max by (pod) (container_spec_cpu_quota{job=\"otel-collector\",exported_job=~\"cadvisor|kubelet-cadvisor\",namespace=\"$namespace\",container=\"bulk-loader\",container!=\"POD\",image!=\"\"})) / (max by (pod) (container_spec_cpu_period{job=\"otel-collector\",exported_job=~\"cadvisor|kubelet-cadvisor\",namespace=\"$namespace\",container=\"bulk-loader\",container!=\"POD\",image!=\"\"})))",
-              "legendFormat": "% (fleet capacity)",
+              "expr": "sum by (tier) (label_replace(label_replace((max by (pod) (rate(container_cpu_usage_seconds_total{job=\"otel-collector\",exported_job=~\"cadvisor|kubelet-cadvisor\",namespace=\"$namespace\",container=\"bulk-loader\",image!=\"\"}[$__rate_interval]))) and on (pod) (max by (pod) (kube_pod_container_status_running{namespace=\"$namespace\",container=\"bulk-loader\"}) == 1), \"tier\", \"0\", \"pod\", \".*\"), \"tier\", \"$1\", \"pod\", \".*-rfs-t([0-9]+)-[a-z0-9]{1,10}-[a-z0-9]{5}\")) / 1",
+              "legendFormat": "tier {{`{{tier}}`}} used",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${DS_PROMETHEUS}"
@@ -924,8 +876,8 @@ data:
             },
             {
               "refId": "B",
-              "expr": "100 * max((max by (pod) (rate(container_cpu_usage_seconds_total{job=\"otel-collector\",exported_job=~\"cadvisor|kubelet-cadvisor\",namespace=\"$namespace\",container=\"bulk-loader\",container!=\"POD\",image!=\"\"}[$__rate_interval]))) / ((max by (pod) (container_spec_cpu_quota{job=\"otel-collector\",exported_job=~\"cadvisor|kubelet-cadvisor\",namespace=\"$namespace\",container=\"bulk-loader\",container!=\"POD\",image!=\"\"})) / (max by (pod) (container_spec_cpu_period{job=\"otel-collector\",exported_job=~\"cadvisor|kubelet-cadvisor\",namespace=\"$namespace\",container=\"bulk-loader\",container!=\"POD\",image!=\"\"}))))",
-              "legendFormat": "% (hottest pod)",
+              "expr": "sum(clamp_min((max by (pod) (kube_pod_container_resource_limits{namespace=\"$namespace\",container=\"bulk-loader\",resource=\"cpu\"}) and on (pod) (max by (pod) (kube_pod_container_status_running{namespace=\"$namespace\",container=\"bulk-loader\"}) == 1)) - on (pod) (max by (pod) (rate(container_cpu_usage_seconds_total{job=\"otel-collector\",exported_job=~\"cadvisor|kubelet-cadvisor\",namespace=\"$namespace\",container=\"bulk-loader\",image!=\"\"}[$__rate_interval]))), 0) or on (pod) (max by (pod) (kube_pod_container_resource_limits{namespace=\"$namespace\",container=\"bulk-loader\",resource=\"cpu\"}) and on (pod) (max by (pod) (kube_pod_container_status_running{namespace=\"$namespace\",container=\"bulk-loader\"}) == 1))) / 1",
+              "legendFormat": "Limit above measured usage",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${DS_PROMETHEUS}"
@@ -936,14 +888,37 @@ data:
             "h": 6,
             "w": 8,
             "x": 8,
-            "y": 24
+            "y": 23
           },
           "fieldConfig": {
             "defaults": {
-              "unit": "percent",
-              "min": 0
+              "unit": "suffix: cores",
+              "min": 0,
+              "custom": {
+                "stacking": {
+                  "mode": "normal",
+                  "group": "A"
+                },
+                "fillOpacity": 40
+              }
             },
-            "overrides": []
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byFrameRefID",
+                  "options": "B"
+                },
+                "properties": [
+                  {
+                    "id": "color",
+                    "value": {
+                      "mode": "fixed",
+                      "fixedColor": "#879596"
+                    }
+                  }
+                ]
+              }
+            ]
           },
           "options": {
             "legend": {
@@ -959,7 +934,7 @@ data:
         },
         {
           "type": "timeseries",
-          "id": 21,
+          "id": 18,
           "title": "Bulk request size",
           "description": "Mean documents per bulk request and mean KiB per request before and after compression. Falling request sizes can explain lower MiB/s even when request rate is steady; retries and batch splits can change the observed size.",
           "datasource": {
@@ -969,7 +944,7 @@ data:
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(max by (exported_instance) (rate(bulkRequestDocuments_count_sum{otel_scope_name=\"documentMigration\"}[$__rate_interval]))) / sum(max by (exported_instance) (rate(bulkRequestDocuments_count_count{otel_scope_name=\"documentMigration\"}[$__rate_interval])))",
+              "expr": "sum((((max by (exported_instance) (last_over_time(bulkRequestDocuments_count_sum{otel_scope_name=\"documentMigration\"}[$__rate_interval])) - max by (exported_instance) (bulkRequestDocuments_count_sum{otel_scope_name=\"documentMigration\"} offset $__rate_interval)) or max by (exported_instance) (last_over_time(bulkRequestDocuments_count_sum{otel_scope_name=\"documentMigration\"}[$__rate_interval]))) / ($__rate_interval_ms / 1000))) / sum((((max by (exported_instance) (last_over_time(bulkRequestDocuments_count_count{otel_scope_name=\"documentMigration\"}[$__rate_interval])) - max by (exported_instance) (bulkRequestDocuments_count_count{otel_scope_name=\"documentMigration\"} offset $__rate_interval)) or max by (exported_instance) (last_over_time(bulkRequestDocuments_count_count{otel_scope_name=\"documentMigration\"}[$__rate_interval]))) / ($__rate_interval_ms / 1000)))",
               "legendFormat": "Documents per request",
               "datasource": {
                 "type": "prometheus",
@@ -978,7 +953,7 @@ data:
             },
             {
               "refId": "B",
-              "expr": "(sum(max by (exported_instance) (rate(bulkRequestBytes_bytes_sum{otel_scope_name=\"documentMigration\"}[$__rate_interval]))) / sum(max by (exported_instance) (rate(bulkRequestBytes_bytes_count{otel_scope_name=\"documentMigration\"}[$__rate_interval])))) / 1024",
+              "expr": "(sum((((max by (exported_instance) (last_over_time(bulkRequestBytes_bytes_sum{otel_scope_name=\"documentMigration\"}[$__rate_interval])) - max by (exported_instance) (bulkRequestBytes_bytes_sum{otel_scope_name=\"documentMigration\"} offset $__rate_interval)) or max by (exported_instance) (last_over_time(bulkRequestBytes_bytes_sum{otel_scope_name=\"documentMigration\"}[$__rate_interval]))) / ($__rate_interval_ms / 1000))) / sum((((max by (exported_instance) (last_over_time(bulkRequestBytes_bytes_count{otel_scope_name=\"documentMigration\"}[$__rate_interval])) - max by (exported_instance) (bulkRequestBytes_bytes_count{otel_scope_name=\"documentMigration\"} offset $__rate_interval)) or max by (exported_instance) (last_over_time(bulkRequestBytes_bytes_count{otel_scope_name=\"documentMigration\"}[$__rate_interval]))) / ($__rate_interval_ms / 1000)))) / 1024",
               "legendFormat": "KiB per request (NDJSON)",
               "datasource": {
                 "type": "prometheus",
@@ -987,7 +962,7 @@ data:
             },
             {
               "refId": "C",
-              "expr": "(sum(max by (exported_instance) (rate(bulkRequestSentBytes_bytes_sum{otel_scope_name=\"documentMigration\"}[$__rate_interval]))) / sum(max by (exported_instance) (rate(bulkRequestSentBytes_bytes_count{otel_scope_name=\"documentMigration\"}[$__rate_interval])))) / 1024",
+              "expr": "(sum((((max by (exported_instance) (last_over_time(bulkRequestSentBytes_bytes_sum{otel_scope_name=\"documentMigration\"}[$__rate_interval])) - max by (exported_instance) (bulkRequestSentBytes_bytes_sum{otel_scope_name=\"documentMigration\"} offset $__rate_interval)) or max by (exported_instance) (last_over_time(bulkRequestSentBytes_bytes_sum{otel_scope_name=\"documentMigration\"}[$__rate_interval]))) / ($__rate_interval_ms / 1000))) / sum((((max by (exported_instance) (last_over_time(bulkRequestSentBytes_bytes_count{otel_scope_name=\"documentMigration\"}[$__rate_interval])) - max by (exported_instance) (bulkRequestSentBytes_bytes_count{otel_scope_name=\"documentMigration\"} offset $__rate_interval)) or max by (exported_instance) (last_over_time(bulkRequestSentBytes_bytes_count{otel_scope_name=\"documentMigration\"}[$__rate_interval]))) / ($__rate_interval_ms / 1000)))) / 1024",
               "legendFormat": "KiB per request (sent)",
               "datasource": {
                 "type": "prometheus",
@@ -999,7 +974,7 @@ data:
             "h": 6,
             "w": 8,
             "x": 16,
-            "y": 24
+            "y": 23
           },
           "fieldConfig": {
             "defaults": {
@@ -1022,7 +997,7 @@ data:
         },
         {
           "type": "timeseries",
-          "id": 22,
+          "id": 19,
           "title": "Shards completed (cumulative)",
           "description": "Work items (shards) completed since the beginning of the displayed time window. A process migrates one shard and records its duration once. Set the dashboard start before the run began to see progress from zero to the snapshot's total shard count.",
           "datasource": {
@@ -1044,7 +1019,7 @@ data:
             "h": 6,
             "w": 8,
             "x": 0,
-            "y": 30
+            "y": 29
           },
           "fieldConfig": {
             "defaults": {
@@ -1081,9 +1056,9 @@ data:
         },
         {
           "type": "timeseries",
-          "id": 23,
-          "title": "RFS memory utilization (%)",
-          "description": "Bulk-loader working-set memory divided by its configured memory limit: fleet capacity and hottest pod. It is vertically aligned with RFS CPU and the request allowance panel above.",
+          "id": 20,
+          "title": "RFS memory used vs allocated (GiB)",
+          "description": "Sampled container working set by tier. The gray band adds the portion of each running worker’s memory limit above its measured working set. A short-lived peak or a single OOM can occur between samples.",
           "datasource": {
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
@@ -1091,8 +1066,8 @@ data:
           "targets": [
             {
               "refId": "A",
-              "expr": "100 * sum(max by (pod) (container_memory_working_set_bytes{job=\"otel-collector\",exported_job=~\"cadvisor|kubelet-cadvisor\",namespace=\"$namespace\",container=\"bulk-loader\",container!=\"POD\",image!=\"\"})) / sum(max by (pod) (container_spec_memory_limit_bytes{job=\"otel-collector\",exported_job=~\"cadvisor|kubelet-cadvisor\",namespace=\"$namespace\",container=\"bulk-loader\",container!=\"POD\",image!=\"\"}))",
-              "legendFormat": "% (fleet capacity)",
+              "expr": "sum by (tier) (label_replace(label_replace((max by (pod) (container_memory_working_set_bytes{job=\"otel-collector\",exported_job=~\"cadvisor|kubelet-cadvisor\",namespace=\"$namespace\",container=\"bulk-loader\",image!=\"\"} and (topk by (pod) (1, timestamp(container_memory_working_set_bytes{job=\"otel-collector\",exported_job=~\"cadvisor|kubelet-cadvisor\",namespace=\"$namespace\",container=\"bulk-loader\",image!=\"\"})) > time() - 60))) and on (pod) (max by (pod) (kube_pod_container_status_running{namespace=\"$namespace\",container=\"bulk-loader\"}) == 1), \"tier\", \"0\", \"pod\", \".*\"), \"tier\", \"$1\", \"pod\", \".*-rfs-t([0-9]+)-[a-z0-9]{1,10}-[a-z0-9]{5}\")) / 1073741824",
+              "legendFormat": "tier {{`{{tier}}`}} used",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${DS_PROMETHEUS}"
@@ -1100,8 +1075,8 @@ data:
             },
             {
               "refId": "B",
-              "expr": "100 * max((max by (pod) (container_memory_working_set_bytes{job=\"otel-collector\",exported_job=~\"cadvisor|kubelet-cadvisor\",namespace=\"$namespace\",container=\"bulk-loader\",container!=\"POD\",image!=\"\"})) / (max by (pod) (container_spec_memory_limit_bytes{job=\"otel-collector\",exported_job=~\"cadvisor|kubelet-cadvisor\",namespace=\"$namespace\",container=\"bulk-loader\",container!=\"POD\",image!=\"\"})))",
-              "legendFormat": "% (hottest pod)",
+              "expr": "sum(clamp_min((max by (pod) (kube_pod_container_resource_limits{namespace=\"$namespace\",container=\"bulk-loader\",resource=\"memory\"}) and on (pod) (max by (pod) (kube_pod_container_status_running{namespace=\"$namespace\",container=\"bulk-loader\"}) == 1)) - on (pod) (max by (pod) (container_memory_working_set_bytes{job=\"otel-collector\",exported_job=~\"cadvisor|kubelet-cadvisor\",namespace=\"$namespace\",container=\"bulk-loader\",image!=\"\"} and (topk by (pod) (1, timestamp(container_memory_working_set_bytes{job=\"otel-collector\",exported_job=~\"cadvisor|kubelet-cadvisor\",namespace=\"$namespace\",container=\"bulk-loader\",image!=\"\"})) > time() - 60))), 0) or on (pod) (max by (pod) (kube_pod_container_resource_limits{namespace=\"$namespace\",container=\"bulk-loader\",resource=\"memory\"}) and on (pod) (max by (pod) (kube_pod_container_status_running{namespace=\"$namespace\",container=\"bulk-loader\"}) == 1))) / 1073741824",
+              "legendFormat": "Limit above measured usage",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${DS_PROMETHEUS}"
@@ -1112,12 +1087,87 @@ data:
             "h": 6,
             "w": 8,
             "x": 8,
-            "y": 30
+            "y": 29
           },
           "fieldConfig": {
             "defaults": {
-              "unit": "percent",
-              "min": 0
+              "unit": "suffix: GiB",
+              "min": 0,
+              "custom": {
+                "stacking": {
+                  "mode": "normal",
+                  "group": "A"
+                },
+                "fillOpacity": 40
+              }
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byFrameRefID",
+                  "options": "B"
+                },
+                "properties": [
+                  {
+                    "id": "color",
+                    "value": {
+                      "mode": "fixed",
+                      "fixedColor": "#879596"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "type": "timeseries",
+          "id": 21,
+          "title": "Workers by memory tier",
+          "description": "Running bulk-loader containers, including supervisors between JVM launches. A pending container appears when it starts. Workers without memory scaling contribute to tier 0.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (tier) (label_replace(label_replace(max by (pod) (kube_pod_container_status_running{namespace=\"$namespace\",container=\"bulk-loader\"}), \"tier\", \"0\", \"pod\", \".*\"), \"tier\", \"$1\", \"pod\", \".*-rfs-t([0-9]+)-[a-z0-9]{1,10}-[a-z0-9]{5}\"))",
+              "legendFormat": "tier {{`{{tier}}`}}",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_PROMETHEUS}"
+              }
+            }
+          ],
+          "gridPos": {
+            "h": 6,
+            "w": 8,
+            "x": 16,
+            "y": 29
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "min": 0,
+              "custom": {
+                "stacking": {
+                  "mode": "normal",
+                  "group": "A"
+                },
+                "fillOpacity": 40
+              }
             },
             "overrides": []
           },
@@ -1135,22 +1185,22 @@ data:
         },
         {
           "type": "row",
-          "id": 24,
-          "title": "Pipeline performance diagnosis",
+          "id": 22,
+          "title": "Target health and response",
           "collapsed": false,
           "gridPos": {
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 36
+            "y": 35
           },
           "panels": []
         },
         {
           "type": "timeseries",
-          "id": 25,
-          "title": "Documents per second through pipeline stages",
-          "description": "The same source documents counted at successive bounded pipeline boundaries. Source is chunked for preparation; prepared has completed validation/encoding; ordered prep has cleared the ordered fan-in; packed has entered an exact target batch; request started/finished bracket the sink call; checkpointed can advance source progress. A sustained rate drop between adjacent lines locates the stage that is not feeding its consumer.",
+          "id": 23,
+          "title": "Bulk request duration seen by RFS (s)",
+          "description": "Time workers spend waiting for a bulk HTTP response or transport error. Compare the mean with the configured response timeout. Grafana also shows p50 and p99.",
           "datasource": {
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
@@ -1158,8 +1208,8 @@ data:
           "targets": [
             {
               "refId": "A",
-              "expr": "(sum(max by (exported_instance,stage) (rate(pipelineStageDocuments_count_total{otel_scope_name=\"documentMigration\",stage=\"source\"}[$__rate_interval])))) or vector(0)",
-              "legendFormat": "Source",
+              "expr": "(sum((((max by (exported_instance,outcome) (last_over_time(bulkAttemptDuration_milliseconds_sum{otel_scope_name=\"documentMigration\"}[$__rate_interval])) - max by (exported_instance,outcome) (bulkAttemptDuration_milliseconds_sum{otel_scope_name=\"documentMigration\"} offset $__rate_interval)) or max by (exported_instance,outcome) (last_over_time(bulkAttemptDuration_milliseconds_sum{otel_scope_name=\"documentMigration\"}[$__rate_interval]))) / ($__rate_interval_ms / 1000))) / sum((((max by (exported_instance,outcome) (last_over_time(bulkAttemptDuration_milliseconds_count{otel_scope_name=\"documentMigration\"}[$__rate_interval])) - max by (exported_instance,outcome) (bulkAttemptDuration_milliseconds_count{otel_scope_name=\"documentMigration\"} offset $__rate_interval)) or max by (exported_instance,outcome) (last_over_time(bulkAttemptDuration_milliseconds_count{otel_scope_name=\"documentMigration\"}[$__rate_interval]))) / ($__rate_interval_ms / 1000)))) / 1000",
+              "legendFormat": "Mean",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${DS_PROMETHEUS}"
@@ -1167,8 +1217,8 @@ data:
             },
             {
               "refId": "B",
-              "expr": "(sum(max by (exported_instance,stage) (rate(pipelineStageDocuments_count_total{otel_scope_name=\"documentMigration\",stage=\"prepared\"}[$__rate_interval])))) or vector(0)",
-              "legendFormat": "Prepared",
+              "expr": "histogram_quantile(0.5, sum by (le) ((((max by (exported_instance,outcome,le) (last_over_time(bulkAttemptDuration_milliseconds_bucket{otel_scope_name=\"documentMigration\"}[$__rate_interval])) - max by (exported_instance,outcome,le) (bulkAttemptDuration_milliseconds_bucket{otel_scope_name=\"documentMigration\"} offset $__rate_interval)) or max by (exported_instance,outcome,le) (last_over_time(bulkAttemptDuration_milliseconds_bucket{otel_scope_name=\"documentMigration\"}[$__rate_interval]))) / ($__rate_interval_ms / 1000)))) / 1000",
+              "legendFormat": "p50",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${DS_PROMETHEUS}"
@@ -1176,44 +1226,8 @@ data:
             },
             {
               "refId": "C",
-              "expr": "(sum(max by (exported_instance,stage) (rate(pipelineStageDocuments_count_total{otel_scope_name=\"documentMigration\",stage=\"ordered_prepared\"}[$__rate_interval])))) or vector(0)",
-              "legendFormat": "Ordered prep",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              }
-            },
-            {
-              "refId": "D",
-              "expr": "(sum(max by (exported_instance,stage) (rate(pipelineStageDocuments_count_total{otel_scope_name=\"documentMigration\",stage=\"packed\"}[$__rate_interval])))) or vector(0)",
-              "legendFormat": "Packed",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              }
-            },
-            {
-              "refId": "E",
-              "expr": "(sum(max by (exported_instance,stage) (rate(pipelineStageDocuments_count_total{otel_scope_name=\"documentMigration\",stage=\"request_started\"}[$__rate_interval])))) or vector(0)",
-              "legendFormat": "Request started",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              }
-            },
-            {
-              "refId": "F",
-              "expr": "(sum(max by (exported_instance,stage) (rate(pipelineStageDocuments_count_total{otel_scope_name=\"documentMigration\",stage=\"request_completed\"}[$__rate_interval])))) or vector(0)",
-              "legendFormat": "Request finished",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              }
-            },
-            {
-              "refId": "G",
-              "expr": "(sum(max by (exported_instance,stage) (rate(pipelineStageDocuments_count_total{otel_scope_name=\"documentMigration\",stage=\"checkpointed\"}[$__rate_interval])))) or vector(0)",
-              "legendFormat": "Checkpointed",
+              "expr": "histogram_quantile(0.99, sum by (le) ((((max by (exported_instance,outcome,le) (last_over_time(bulkAttemptDuration_milliseconds_bucket{otel_scope_name=\"documentMigration\"}[$__rate_interval])) - max by (exported_instance,outcome,le) (bulkAttemptDuration_milliseconds_bucket{otel_scope_name=\"documentMigration\"} offset $__rate_interval)) or max by (exported_instance,outcome,le) (last_over_time(bulkAttemptDuration_milliseconds_bucket{otel_scope_name=\"documentMigration\"}[$__rate_interval]))) / ($__rate_interval_ms / 1000)))) / 1000",
+              "legendFormat": "p99",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${DS_PROMETHEUS}"
@@ -1224,11 +1238,11 @@ data:
             "h": 6,
             "w": 8,
             "x": 0,
-            "y": 37
+            "y": 36
           },
           "fieldConfig": {
             "defaults": {
-              "unit": "suffix: docs/s",
+              "unit": "s",
               "min": 0
             },
             "overrides": []
@@ -1247,9 +1261,9 @@ data:
         },
         {
           "type": "timeseries",
-          "id": 26,
-          "title": "Documents buffered between stages",
-          "description": "Current source documents waiting for a preparation rail, completed prepared documents held behind an earlier chunk by ordered fan-in, and packed documents ready for the request fan-out. Ordered-prep growth exposes head-of-line blocking; ready-document growth with low HTTP in-flight work points to request-fan-out scheduling or sink work.",
+          "id": 24,
+          "title": "Target-unavailable document attempts per minute",
+          "description": "Document attempts that could not be written because the target was unavailable, grouped by reason: a write block, unavailable shards, HTTP 503, or connection failure/reset. This does not include HTTP 429 throttles; correlate the overview's paused-document gauge with its limit-cut panel for those. A document is counted again on each attempt, so this is refusal volume rather than a distinct-document count.",
           "datasource": {
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
@@ -1257,26 +1271,8 @@ data:
           "targets": [
             {
               "refId": "A",
-              "expr": "sum((max by (exported_instance) (pipelinePreparationQueuedDocuments_count{otel_scope_name=\"documentMigration\"})) and on (exported_instance) (max by (exported_instance,phase) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0))",
-              "legendFormat": "Waiting for preparation",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              }
-            },
-            {
-              "refId": "B",
-              "expr": "sum((max by (exported_instance) (pipelinePreparationOrderedDocuments_count{otel_scope_name=\"documentMigration\"})) and on (exported_instance) (max by (exported_instance,phase) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0))",
-              "legendFormat": "Blocked at ordered prep fan-in",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              }
-            },
-            {
-              "refId": "C",
-              "expr": "sum((max by (exported_instance) (pipelineRequestReadyDocuments_count{otel_scope_name=\"documentMigration\"})) and on (exported_instance) (max by (exported_instance,phase) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0))",
-              "legendFormat": "Packed and request-ready",
+              "expr": "sum by (reason)((((max by (exported_instance,reason) (last_over_time(bulkDocsTargetUnavailable_count_total{otel_scope_name=\"documentMigration\"}[$__rate_interval])) - max by (exported_instance,reason) (bulkDocsTargetUnavailable_count_total{otel_scope_name=\"documentMigration\"} offset $__rate_interval)) or max by (exported_instance,reason) (last_over_time(bulkDocsTargetUnavailable_count_total{otel_scope_name=\"documentMigration\"}[$__rate_interval]))) / ($__rate_interval_ms / 1000))) * 60",
+              "legendFormat": "{{`{{reason}}`}}",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${DS_PROMETHEUS}"
@@ -1287,651 +1283,19 @@ data:
             "h": 6,
             "w": 8,
             "x": 8,
-            "y": 37
+            "y": 36
           },
           "fieldConfig": {
             "defaults": {
-              "unit": "short",
-              "min": 0
-            },
-            "overrides": []
-          },
-          "options": {
-            "legend": {
-              "displayMode": "list",
-              "placement": "bottom",
-              "showLegend": true
-            },
-            "tooltip": {
-              "mode": "multi",
-              "sort": "desc"
-            }
-          }
-        },
-        {
-          "type": "timeseries",
-          "id": 27,
-          "title": "Time waiting between pipeline stages (ms)",
-          "description": "Mean queue residence per chunk or batch: waiting for a preparation rail, waiting after preparation for ordered fan-in, and waiting after exact packing for the request fan-out. These are boundary waits, not target response time.",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "targets": [
-            {
-              "refId": "A",
-              "expr": "sum(max by (exported_instance) (rate(pipelinePreparationQueueWait_milliseconds_sum{otel_scope_name=\"documentMigration\"}[$__rate_interval]))) / sum(max by (exported_instance) (rate(pipelinePreparationQueueWait_milliseconds_count{otel_scope_name=\"documentMigration\"}[$__rate_interval])))",
-              "legendFormat": "Preparation queue",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
+              "unit": "suffix: /min",
+              "min": 0,
+              "custom": {
+                "stacking": {
+                  "mode": "normal",
+                  "group": "A"
+                },
+                "fillOpacity": 40
               }
-            },
-            {
-              "refId": "B",
-              "expr": "sum(max by (exported_instance) (rate(pipelinePreparationOrderedWait_milliseconds_sum{otel_scope_name=\"documentMigration\"}[$__rate_interval]))) / sum(max by (exported_instance) (rate(pipelinePreparationOrderedWait_milliseconds_count{otel_scope_name=\"documentMigration\"}[$__rate_interval])))",
-              "legendFormat": "Ordered prep fan-in",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              }
-            },
-            {
-              "refId": "C",
-              "expr": "sum(max by (exported_instance) (rate(pipelineRequestQueueWait_milliseconds_sum{otel_scope_name=\"documentMigration\"}[$__rate_interval]))) / sum(max by (exported_instance) (rate(pipelineRequestQueueWait_milliseconds_count{otel_scope_name=\"documentMigration\"}[$__rate_interval])))",
-              "legendFormat": "Packed-to-request",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              }
-            }
-          ],
-          "gridPos": {
-            "h": 6,
-            "w": 8,
-            "x": 16,
-            "y": 37
-          },
-          "fieldConfig": {
-            "defaults": {
-              "unit": "ms",
-              "min": 0
-            },
-            "overrides": []
-          },
-          "options": {
-            "legend": {
-              "displayMode": "list",
-              "placement": "bottom",
-              "showLegend": true
-            },
-            "tooltip": {
-              "mode": "multi",
-              "sort": "desc"
-            }
-          }
-        },
-        {
-          "type": "timeseries",
-          "id": 28,
-          "title": "MiB per second through pipeline stages",
-          "description": "Bytes crossing selected pipeline boundaries. Source and checkpointed bytes are original document source. Prepared, packed, and request-started bytes are exact encoded NDJSON operations including action metadata and framing. The change from source to prepared quantifies bulk-format overhead.",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "targets": [
-            {
-              "refId": "A",
-              "expr": "(sum(max by (exported_instance,stage) (rate(pipelineStageBytes_bytes_total{otel_scope_name=\"documentMigration\",stage=\"source\"}[$__rate_interval]))) * 9.53674e-07) or vector(0)",
-              "legendFormat": "Source",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              }
-            },
-            {
-              "refId": "B",
-              "expr": "(sum(max by (exported_instance,stage) (rate(pipelineStageBytes_bytes_total{otel_scope_name=\"documentMigration\",stage=\"prepared\"}[$__rate_interval]))) * 9.53674e-07) or vector(0)",
-              "legendFormat": "Prepared",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              }
-            },
-            {
-              "refId": "C",
-              "expr": "(sum(max by (exported_instance,stage) (rate(pipelineStageBytes_bytes_total{otel_scope_name=\"documentMigration\",stage=\"packed\"}[$__rate_interval]))) * 9.53674e-07) or vector(0)",
-              "legendFormat": "Packed",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              }
-            },
-            {
-              "refId": "D",
-              "expr": "(sum(max by (exported_instance,stage) (rate(pipelineStageBytes_bytes_total{otel_scope_name=\"documentMigration\",stage=\"request_started\"}[$__rate_interval]))) * 9.53674e-07) or vector(0)",
-              "legendFormat": "Request started",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              }
-            },
-            {
-              "refId": "E",
-              "expr": "(sum(max by (exported_instance,stage) (rate(pipelineStageBytes_bytes_total{otel_scope_name=\"documentMigration\",stage=\"checkpointed\"}[$__rate_interval]))) * 9.53674e-07) or vector(0)",
-              "legendFormat": "Checkpointed source",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              }
-            }
-          ],
-          "gridPos": {
-            "h": 6,
-            "w": 8,
-            "x": 0,
-            "y": 43
-          },
-          "fieldConfig": {
-            "defaults": {
-              "unit": "suffix: MiB/s",
-              "min": 0
-            },
-            "overrides": []
-          },
-          "options": {
-            "legend": {
-              "displayMode": "list",
-              "placement": "bottom",
-              "showLegend": true
-            },
-            "tooltip": {
-              "mode": "multi",
-              "sort": "desc"
-            }
-          }
-        },
-        {
-          "type": "timeseries",
-          "id": 29,
-          "title": "MiB buffered between stages",
-          "description": "Current source bytes waiting for preparation, exact encoded bytes held by the ordered preparation fan-in, and exact encoded bytes packed and ready for requests. A persistent reservoir shows where memory is being used and which downstream boundary is not draining.",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "targets": [
-            {
-              "refId": "A",
-              "expr": "sum((max by (exported_instance) (pipelinePreparationQueuedBytes_bytes{otel_scope_name=\"documentMigration\"})) and on (exported_instance) (max by (exported_instance,phase) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0)) / 1048576",
-              "legendFormat": "Waiting for preparation",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              }
-            },
-            {
-              "refId": "B",
-              "expr": "sum((max by (exported_instance) (pipelinePreparationOrderedBytes_bytes{otel_scope_name=\"documentMigration\"})) and on (exported_instance) (max by (exported_instance,phase) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0)) / 1048576",
-              "legendFormat": "Blocked at ordered prep fan-in",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              }
-            },
-            {
-              "refId": "C",
-              "expr": "sum((max by (exported_instance) (pipelineRequestReadyBytes_bytes{otel_scope_name=\"documentMigration\"})) and on (exported_instance) (max by (exported_instance,phase) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0)) / 1048576",
-              "legendFormat": "Packed and request-ready",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              }
-            }
-          ],
-          "gridPos": {
-            "h": 6,
-            "w": 8,
-            "x": 8,
-            "y": 43
-          },
-          "fieldConfig": {
-            "defaults": {
-              "unit": "suffix: MiB",
-              "min": 0
-            },
-            "overrides": []
-          },
-          "options": {
-            "legend": {
-              "displayMode": "list",
-              "placement": "bottom",
-              "showLegend": true
-            },
-            "tooltip": {
-              "mode": "multi",
-              "sort": "desc"
-            }
-          }
-        },
-        {
-          "type": "timeseries",
-          "id": 30,
-          "title": "Active and queued pipeline work",
-          "description": "Counts of chunks or request groups at the main concurrency boundaries. Preparation active is work on CPU rails. Ordered chunks completed out of order and are waiting to be released. Request-ready batches are packed but not subscribed; active request groups are executing sink work.",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "targets": [
-            {
-              "refId": "A",
-              "expr": "sum((max by (exported_instance) (pipelinePreparationQueuedChunks_count{otel_scope_name=\"documentMigration\"})) and on (exported_instance) (max by (exported_instance,phase) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0))",
-              "legendFormat": "Prep chunks queued",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              }
-            },
-            {
-              "refId": "B",
-              "expr": "sum((max by (exported_instance) (pipelinePreparationActiveChunks_count{otel_scope_name=\"documentMigration\"})) and on (exported_instance) (max by (exported_instance,phase) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0))",
-              "legendFormat": "Prep chunks active",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              }
-            },
-            {
-              "refId": "C",
-              "expr": "sum((max by (exported_instance) (pipelinePreparationOrderedChunks_count{otel_scope_name=\"documentMigration\"})) and on (exported_instance) (max by (exported_instance,phase) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0))",
-              "legendFormat": "Prep chunks ordered-blocked",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              }
-            },
-            {
-              "refId": "D",
-              "expr": "sum((max by (exported_instance) (pipelineRequestReadyBatches_count{otel_scope_name=\"documentMigration\"})) and on (exported_instance) (max by (exported_instance,phase) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0))",
-              "legendFormat": "Request-ready batches",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              }
-            },
-            {
-              "refId": "E",
-              "expr": "sum((max by (exported_instance) (pipelineRequestActiveGroups_count{otel_scope_name=\"documentMigration\"})) and on (exported_instance) (max by (exported_instance,phase) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0))",
-              "legendFormat": "Request groups active",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              }
-            }
-          ],
-          "gridPos": {
-            "h": 6,
-            "w": 8,
-            "x": 16,
-            "y": 43
-          },
-          "fieldConfig": {
-            "defaults": {
-              "unit": "short",
-              "min": 0
-            },
-            "overrides": []
-          },
-          "options": {
-            "legend": {
-              "displayMode": "list",
-              "placement": "bottom",
-              "showLegend": true
-            },
-            "tooltip": {
-              "mode": "multi",
-              "sort": "desc"
-            }
-          }
-        },
-        {
-          "type": "timeseries",
-          "id": 31,
-          "title": "Pipeline service time (ms)",
-          "description": "Mean CPU preparation time per chunk, serial exact-packer time per chunk, and complete sink-call time per successful request group. Request-group duration includes target requests and their response handling, so compare it with Bulk attempt duration and the client-side timings.",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "targets": [
-            {
-              "refId": "A",
-              "expr": "sum(max by (exported_instance,outcome) (rate(pipelinePreparationDuration_milliseconds_sum{otel_scope_name=\"documentMigration\",outcome=\"success\"}[$__rate_interval]))) / sum(max by (exported_instance,outcome) (rate(pipelinePreparationDuration_milliseconds_count{otel_scope_name=\"documentMigration\",outcome=\"success\"}[$__rate_interval])))",
-              "legendFormat": "Prepare chunk",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              }
-            },
-            {
-              "refId": "B",
-              "expr": "sum(max by (exported_instance) (rate(pipelinePackingDuration_milliseconds_sum{otel_scope_name=\"documentMigration\"}[$__rate_interval]))) / sum(max by (exported_instance) (rate(pipelinePackingDuration_milliseconds_count{otel_scope_name=\"documentMigration\"}[$__rate_interval])))",
-              "legendFormat": "Exact packer",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              }
-            },
-            {
-              "refId": "C",
-              "expr": "sum(max by (exported_instance,outcome) (rate(pipelineRequestGroupDuration_milliseconds_sum{otel_scope_name=\"documentMigration\",outcome=\"success\"}[$__rate_interval]))) / sum(max by (exported_instance,outcome) (rate(pipelineRequestGroupDuration_milliseconds_count{otel_scope_name=\"documentMigration\",outcome=\"success\"}[$__rate_interval])))",
-              "legendFormat": "Request group",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              }
-            }
-          ],
-          "gridPos": {
-            "h": 6,
-            "w": 8,
-            "x": 0,
-            "y": 49
-          },
-          "fieldConfig": {
-            "defaults": {
-              "unit": "ms",
-              "min": 0
-            },
-            "overrides": []
-          },
-          "options": {
-            "legend": {
-              "displayMode": "list",
-              "placement": "bottom",
-              "showLegend": true
-            },
-            "tooltip": {
-              "mode": "multi",
-              "sort": "desc"
-            }
-          }
-        },
-        {
-          "type": "timeseries",
-          "id": 32,
-          "title": "Packed target-batch shape",
-          "description": "Mean exact documents and MiB per target batch, plus utilization of the configured document and byte limits. A batch may be near one limit and far below the other. Values above 100% identify a single oversized operation that must be isolated.",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "targets": [
-            {
-              "refId": "A",
-              "expr": "sum(max by (exported_instance) (rate(pipelinePackedBatchDocuments_count_sum{otel_scope_name=\"documentMigration\"}[$__rate_interval]))) / sum(max by (exported_instance) (rate(pipelinePackedBatchDocuments_count_count{otel_scope_name=\"documentMigration\"}[$__rate_interval])))",
-              "legendFormat": "Documents",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              }
-            },
-            {
-              "refId": "B",
-              "expr": "(sum(max by (exported_instance) (rate(pipelinePackedBatchBytes_bytes_sum{otel_scope_name=\"documentMigration\"}[$__rate_interval]))) / sum(max by (exported_instance) (rate(pipelinePackedBatchBytes_bytes_count{otel_scope_name=\"documentMigration\"}[$__rate_interval])))) / 1048576",
-              "legendFormat": "MiB",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              }
-            },
-            {
-              "refId": "C",
-              "expr": "sum(max by (exported_instance,limit) (rate(pipelinePackedBatchFill_percent_sum{otel_scope_name=\"documentMigration\",limit=\"documents\"}[$__rate_interval]))) / sum(max by (exported_instance,limit) (rate(pipelinePackedBatchFill_percent_count{otel_scope_name=\"documentMigration\",limit=\"documents\"}[$__rate_interval])))",
-              "legendFormat": "Document-limit fill (%)",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              }
-            },
-            {
-              "refId": "D",
-              "expr": "sum(max by (exported_instance,limit) (rate(pipelinePackedBatchFill_percent_sum{otel_scope_name=\"documentMigration\",limit=\"bytes\"}[$__rate_interval]))) / sum(max by (exported_instance,limit) (rate(pipelinePackedBatchFill_percent_count{otel_scope_name=\"documentMigration\",limit=\"bytes\"}[$__rate_interval])))",
-              "legendFormat": "Byte-limit fill (%)",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              }
-            }
-          ],
-          "gridPos": {
-            "h": 6,
-            "w": 8,
-            "x": 8,
-            "y": 49
-          },
-          "fieldConfig": {
-            "defaults": {
-              "unit": "short",
-              "min": 0
-            },
-            "overrides": []
-          },
-          "options": {
-            "legend": {
-              "displayMode": "list",
-              "placement": "bottom",
-              "showLegend": true
-            },
-            "tooltip": {
-              "mode": "multi",
-              "sort": "desc"
-            }
-          }
-        },
-        {
-          "type": "timeseries",
-          "id": 33,
-          "title": "Client preparation and response handling (ms)",
-          "description": "Client-side work after a request group reaches OpenSearchClient: final client repacking, contiguous NDJSON assembly, gzip, and response classification/compaction. Gap between starts is process-wide request pacing, not per-request or per-connection latency. The client repacking timer does not include the upstream preparation and ordered packing shown elsewhere in this section.",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "targets": [
-            {
-              "refId": "A",
-              "expr": "sum(max by (exported_instance,path) (rate(bulkBatchPreparationDuration_milliseconds_sum{otel_scope_name=\"documentMigration\"}[$__rate_interval]))) / sum(max by (exported_instance,path) (rate(bulkBatchPreparationDuration_milliseconds_count{otel_scope_name=\"documentMigration\"}[$__rate_interval])))",
-              "legendFormat": "Client repacking",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              }
-            },
-            {
-              "refId": "B",
-              "expr": "sum(max by (exported_instance,attempt) (rate(bulkRequestStartGap_milliseconds_sum{otel_scope_name=\"documentMigration\"}[$__rate_interval]))) / sum(max by (exported_instance,attempt) (rate(bulkRequestStartGap_milliseconds_count{otel_scope_name=\"documentMigration\"}[$__rate_interval])))",
-              "legendFormat": "Gap between request starts",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              }
-            },
-            {
-              "refId": "C",
-              "expr": "sum(max by (exported_instance,attempt) (rate(bulkRequestAssemblyDuration_milliseconds_sum{otel_scope_name=\"documentMigration\"}[$__rate_interval]))) / sum(max by (exported_instance,attempt) (rate(bulkRequestAssemblyDuration_milliseconds_count{otel_scope_name=\"documentMigration\"}[$__rate_interval])))",
-              "legendFormat": "Request assembly",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              }
-            },
-            {
-              "refId": "D",
-              "expr": "sum(max by (exported_instance,attempt) (rate(bulkRequestCompressionDuration_milliseconds_sum{otel_scope_name=\"documentMigration\"}[$__rate_interval]))) / sum(max by (exported_instance,attempt) (rate(bulkRequestCompressionDuration_milliseconds_count{otel_scope_name=\"documentMigration\"}[$__rate_interval])))",
-              "legendFormat": "Gzip",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              }
-            },
-            {
-              "refId": "E",
-              "expr": "sum(max by (exported_instance,result) (rate(bulkResponseClassificationDuration_milliseconds_sum{otel_scope_name=\"documentMigration\",result=\"response\"}[$__rate_interval]))) / sum(max by (exported_instance,result) (rate(bulkResponseClassificationDuration_milliseconds_count{otel_scope_name=\"documentMigration\",result=\"response\"}[$__rate_interval])))",
-              "legendFormat": "Classify response",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              }
-            },
-            {
-              "refId": "F",
-              "expr": "sum(max by (exported_instance,result) (rate(bulkResponseClassificationDuration_milliseconds_sum{otel_scope_name=\"documentMigration\",result=\"no_response\"}[$__rate_interval]))) / sum(max by (exported_instance,result) (rate(bulkResponseClassificationDuration_milliseconds_count{otel_scope_name=\"documentMigration\",result=\"no_response\"}[$__rate_interval])))",
-              "legendFormat": "Classify no response",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              }
-            }
-          ],
-          "gridPos": {
-            "h": 6,
-            "w": 8,
-            "x": 16,
-            "y": 49
-          },
-          "fieldConfig": {
-            "defaults": {
-              "unit": "ms",
-              "min": 0
-            },
-            "overrides": []
-          },
-          "options": {
-            "legend": {
-              "displayMode": "list",
-              "placement": "bottom",
-              "showLegend": true
-            },
-            "tooltip": {
-              "mode": "multi",
-              "sort": "desc"
-            }
-          }
-        },
-        {
-          "type": "timeseries",
-          "id": 34,
-          "title": "RFS CPU throttled periods (%)",
-          "description": "Percentage of Linux CFS scheduling periods in which bulk-loader containers wanted more CPU than their configured limits allowed. High CPU utilization without throttled periods means workers are using their allocation; sustained throttling means preparation, packing, compression, or response work is being delayed by the pod CPU limit.",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "targets": [
-            {
-              "refId": "A",
-              "expr": "100 * (sum(rate(container_cpu_cfs_throttled_periods_total{job=\"otel-collector\",exported_job=~\"cadvisor|kubelet-cadvisor\",namespace=\"$namespace\",container=\"bulk-loader\",container!=\"POD\",image!=\"\"}[$__rate_interval]))) / (sum(rate(container_cpu_cfs_periods_total{job=\"otel-collector\",exported_job=~\"cadvisor|kubelet-cadvisor\",namespace=\"$namespace\",container=\"bulk-loader\",container!=\"POD\",image!=\"\"}[$__rate_interval])))",
-              "legendFormat": "% throttled periods",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              }
-            }
-          ],
-          "gridPos": {
-            "h": 6,
-            "w": 8,
-            "x": 0,
-            "y": 55
-          },
-          "fieldConfig": {
-            "defaults": {
-              "unit": "percent",
-              "min": 0
-            },
-            "overrides": []
-          },
-          "options": {
-            "legend": {
-              "displayMode": "list",
-              "placement": "bottom",
-              "showLegend": true
-            },
-            "tooltip": {
-              "mode": "multi",
-              "sort": "desc"
-            }
-          }
-        },
-        {
-          "type": "timeseries",
-          "id": 35,
-          "title": "Effective pipeline configuration",
-          "description": "Mean process configuration reported by the running workers. These values make benchmark graphs self-describing when lanes use different images or tuning combinations. Batch bytes are shown in MiB; the other lines are document, chunk, group, or concurrency counts as named.",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "targets": [
-            {
-              "refId": "A",
-              "expr": "avg((max by (exported_instance) (pipelineMaxBatchDocuments_count{otel_scope_name=\"documentMigration\"})) and on (exported_instance) (max by (exported_instance,phase) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0))",
-              "legendFormat": "Max documents per target batch",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              }
-            },
-            {
-              "refId": "B",
-              "expr": "avg((max by (exported_instance) (pipelineMaxBatchBytes_bytes{otel_scope_name=\"documentMigration\"})) and on (exported_instance) (max by (exported_instance,phase) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0)) / 1048576",
-              "legendFormat": "Max target-batch MiB",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              }
-            },
-            {
-              "refId": "C",
-              "expr": "avg((max by (exported_instance) (pipelineBatchConcurrency_count{otel_scope_name=\"documentMigration\"})) and on (exported_instance) (max by (exported_instance,phase) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0))",
-              "legendFormat": "Request concurrency ceiling",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              }
-            },
-            {
-              "refId": "D",
-              "expr": "avg((max by (exported_instance) (pipelinePreparationConcurrency_count{otel_scope_name=\"documentMigration\"})) and on (exported_instance) (max by (exported_instance,phase) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0))",
-              "legendFormat": "Preparation rails",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              }
-            },
-            {
-              "refId": "E",
-              "expr": "avg((max by (exported_instance) (pipelinePreparationChunkDocuments_count{otel_scope_name=\"documentMigration\"})) and on (exported_instance) (max by (exported_instance,phase) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0))",
-              "legendFormat": "Documents per preparation chunk",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              }
-            }
-          ],
-          "gridPos": {
-            "h": 6,
-            "w": 8,
-            "x": 8,
-            "y": 55
-          },
-          "fieldConfig": {
-            "defaults": {
-              "unit": "short",
-              "min": 0
             },
             "overrides": []
           },
@@ -1949,21 +1313,21 @@ data:
         },
         {
           "type": "row",
-          "id": 36,
-          "title": "Retry and recovery",
+          "id": 25,
+          "title": "Retries and document failures",
           "collapsed": true,
           "gridPos": {
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 61
+            "y": 42
           },
           "panels": [
             {
               "type": "timeseries",
-              "id": 37,
+              "id": 26,
               "title": "Delay between retries for each batch (s)",
-              "description": "For each retrying batch, time from the end of its previous HTTP attempt until its next attempt was sent. This is per batch/retry chain, not per connection. It includes planned backoff and any later wait for retry capacity or a target-request slot. No line means no retries happened in the selected window. The panel shows the mean and p95.",
+              "description": "For each retrying batch, time from the end of its previous HTTP attempt until its next attempt was sent. This is per batch/retry chain, not per connection. It includes planned backoff and any later wait for retry capacity or a target-request slot. The right axis counts observed retries. Delay is measured when a retry occurs. Grafana also shows p95.",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${DS_PROMETHEUS}"
@@ -1986,72 +1350,46 @@ data:
                     "type": "prometheus",
                     "uid": "${DS_PROMETHEUS}"
                   }
+                },
+                {
+                  "refId": "C",
+                  "expr": "(sum(max by (exported_instance) (rate(bulkAttemptGap_milliseconds_count{otel_scope_name=\"documentMigration\"}[$__rate_interval]))) * 60) or vector(0)",
+                  "legendFormat": "Observed retries/min",
+                  "datasource": {
+                    "type": "prometheus",
+                    "uid": "${DS_PROMETHEUS}"
+                  }
                 }
               ],
               "gridPos": {
                 "h": 6,
                 "w": 8,
                 "x": 0,
-                "y": 62
+                "y": 43
               },
               "fieldConfig": {
                 "defaults": {
                   "unit": "s",
                   "min": 0
                 },
-                "overrides": []
-              },
-              "options": {
-                "legend": {
-                  "displayMode": "list",
-                  "placement": "bottom",
-                  "showLegend": true
-                },
-                "tooltip": {
-                  "mode": "multi",
-                  "sort": "desc"
-                }
-              }
-            },
-            {
-              "type": "timeseries",
-              "id": 38,
-              "title": "Target-unavailable document attempts per minute",
-              "description": "Document attempts that could not be written because the target was unavailable, grouped by reason: a write block, unavailable shards, HTTP 503, or connection failure/reset. This does not include HTTP 429 throttles; correlate the overview's paused-document gauge with its limit-cut panel for those. A document is counted again on each attempt, so this is refusal volume rather than a distinct-document count.",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              },
-              "targets": [
-                {
-                  "refId": "A",
-                  "expr": "sum by (reason)(max by (exported_instance,reason) (rate(bulkDocsTargetUnavailable_count_total{otel_scope_name=\"documentMigration\"}[$__rate_interval]))) * 60",
-                  "legendFormat": "{{`{{reason}}`}}",
-                  "datasource": {
-                    "type": "prometheus",
-                    "uid": "${DS_PROMETHEUS}"
-                  }
-                }
-              ],
-              "gridPos": {
-                "h": 6,
-                "w": 8,
-                "x": 8,
-                "y": 62
-              },
-              "fieldConfig": {
-                "defaults": {
-                  "unit": "suffix: /min",
-                  "min": 0,
-                  "custom": {
-                    "stacking": {
-                      "mode": "normal",
-                      "group": "A"
+                "overrides": [
+                  {
+                    "matcher": {
+                      "id": "byFrameRefID",
+                      "options": "C"
                     },
-                    "fillOpacity": 40
+                    "properties": [
+                      {
+                        "id": "custom.axisPlacement",
+                        "value": "right"
+                      },
+                      {
+                        "id": "unit",
+                        "value": "suffix: /min"
+                      }
+                    ]
                   }
-                },
-                "overrides": []
+                ]
               },
               "options": {
                 "legend": {
@@ -2067,70 +1405,7 @@ data:
             },
             {
               "type": "timeseries",
-              "id": 39,
-              "title": "Bulk attempt duration (s)",
-              "description": "Time from sending a bulk HTTP request until its response or transport error. The panel shows the mean, p50, and p99. Durations approaching the configured bulk response timeout indicate responses are arriving too slowly.",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-              },
-              "targets": [
-                {
-                  "refId": "A",
-                  "expr": "(sum(max by (exported_instance,outcome) (rate(bulkAttemptDuration_milliseconds_sum{otel_scope_name=\"documentMigration\"}[$__rate_interval]))) / sum(max by (exported_instance,outcome) (rate(bulkAttemptDuration_milliseconds_count{otel_scope_name=\"documentMigration\"}[$__rate_interval])))) / 1000",
-                  "legendFormat": "Mean",
-                  "datasource": {
-                    "type": "prometheus",
-                    "uid": "${DS_PROMETHEUS}"
-                  }
-                },
-                {
-                  "refId": "B",
-                  "expr": "histogram_quantile(0.5, sum by (le) (max by (exported_instance,outcome,le) (rate(bulkAttemptDuration_milliseconds_bucket{otel_scope_name=\"documentMigration\"}[$__rate_interval])))) / 1000",
-                  "legendFormat": "p50",
-                  "datasource": {
-                    "type": "prometheus",
-                    "uid": "${DS_PROMETHEUS}"
-                  }
-                },
-                {
-                  "refId": "C",
-                  "expr": "histogram_quantile(0.99, sum by (le) (max by (exported_instance,outcome,le) (rate(bulkAttemptDuration_milliseconds_bucket{otel_scope_name=\"documentMigration\"}[$__rate_interval])))) / 1000",
-                  "legendFormat": "p99",
-                  "datasource": {
-                    "type": "prometheus",
-                    "uid": "${DS_PROMETHEUS}"
-                  }
-                }
-              ],
-              "gridPos": {
-                "h": 6,
-                "w": 8,
-                "x": 16,
-                "y": 62
-              },
-              "fieldConfig": {
-                "defaults": {
-                  "unit": "s",
-                  "min": 0
-                },
-                "overrides": []
-              },
-              "options": {
-                "legend": {
-                  "displayMode": "list",
-                  "placement": "bottom",
-                  "showLegend": true
-                },
-                "tooltip": {
-                  "mode": "multi",
-                  "sort": "desc"
-                }
-              }
-            },
-            {
-              "type": "timeseries",
-              "id": 40,
+              "id": 27,
               "title": "Batch completion time and oldest unfinished batch (s)",
               "description": "A batch is one request-sized group of documents followed through all of its retries. Mean completion time runs from the first attempt until the batch succeeds or gives up. Oldest unfinished is the highest age of any still-open batch in a worker. If the oldest rises while other batches complete, some early work may be starved.",
               "datasource": {
@@ -2149,7 +1424,7 @@ data:
                 },
                 {
                   "refId": "B",
-                  "expr": "max((max by (exported_instance) (bulkOldestOpenBatchAge_milliseconds{otel_scope_name=\"documentMigration\"})) and on (exported_instance) (max by (exported_instance,phase) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0)) / 1000",
+                  "expr": "max((max by (exported_instance) (bulkOldestOpenBatchAge_milliseconds{otel_scope_name=\"documentMigration\"})) and on (exported_instance) (max by (exported_instance,phase,tier) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0)) / 1000",
                   "legendFormat": "Oldest unfinished (highest worker)",
                   "datasource": {
                     "type": "prometheus",
@@ -2160,8 +1435,8 @@ data:
               "gridPos": {
                 "h": 6,
                 "w": 8,
-                "x": 0,
-                "y": 68
+                "x": 8,
+                "y": 43
               },
               "fieldConfig": {
                 "defaults": {
@@ -2184,7 +1459,7 @@ data:
             },
             {
               "type": "timeseries",
-              "id": 41,
+              "id": 28,
               "title": "Retry budget tokens and exhaustion",
               "description": "Tokens remaining in each worker's shared retry budget (500 initially), shown for the lowest and highest worker. The right axis counts times retries had to wait because a worker ran out. A low minimum means at least one worker is seeing sustained failures even if the rest are healthy.",
               "datasource": {
@@ -2194,7 +1469,7 @@ data:
               "targets": [
                 {
                   "refId": "A",
-                  "expr": "min((max by (exported_instance) (retryBudgetTokens_count{otel_scope_name=\"documentMigration\"})) and on (exported_instance) (max by (exported_instance,phase) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0))",
+                  "expr": "min((max by (exported_instance) (retryBudgetTokens_count{otel_scope_name=\"documentMigration\"})) and on (exported_instance) (max by (exported_instance,phase,tier) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0))",
                   "legendFormat": "Lowest worker",
                   "datasource": {
                     "type": "prometheus",
@@ -2203,7 +1478,7 @@ data:
                 },
                 {
                   "refId": "B",
-                  "expr": "max((max by (exported_instance) (retryBudgetTokens_count{otel_scope_name=\"documentMigration\"})) and on (exported_instance) (max by (exported_instance,phase) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0))",
+                  "expr": "max((max by (exported_instance) (retryBudgetTokens_count{otel_scope_name=\"documentMigration\"})) and on (exported_instance) (max by (exported_instance,phase,tier) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0))",
                   "legendFormat": "Highest worker",
                   "datasource": {
                     "type": "prometheus",
@@ -2223,8 +1498,8 @@ data:
               "gridPos": {
                 "h": 6,
                 "w": 8,
-                "x": 8,
-                "y": 68
+                "x": 16,
+                "y": 43
               },
               "fieldConfig": {
                 "defaults": {
@@ -2261,26 +1536,12 @@ data:
                   "sort": "desc"
                 }
               }
-            }
-          ]
-        },
-        {
-          "type": "row",
-          "id": 42,
-          "title": "Failure diagnosis",
-          "collapsed": true,
-          "gridPos": {
-            "h": 1,
-            "w": 24,
-            "x": 0,
-            "y": 62
-          },
-          "panels": [
+            },
             {
               "type": "timeseries",
-              "id": 43,
-              "title": "Documents given up after retries (per minute)",
-              "description": "Documents abandoned after repeated unknown status, no-response, or item failures. This explains the RETRYABLE_EXHAUSTED portion of the overview's manual-action graph. Throttling and temporary target unavailability do not give documents up by themselves.",
+              "id": 29,
+              "title": "Why documents reached the retry limit (docs/min)",
+              "description": "The stack breaks down the Retry limit reached series in Failed documents per minute. A response timeout means the worker waited too long for a reply. A repeated item error came back for one document inside a bulk response. An unexpected HTTP status applied to the whole request.",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${DS_PROMETHEUS}"
@@ -2288,8 +1549,26 @@ data:
               "targets": [
                 {
                   "refId": "A",
-                  "expr": "sum by (reason)(max by (exported_instance,reason) (rate(bulkDocsGaveUp_count_total{otel_scope_name=\"documentMigration\"}[$__rate_interval]))) * 60",
-                  "legendFormat": "{{`{{reason}}`}}",
+                  "expr": "(sum(max by (exported_instance,reason) (rate(bulkDocsGaveUp_count_total{otel_scope_name=\"documentMigration\",reason=\"no_response\"}[$__rate_interval]))) * 60) or vector(0)",
+                  "legendFormat": "Response timed out",
+                  "datasource": {
+                    "type": "prometheus",
+                    "uid": "${DS_PROMETHEUS}"
+                  }
+                },
+                {
+                  "refId": "B",
+                  "expr": "(sum(max by (exported_instance,reason) (rate(bulkDocsGaveUp_count_total{otel_scope_name=\"documentMigration\",reason=\"item_failures\"}[$__rate_interval]))) * 60) or vector(0)",
+                  "legendFormat": "Repeated item error",
+                  "datasource": {
+                    "type": "prometheus",
+                    "uid": "${DS_PROMETHEUS}"
+                  }
+                },
+                {
+                  "refId": "C",
+                  "expr": "(sum(max by (exported_instance,reason) (rate(bulkDocsGaveUp_count_total{otel_scope_name=\"documentMigration\",reason=\"unknown_failures\"}[$__rate_interval]))) * 60) or vector(0)",
+                  "legendFormat": "Unexpected HTTP status",
                   "datasource": {
                     "type": "prometheus",
                     "uid": "${DS_PROMETHEUS}"
@@ -2300,12 +1579,19 @@ data:
                 "h": 6,
                 "w": 8,
                 "x": 0,
-                "y": 63
+                "y": 49
               },
               "fieldConfig": {
                 "defaults": {
                   "unit": "suffix: /min",
-                  "min": 0
+                  "min": 0,
+                  "custom": {
+                    "stacking": {
+                      "mode": "normal",
+                      "group": "A"
+                    },
+                    "fillOpacity": 40
+                  }
                 },
                 "overrides": []
               },
@@ -2323,9 +1609,9 @@ data:
             },
             {
               "type": "timeseries",
-              "id": 44,
-              "title": "Item errors per second",
-              "description": "Per-document errors returned inside otherwise successful bulk HTTP responses. Retried errors may reflect target state; terminal errors were attributed to the document and recorded for manual action. CloudWatch aggregates error types into retried and terminal totals and shows zero while healthy bulk traffic is present; Grafana retains the per-error-type breakdown.",
+              "id": 30,
+              "title": "Item errors returned by the target (errors/s)",
+              "description": "Each failed item in a bulk response counts once per attempt. A document can contribute several retryable errors before it succeeds or reaches its retry limit. A response timeout produces no item error. Grafana also groups the errors by type.",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${DS_PROMETHEUS}"
@@ -2333,8 +1619,8 @@ data:
               "targets": [
                 {
                   "refId": "A",
-                  "expr": "sum by (errorType)(max by (exported_instance,errorType,retryable) (rate(bulkItemErrors_count_total{otel_scope_name=\"documentMigration\",retryable=\"true\"}[$__rate_interval])))",
-                  "legendFormat": "{{`{{errorType}}`}} (retried)",
+                  "expr": "(sum by (errorType)((((max by (exported_instance,errorType,retryable) (last_over_time(bulkItemErrors_count_total{otel_scope_name=\"documentMigration\",retryable=\"true\"}[$__rate_interval])) - max by (exported_instance,errorType,retryable) (bulkItemErrors_count_total{otel_scope_name=\"documentMigration\",retryable=\"true\"} offset $__rate_interval)) or max by (exported_instance,errorType,retryable) (last_over_time(bulkItemErrors_count_total{otel_scope_name=\"documentMigration\",retryable=\"true\"}[$__rate_interval]))) / ($__rate_interval_ms / 1000)))) or on() label_replace(0 * (sum((((max by (exported_instance,attempt,outcome) (last_over_time(bulkAttempts_count_total{otel_scope_name=\"documentMigration\"}[$__rate_interval])) - max by (exported_instance,attempt,outcome) (bulkAttempts_count_total{otel_scope_name=\"documentMigration\"} offset $__rate_interval)) or max by (exported_instance,attempt,outcome) (last_over_time(bulkAttempts_count_total{otel_scope_name=\"documentMigration\"}[$__rate_interval]))) / ($__rate_interval_ms / 1000))) > 0), \"errorType\", \"none\", \"\", \"\")",
+                  "legendFormat": "Retryable · {{`{{errorType}}`}}",
                   "datasource": {
                     "type": "prometheus",
                     "uid": "${DS_PROMETHEUS}"
@@ -2342,8 +1628,8 @@ data:
                 },
                 {
                   "refId": "B",
-                  "expr": "sum by (errorType)(max by (exported_instance,errorType,retryable) (rate(bulkItemErrors_count_total{otel_scope_name=\"documentMigration\",retryable=\"false\"}[$__rate_interval])))",
-                  "legendFormat": "{{`{{errorType}}`}} (terminal)",
+                  "expr": "(sum by (errorType)((((max by (exported_instance,errorType,retryable) (last_over_time(bulkItemErrors_count_total{otel_scope_name=\"documentMigration\",retryable=\"false\"}[$__rate_interval])) - max by (exported_instance,errorType,retryable) (bulkItemErrors_count_total{otel_scope_name=\"documentMigration\",retryable=\"false\"} offset $__rate_interval)) or max by (exported_instance,errorType,retryable) (last_over_time(bulkItemErrors_count_total{otel_scope_name=\"documentMigration\",retryable=\"false\"}[$__rate_interval]))) / ($__rate_interval_ms / 1000)))) or on() label_replace(0 * (sum((((max by (exported_instance,attempt,outcome) (last_over_time(bulkAttempts_count_total{otel_scope_name=\"documentMigration\"}[$__rate_interval])) - max by (exported_instance,attempt,outcome) (bulkAttempts_count_total{otel_scope_name=\"documentMigration\"} offset $__rate_interval)) or max by (exported_instance,attempt,outcome) (last_over_time(bulkAttempts_count_total{otel_scope_name=\"documentMigration\"}[$__rate_interval]))) / ($__rate_interval_ms / 1000))) > 0), \"errorType\", \"none\", \"\", \"\")",
+                  "legendFormat": "Non-retryable · {{`{{errorType}}`}}",
                   "datasource": {
                     "type": "prometheus",
                     "uid": "${DS_PROMETHEUS}"
@@ -2354,7 +1640,7 @@ data:
                 "h": 6,
                 "w": 8,
                 "x": 8,
-                "y": 63
+                "y": 49
               },
               "fieldConfig": {
                 "defaults": {
@@ -2386,14 +1672,919 @@ data:
         },
         {
           "type": "row",
-          "id": 45,
-          "title": "Flow-control internals (expert)",
+          "id": 31,
+          "title": "Worker pipeline bottlenecks",
           "collapsed": true,
           "gridPos": {
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 63
+            "y": 43
+          },
+          "panels": [
+            {
+              "type": "timeseries",
+              "id": 32,
+              "title": "Hottest RFS pod by CPU limit",
+              "description": "Highest CPU usage relative to that running pod's own CPU limit.",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_PROMETHEUS}"
+              },
+              "targets": [
+                {
+                  "refId": "A",
+                  "expr": "100 * topk(1, (max by (pod) (rate(container_cpu_usage_seconds_total{job=\"otel-collector\",exported_job=~\"cadvisor|kubelet-cadvisor\",namespace=\"$namespace\",container=\"bulk-loader\",image!=\"\"}[$__rate_interval]))) / on (pod) ((max by (pod) (kube_pod_container_resource_limits{namespace=\"$namespace\",container=\"bulk-loader\",resource=\"cpu\"}) and on (pod) (max by (pod) (kube_pod_container_status_running{namespace=\"$namespace\",container=\"bulk-loader\"}) == 1)) > 0))",
+                  "legendFormat": "{{`{{pod}}`}}",
+                  "datasource": {
+                    "type": "prometheus",
+                    "uid": "${DS_PROMETHEUS}"
+                  }
+                }
+              ],
+              "gridPos": {
+                "h": 6,
+                "w": 8,
+                "x": 0,
+                "y": 44
+              },
+              "fieldConfig": {
+                "defaults": {
+                  "unit": "percent",
+                  "min": 0
+                },
+                "overrides": []
+              },
+              "options": {
+                "legend": {
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": true
+                },
+                "tooltip": {
+                  "mode": "multi",
+                  "sort": "desc"
+                }
+              }
+            },
+            {
+              "type": "timeseries",
+              "id": 33,
+              "title": "Hottest RFS pod by memory limit",
+              "description": "Highest working set relative to that running pod's own memory limit.",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_PROMETHEUS}"
+              },
+              "targets": [
+                {
+                  "refId": "A",
+                  "expr": "100 * topk(1, (max by (pod) (container_memory_working_set_bytes{job=\"otel-collector\",exported_job=~\"cadvisor|kubelet-cadvisor\",namespace=\"$namespace\",container=\"bulk-loader\",image!=\"\"} and (topk by (pod) (1, timestamp(container_memory_working_set_bytes{job=\"otel-collector\",exported_job=~\"cadvisor|kubelet-cadvisor\",namespace=\"$namespace\",container=\"bulk-loader\",image!=\"\"})) > time() - 60))) / on (pod) ((max by (pod) (kube_pod_container_resource_limits{namespace=\"$namespace\",container=\"bulk-loader\",resource=\"memory\"}) and on (pod) (max by (pod) (kube_pod_container_status_running{namespace=\"$namespace\",container=\"bulk-loader\"}) == 1)) > 0))",
+                  "legendFormat": "{{`{{pod}}`}}",
+                  "datasource": {
+                    "type": "prometheus",
+                    "uid": "${DS_PROMETHEUS}"
+                  }
+                }
+              ],
+              "gridPos": {
+                "h": 6,
+                "w": 8,
+                "x": 8,
+                "y": 44
+              },
+              "fieldConfig": {
+                "defaults": {
+                  "unit": "percent",
+                  "min": 0
+                },
+                "overrides": []
+              },
+              "options": {
+                "legend": {
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": true
+                },
+                "tooltip": {
+                  "mode": "multi",
+                  "sort": "desc"
+                }
+              }
+            },
+            {
+              "type": "timeseries",
+              "id": 34,
+              "title": "Documents per second through pipeline stages",
+              "description": "The same source documents counted at successive bounded pipeline boundaries. Source is chunked for preparation; prepared has completed validation/encoding; ordered prep has cleared the ordered fan-in; packed has entered an exact target batch; request started/finished bracket the sink call; checkpointed can advance source progress. A sustained rate drop between adjacent lines locates the stage that is not feeding its consumer.",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_PROMETHEUS}"
+              },
+              "targets": [
+                {
+                  "refId": "A",
+                  "expr": "(sum(max by (exported_instance,stage) (rate(pipelineStageDocuments_count_total{otel_scope_name=\"documentMigration\",stage=\"source\"}[$__rate_interval])))) or vector(0)",
+                  "legendFormat": "Source",
+                  "datasource": {
+                    "type": "prometheus",
+                    "uid": "${DS_PROMETHEUS}"
+                  }
+                },
+                {
+                  "refId": "B",
+                  "expr": "(sum(max by (exported_instance,stage) (rate(pipelineStageDocuments_count_total{otel_scope_name=\"documentMigration\",stage=\"prepared\"}[$__rate_interval])))) or vector(0)",
+                  "legendFormat": "Prepared",
+                  "datasource": {
+                    "type": "prometheus",
+                    "uid": "${DS_PROMETHEUS}"
+                  }
+                },
+                {
+                  "refId": "C",
+                  "expr": "(sum(max by (exported_instance,stage) (rate(pipelineStageDocuments_count_total{otel_scope_name=\"documentMigration\",stage=\"ordered_prepared\"}[$__rate_interval])))) or vector(0)",
+                  "legendFormat": "Ordered prep",
+                  "datasource": {
+                    "type": "prometheus",
+                    "uid": "${DS_PROMETHEUS}"
+                  }
+                },
+                {
+                  "refId": "D",
+                  "expr": "(sum(max by (exported_instance,stage) (rate(pipelineStageDocuments_count_total{otel_scope_name=\"documentMigration\",stage=\"packed\"}[$__rate_interval])))) or vector(0)",
+                  "legendFormat": "Packed",
+                  "datasource": {
+                    "type": "prometheus",
+                    "uid": "${DS_PROMETHEUS}"
+                  }
+                },
+                {
+                  "refId": "E",
+                  "expr": "(sum(max by (exported_instance,stage) (rate(pipelineStageDocuments_count_total{otel_scope_name=\"documentMigration\",stage=\"request_started\"}[$__rate_interval])))) or vector(0)",
+                  "legendFormat": "Request started",
+                  "datasource": {
+                    "type": "prometheus",
+                    "uid": "${DS_PROMETHEUS}"
+                  }
+                },
+                {
+                  "refId": "F",
+                  "expr": "(sum(max by (exported_instance,stage) (rate(pipelineStageDocuments_count_total{otel_scope_name=\"documentMigration\",stage=\"request_completed\"}[$__rate_interval])))) or vector(0)",
+                  "legendFormat": "Request finished",
+                  "datasource": {
+                    "type": "prometheus",
+                    "uid": "${DS_PROMETHEUS}"
+                  }
+                },
+                {
+                  "refId": "G",
+                  "expr": "(sum(max by (exported_instance,stage) (rate(pipelineStageDocuments_count_total{otel_scope_name=\"documentMigration\",stage=\"checkpointed\"}[$__rate_interval])))) or vector(0)",
+                  "legendFormat": "Checkpointed",
+                  "datasource": {
+                    "type": "prometheus",
+                    "uid": "${DS_PROMETHEUS}"
+                  }
+                }
+              ],
+              "gridPos": {
+                "h": 6,
+                "w": 8,
+                "x": 16,
+                "y": 44
+              },
+              "fieldConfig": {
+                "defaults": {
+                  "unit": "suffix: docs/s",
+                  "min": 0
+                },
+                "overrides": []
+              },
+              "options": {
+                "legend": {
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": true
+                },
+                "tooltip": {
+                  "mode": "multi",
+                  "sort": "desc"
+                }
+              }
+            },
+            {
+              "type": "timeseries",
+              "id": 35,
+              "title": "Documents buffered between stages",
+              "description": "Current source documents waiting for a preparation rail, completed prepared documents held behind an earlier chunk by ordered fan-in, and packed documents ready for the request fan-out. Ordered-prep growth exposes head-of-line blocking; ready-document growth with low HTTP in-flight work points to request-fan-out scheduling or sink work.",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_PROMETHEUS}"
+              },
+              "targets": [
+                {
+                  "refId": "A",
+                  "expr": "sum((max by (exported_instance) (pipelinePreparationQueuedDocuments_count{otel_scope_name=\"documentMigration\"})) and on (exported_instance) (max by (exported_instance,phase,tier) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0))",
+                  "legendFormat": "Waiting for preparation",
+                  "datasource": {
+                    "type": "prometheus",
+                    "uid": "${DS_PROMETHEUS}"
+                  }
+                },
+                {
+                  "refId": "B",
+                  "expr": "sum((max by (exported_instance) (pipelinePreparationOrderedDocuments_count{otel_scope_name=\"documentMigration\"})) and on (exported_instance) (max by (exported_instance,phase,tier) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0))",
+                  "legendFormat": "Blocked at ordered prep fan-in",
+                  "datasource": {
+                    "type": "prometheus",
+                    "uid": "${DS_PROMETHEUS}"
+                  }
+                },
+                {
+                  "refId": "C",
+                  "expr": "sum((max by (exported_instance) (pipelineRequestReadyDocuments_count{otel_scope_name=\"documentMigration\"})) and on (exported_instance) (max by (exported_instance,phase,tier) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0))",
+                  "legendFormat": "Packed and request-ready",
+                  "datasource": {
+                    "type": "prometheus",
+                    "uid": "${DS_PROMETHEUS}"
+                  }
+                }
+              ],
+              "gridPos": {
+                "h": 6,
+                "w": 8,
+                "x": 0,
+                "y": 50
+              },
+              "fieldConfig": {
+                "defaults": {
+                  "unit": "short",
+                  "min": 0
+                },
+                "overrides": []
+              },
+              "options": {
+                "legend": {
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": true
+                },
+                "tooltip": {
+                  "mode": "multi",
+                  "sort": "desc"
+                }
+              }
+            },
+            {
+              "type": "timeseries",
+              "id": 36,
+              "title": "Time waiting between pipeline stages (ms)",
+              "description": "Mean queue residence per chunk or batch: waiting for a preparation rail, waiting after preparation for ordered fan-in, and waiting after exact packing for the request fan-out. These are boundary waits, not target response time.",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_PROMETHEUS}"
+              },
+              "targets": [
+                {
+                  "refId": "A",
+                  "expr": "sum(max by (exported_instance) (rate(pipelinePreparationQueueWait_milliseconds_sum{otel_scope_name=\"documentMigration\"}[$__rate_interval]))) / sum(max by (exported_instance) (rate(pipelinePreparationQueueWait_milliseconds_count{otel_scope_name=\"documentMigration\"}[$__rate_interval])))",
+                  "legendFormat": "Preparation queue",
+                  "datasource": {
+                    "type": "prometheus",
+                    "uid": "${DS_PROMETHEUS}"
+                  }
+                },
+                {
+                  "refId": "B",
+                  "expr": "sum(max by (exported_instance) (rate(pipelinePreparationOrderedWait_milliseconds_sum{otel_scope_name=\"documentMigration\"}[$__rate_interval]))) / sum(max by (exported_instance) (rate(pipelinePreparationOrderedWait_milliseconds_count{otel_scope_name=\"documentMigration\"}[$__rate_interval])))",
+                  "legendFormat": "Ordered prep fan-in",
+                  "datasource": {
+                    "type": "prometheus",
+                    "uid": "${DS_PROMETHEUS}"
+                  }
+                },
+                {
+                  "refId": "C",
+                  "expr": "sum(max by (exported_instance) (rate(pipelineRequestQueueWait_milliseconds_sum{otel_scope_name=\"documentMigration\"}[$__rate_interval]))) / sum(max by (exported_instance) (rate(pipelineRequestQueueWait_milliseconds_count{otel_scope_name=\"documentMigration\"}[$__rate_interval])))",
+                  "legendFormat": "Packed-to-request",
+                  "datasource": {
+                    "type": "prometheus",
+                    "uid": "${DS_PROMETHEUS}"
+                  }
+                }
+              ],
+              "gridPos": {
+                "h": 6,
+                "w": 8,
+                "x": 8,
+                "y": 50
+              },
+              "fieldConfig": {
+                "defaults": {
+                  "unit": "ms",
+                  "min": 0
+                },
+                "overrides": []
+              },
+              "options": {
+                "legend": {
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": true
+                },
+                "tooltip": {
+                  "mode": "multi",
+                  "sort": "desc"
+                }
+              }
+            },
+            {
+              "type": "timeseries",
+              "id": 37,
+              "title": "MiB per second through pipeline stages",
+              "description": "Bytes crossing selected pipeline boundaries. Source and checkpointed bytes are original document source. Prepared, packed, and request-started bytes are exact encoded NDJSON operations including action metadata and framing. The change from source to prepared quantifies bulk-format overhead.",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_PROMETHEUS}"
+              },
+              "targets": [
+                {
+                  "refId": "A",
+                  "expr": "(sum(max by (exported_instance,stage) (rate(pipelineStageBytes_bytes_total{otel_scope_name=\"documentMigration\",stage=\"source\"}[$__rate_interval]))) * 9.53674e-07) or vector(0)",
+                  "legendFormat": "Source",
+                  "datasource": {
+                    "type": "prometheus",
+                    "uid": "${DS_PROMETHEUS}"
+                  }
+                },
+                {
+                  "refId": "B",
+                  "expr": "(sum(max by (exported_instance,stage) (rate(pipelineStageBytes_bytes_total{otel_scope_name=\"documentMigration\",stage=\"prepared\"}[$__rate_interval]))) * 9.53674e-07) or vector(0)",
+                  "legendFormat": "Prepared",
+                  "datasource": {
+                    "type": "prometheus",
+                    "uid": "${DS_PROMETHEUS}"
+                  }
+                },
+                {
+                  "refId": "C",
+                  "expr": "(sum(max by (exported_instance,stage) (rate(pipelineStageBytes_bytes_total{otel_scope_name=\"documentMigration\",stage=\"packed\"}[$__rate_interval]))) * 9.53674e-07) or vector(0)",
+                  "legendFormat": "Packed",
+                  "datasource": {
+                    "type": "prometheus",
+                    "uid": "${DS_PROMETHEUS}"
+                  }
+                },
+                {
+                  "refId": "D",
+                  "expr": "(sum(max by (exported_instance,stage) (rate(pipelineStageBytes_bytes_total{otel_scope_name=\"documentMigration\",stage=\"request_started\"}[$__rate_interval]))) * 9.53674e-07) or vector(0)",
+                  "legendFormat": "Request started",
+                  "datasource": {
+                    "type": "prometheus",
+                    "uid": "${DS_PROMETHEUS}"
+                  }
+                },
+                {
+                  "refId": "E",
+                  "expr": "(sum(max by (exported_instance,stage) (rate(pipelineStageBytes_bytes_total{otel_scope_name=\"documentMigration\",stage=\"checkpointed\"}[$__rate_interval]))) * 9.53674e-07) or vector(0)",
+                  "legendFormat": "Checkpointed source",
+                  "datasource": {
+                    "type": "prometheus",
+                    "uid": "${DS_PROMETHEUS}"
+                  }
+                }
+              ],
+              "gridPos": {
+                "h": 6,
+                "w": 8,
+                "x": 16,
+                "y": 50
+              },
+              "fieldConfig": {
+                "defaults": {
+                  "unit": "suffix: MiB/s",
+                  "min": 0
+                },
+                "overrides": []
+              },
+              "options": {
+                "legend": {
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": true
+                },
+                "tooltip": {
+                  "mode": "multi",
+                  "sort": "desc"
+                }
+              }
+            },
+            {
+              "type": "timeseries",
+              "id": 38,
+              "title": "MiB buffered between stages",
+              "description": "Current source bytes waiting for preparation, exact encoded bytes held by the ordered preparation fan-in, and exact encoded bytes packed and ready for requests. A persistent reservoir shows where memory is being used and which downstream boundary is not draining.",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_PROMETHEUS}"
+              },
+              "targets": [
+                {
+                  "refId": "A",
+                  "expr": "sum((max by (exported_instance) (pipelinePreparationQueuedBytes_bytes{otel_scope_name=\"documentMigration\"})) and on (exported_instance) (max by (exported_instance,phase,tier) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0)) / 1048576",
+                  "legendFormat": "Waiting for preparation",
+                  "datasource": {
+                    "type": "prometheus",
+                    "uid": "${DS_PROMETHEUS}"
+                  }
+                },
+                {
+                  "refId": "B",
+                  "expr": "sum((max by (exported_instance) (pipelinePreparationOrderedBytes_bytes{otel_scope_name=\"documentMigration\"})) and on (exported_instance) (max by (exported_instance,phase,tier) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0)) / 1048576",
+                  "legendFormat": "Blocked at ordered prep fan-in",
+                  "datasource": {
+                    "type": "prometheus",
+                    "uid": "${DS_PROMETHEUS}"
+                  }
+                },
+                {
+                  "refId": "C",
+                  "expr": "sum((max by (exported_instance) (pipelineRequestReadyBytes_bytes{otel_scope_name=\"documentMigration\"})) and on (exported_instance) (max by (exported_instance,phase,tier) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0)) / 1048576",
+                  "legendFormat": "Packed and request-ready",
+                  "datasource": {
+                    "type": "prometheus",
+                    "uid": "${DS_PROMETHEUS}"
+                  }
+                }
+              ],
+              "gridPos": {
+                "h": 6,
+                "w": 8,
+                "x": 0,
+                "y": 56
+              },
+              "fieldConfig": {
+                "defaults": {
+                  "unit": "suffix: MiB",
+                  "min": 0
+                },
+                "overrides": []
+              },
+              "options": {
+                "legend": {
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": true
+                },
+                "tooltip": {
+                  "mode": "multi",
+                  "sort": "desc"
+                }
+              }
+            },
+            {
+              "type": "timeseries",
+              "id": 39,
+              "title": "Active and queued pipeline work",
+              "description": "Counts of chunks or request groups at the main concurrency boundaries. Preparation active is work on CPU rails. Ordered chunks completed out of order and are waiting to be released. Request-ready batches are packed but not subscribed; active request groups are executing sink work.",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_PROMETHEUS}"
+              },
+              "targets": [
+                {
+                  "refId": "A",
+                  "expr": "sum((max by (exported_instance) (pipelinePreparationQueuedChunks_count{otel_scope_name=\"documentMigration\"})) and on (exported_instance) (max by (exported_instance,phase,tier) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0))",
+                  "legendFormat": "Prep chunks queued",
+                  "datasource": {
+                    "type": "prometheus",
+                    "uid": "${DS_PROMETHEUS}"
+                  }
+                },
+                {
+                  "refId": "B",
+                  "expr": "sum((max by (exported_instance) (pipelinePreparationActiveChunks_count{otel_scope_name=\"documentMigration\"})) and on (exported_instance) (max by (exported_instance,phase,tier) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0))",
+                  "legendFormat": "Prep chunks active",
+                  "datasource": {
+                    "type": "prometheus",
+                    "uid": "${DS_PROMETHEUS}"
+                  }
+                },
+                {
+                  "refId": "C",
+                  "expr": "sum((max by (exported_instance) (pipelinePreparationOrderedChunks_count{otel_scope_name=\"documentMigration\"})) and on (exported_instance) (max by (exported_instance,phase,tier) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0))",
+                  "legendFormat": "Prep chunks ordered-blocked",
+                  "datasource": {
+                    "type": "prometheus",
+                    "uid": "${DS_PROMETHEUS}"
+                  }
+                },
+                {
+                  "refId": "D",
+                  "expr": "sum((max by (exported_instance) (pipelineRequestReadyBatches_count{otel_scope_name=\"documentMigration\"})) and on (exported_instance) (max by (exported_instance,phase,tier) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0))",
+                  "legendFormat": "Request-ready batches",
+                  "datasource": {
+                    "type": "prometheus",
+                    "uid": "${DS_PROMETHEUS}"
+                  }
+                },
+                {
+                  "refId": "E",
+                  "expr": "sum((max by (exported_instance) (pipelineRequestActiveGroups_count{otel_scope_name=\"documentMigration\"})) and on (exported_instance) (max by (exported_instance,phase,tier) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0))",
+                  "legendFormat": "Request groups active",
+                  "datasource": {
+                    "type": "prometheus",
+                    "uid": "${DS_PROMETHEUS}"
+                  }
+                }
+              ],
+              "gridPos": {
+                "h": 6,
+                "w": 8,
+                "x": 8,
+                "y": 56
+              },
+              "fieldConfig": {
+                "defaults": {
+                  "unit": "short",
+                  "min": 0
+                },
+                "overrides": []
+              },
+              "options": {
+                "legend": {
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": true
+                },
+                "tooltip": {
+                  "mode": "multi",
+                  "sort": "desc"
+                }
+              }
+            },
+            {
+              "type": "timeseries",
+              "id": 40,
+              "title": "Pipeline service time (ms)",
+              "description": "Mean CPU preparation time per chunk, serial exact-packer time per chunk, and complete sink-call time per successful request group. Request-group duration includes target requests and their response handling, so compare it with the bulk request duration seen by RFS and the client-side timings.",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_PROMETHEUS}"
+              },
+              "targets": [
+                {
+                  "refId": "A",
+                  "expr": "sum(max by (exported_instance,outcome) (rate(pipelinePreparationDuration_milliseconds_sum{otel_scope_name=\"documentMigration\",outcome=\"success\"}[$__rate_interval]))) / sum(max by (exported_instance,outcome) (rate(pipelinePreparationDuration_milliseconds_count{otel_scope_name=\"documentMigration\",outcome=\"success\"}[$__rate_interval])))",
+                  "legendFormat": "Prepare chunk",
+                  "datasource": {
+                    "type": "prometheus",
+                    "uid": "${DS_PROMETHEUS}"
+                  }
+                },
+                {
+                  "refId": "B",
+                  "expr": "sum(max by (exported_instance) (rate(pipelinePackingDuration_milliseconds_sum{otel_scope_name=\"documentMigration\"}[$__rate_interval]))) / sum(max by (exported_instance) (rate(pipelinePackingDuration_milliseconds_count{otel_scope_name=\"documentMigration\"}[$__rate_interval])))",
+                  "legendFormat": "Exact packer",
+                  "datasource": {
+                    "type": "prometheus",
+                    "uid": "${DS_PROMETHEUS}"
+                  }
+                },
+                {
+                  "refId": "C",
+                  "expr": "sum(max by (exported_instance,outcome) (rate(pipelineRequestGroupDuration_milliseconds_sum{otel_scope_name=\"documentMigration\",outcome=\"success\"}[$__rate_interval]))) / sum(max by (exported_instance,outcome) (rate(pipelineRequestGroupDuration_milliseconds_count{otel_scope_name=\"documentMigration\",outcome=\"success\"}[$__rate_interval])))",
+                  "legendFormat": "Request group",
+                  "datasource": {
+                    "type": "prometheus",
+                    "uid": "${DS_PROMETHEUS}"
+                  }
+                }
+              ],
+              "gridPos": {
+                "h": 6,
+                "w": 8,
+                "x": 16,
+                "y": 56
+              },
+              "fieldConfig": {
+                "defaults": {
+                  "unit": "ms",
+                  "min": 0
+                },
+                "overrides": []
+              },
+              "options": {
+                "legend": {
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": true
+                },
+                "tooltip": {
+                  "mode": "multi",
+                  "sort": "desc"
+                }
+              }
+            },
+            {
+              "type": "timeseries",
+              "id": 41,
+              "title": "Packed target-batch shape",
+              "description": "Mean exact documents and MiB per target batch, plus utilization of the configured document and byte limits. A batch may be near one limit and far below the other. Values above 100% identify a single oversized operation that must be isolated.",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_PROMETHEUS}"
+              },
+              "targets": [
+                {
+                  "refId": "A",
+                  "expr": "sum(max by (exported_instance) (rate(pipelinePackedBatchDocuments_count_sum{otel_scope_name=\"documentMigration\"}[$__rate_interval]))) / sum(max by (exported_instance) (rate(pipelinePackedBatchDocuments_count_count{otel_scope_name=\"documentMigration\"}[$__rate_interval])))",
+                  "legendFormat": "Documents",
+                  "datasource": {
+                    "type": "prometheus",
+                    "uid": "${DS_PROMETHEUS}"
+                  }
+                },
+                {
+                  "refId": "B",
+                  "expr": "(sum(max by (exported_instance) (rate(pipelinePackedBatchBytes_bytes_sum{otel_scope_name=\"documentMigration\"}[$__rate_interval]))) / sum(max by (exported_instance) (rate(pipelinePackedBatchBytes_bytes_count{otel_scope_name=\"documentMigration\"}[$__rate_interval])))) / 1048576",
+                  "legendFormat": "MiB",
+                  "datasource": {
+                    "type": "prometheus",
+                    "uid": "${DS_PROMETHEUS}"
+                  }
+                },
+                {
+                  "refId": "C",
+                  "expr": "sum(max by (exported_instance,limit) (rate(pipelinePackedBatchFill_percent_sum{otel_scope_name=\"documentMigration\",limit=\"documents\"}[$__rate_interval]))) / sum(max by (exported_instance,limit) (rate(pipelinePackedBatchFill_percent_count{otel_scope_name=\"documentMigration\",limit=\"documents\"}[$__rate_interval])))",
+                  "legendFormat": "Document-limit fill (%)",
+                  "datasource": {
+                    "type": "prometheus",
+                    "uid": "${DS_PROMETHEUS}"
+                  }
+                },
+                {
+                  "refId": "D",
+                  "expr": "sum(max by (exported_instance,limit) (rate(pipelinePackedBatchFill_percent_sum{otel_scope_name=\"documentMigration\",limit=\"bytes\"}[$__rate_interval]))) / sum(max by (exported_instance,limit) (rate(pipelinePackedBatchFill_percent_count{otel_scope_name=\"documentMigration\",limit=\"bytes\"}[$__rate_interval])))",
+                  "legendFormat": "Byte-limit fill (%)",
+                  "datasource": {
+                    "type": "prometheus",
+                    "uid": "${DS_PROMETHEUS}"
+                  }
+                }
+              ],
+              "gridPos": {
+                "h": 6,
+                "w": 8,
+                "x": 0,
+                "y": 62
+              },
+              "fieldConfig": {
+                "defaults": {
+                  "unit": "short",
+                  "min": 0
+                },
+                "overrides": []
+              },
+              "options": {
+                "legend": {
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": true
+                },
+                "tooltip": {
+                  "mode": "multi",
+                  "sort": "desc"
+                }
+              }
+            },
+            {
+              "type": "timeseries",
+              "id": 42,
+              "title": "Client preparation and response handling (ms)",
+              "description": "Client-side work after a request group reaches OpenSearchClient: final client repacking, contiguous NDJSON assembly, gzip, and response classification/compaction. Gap between starts is process-wide request pacing, not per-request or per-connection latency. The client repacking timer does not include the upstream preparation and ordered packing shown elsewhere in this section.",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_PROMETHEUS}"
+              },
+              "targets": [
+                {
+                  "refId": "A",
+                  "expr": "sum(max by (exported_instance,path) (rate(bulkBatchPreparationDuration_milliseconds_sum{otel_scope_name=\"documentMigration\"}[$__rate_interval]))) / sum(max by (exported_instance,path) (rate(bulkBatchPreparationDuration_milliseconds_count{otel_scope_name=\"documentMigration\"}[$__rate_interval])))",
+                  "legendFormat": "Client repacking",
+                  "datasource": {
+                    "type": "prometheus",
+                    "uid": "${DS_PROMETHEUS}"
+                  }
+                },
+                {
+                  "refId": "B",
+                  "expr": "sum(max by (exported_instance,attempt) (rate(bulkRequestStartGap_milliseconds_sum{otel_scope_name=\"documentMigration\"}[$__rate_interval]))) / sum(max by (exported_instance,attempt) (rate(bulkRequestStartGap_milliseconds_count{otel_scope_name=\"documentMigration\"}[$__rate_interval])))",
+                  "legendFormat": "Gap between request starts",
+                  "datasource": {
+                    "type": "prometheus",
+                    "uid": "${DS_PROMETHEUS}"
+                  }
+                },
+                {
+                  "refId": "C",
+                  "expr": "sum(max by (exported_instance,attempt) (rate(bulkRequestAssemblyDuration_milliseconds_sum{otel_scope_name=\"documentMigration\"}[$__rate_interval]))) / sum(max by (exported_instance,attempt) (rate(bulkRequestAssemblyDuration_milliseconds_count{otel_scope_name=\"documentMigration\"}[$__rate_interval])))",
+                  "legendFormat": "Request assembly",
+                  "datasource": {
+                    "type": "prometheus",
+                    "uid": "${DS_PROMETHEUS}"
+                  }
+                },
+                {
+                  "refId": "D",
+                  "expr": "sum(max by (exported_instance,attempt) (rate(bulkRequestCompressionDuration_milliseconds_sum{otel_scope_name=\"documentMigration\"}[$__rate_interval]))) / sum(max by (exported_instance,attempt) (rate(bulkRequestCompressionDuration_milliseconds_count{otel_scope_name=\"documentMigration\"}[$__rate_interval])))",
+                  "legendFormat": "Gzip",
+                  "datasource": {
+                    "type": "prometheus",
+                    "uid": "${DS_PROMETHEUS}"
+                  }
+                },
+                {
+                  "refId": "E",
+                  "expr": "sum(max by (exported_instance,result) (rate(bulkResponseClassificationDuration_milliseconds_sum{otel_scope_name=\"documentMigration\",result=\"response\"}[$__rate_interval]))) / sum(max by (exported_instance,result) (rate(bulkResponseClassificationDuration_milliseconds_count{otel_scope_name=\"documentMigration\",result=\"response\"}[$__rate_interval])))",
+                  "legendFormat": "Classify response",
+                  "datasource": {
+                    "type": "prometheus",
+                    "uid": "${DS_PROMETHEUS}"
+                  }
+                },
+                {
+                  "refId": "F",
+                  "expr": "sum(max by (exported_instance,result) (rate(bulkResponseClassificationDuration_milliseconds_sum{otel_scope_name=\"documentMigration\",result=\"no_response\"}[$__rate_interval]))) / sum(max by (exported_instance,result) (rate(bulkResponseClassificationDuration_milliseconds_count{otel_scope_name=\"documentMigration\",result=\"no_response\"}[$__rate_interval])))",
+                  "legendFormat": "Classify no response",
+                  "datasource": {
+                    "type": "prometheus",
+                    "uid": "${DS_PROMETHEUS}"
+                  }
+                }
+              ],
+              "gridPos": {
+                "h": 6,
+                "w": 8,
+                "x": 8,
+                "y": 62
+              },
+              "fieldConfig": {
+                "defaults": {
+                  "unit": "ms",
+                  "min": 0
+                },
+                "overrides": []
+              },
+              "options": {
+                "legend": {
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": true
+                },
+                "tooltip": {
+                  "mode": "multi",
+                  "sort": "desc"
+                }
+              }
+            },
+            {
+              "type": "timeseries",
+              "id": 43,
+              "title": "RFS CPU throttled periods (%)",
+              "description": "Percentage of Linux CFS scheduling periods in which bulk-loader containers wanted more CPU than their configured limits allowed. High CPU utilization without throttled periods means workers are using their allocation; sustained throttling means preparation, packing, compression, or response work is being delayed by the pod CPU limit.",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_PROMETHEUS}"
+              },
+              "targets": [
+                {
+                  "refId": "A",
+                  "expr": "100 * (sum(rate(container_cpu_cfs_throttled_periods_total{job=\"otel-collector\",exported_job=~\"cadvisor|kubelet-cadvisor\",namespace=\"$namespace\",container=\"bulk-loader\",container!=\"POD\",image!=\"\"}[$__rate_interval]))) / (sum(rate(container_cpu_cfs_periods_total{job=\"otel-collector\",exported_job=~\"cadvisor|kubelet-cadvisor\",namespace=\"$namespace\",container=\"bulk-loader\",container!=\"POD\",image!=\"\"}[$__rate_interval])))",
+                  "legendFormat": "% throttled periods",
+                  "datasource": {
+                    "type": "prometheus",
+                    "uid": "${DS_PROMETHEUS}"
+                  }
+                }
+              ],
+              "gridPos": {
+                "h": 6,
+                "w": 8,
+                "x": 16,
+                "y": 62
+              },
+              "fieldConfig": {
+                "defaults": {
+                  "unit": "percent",
+                  "min": 0
+                },
+                "overrides": []
+              },
+              "options": {
+                "legend": {
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": true
+                },
+                "tooltip": {
+                  "mode": "multi",
+                  "sort": "desc"
+                }
+              }
+            },
+            {
+              "type": "timeseries",
+              "id": 44,
+              "title": "Effective pipeline configuration",
+              "description": "Mean process configuration reported by the running workers. These values make benchmark graphs self-describing when lanes use different images or tuning combinations. Batch bytes are shown in MiB; the other lines are document, chunk, group, or concurrency counts as named.",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_PROMETHEUS}"
+              },
+              "targets": [
+                {
+                  "refId": "A",
+                  "expr": "avg((max by (exported_instance) (pipelineMaxBatchDocuments_count{otel_scope_name=\"documentMigration\"})) and on (exported_instance) (max by (exported_instance,phase,tier) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0))",
+                  "legendFormat": "Max documents per target batch",
+                  "datasource": {
+                    "type": "prometheus",
+                    "uid": "${DS_PROMETHEUS}"
+                  }
+                },
+                {
+                  "refId": "B",
+                  "expr": "avg((max by (exported_instance) (pipelineMaxBatchBytes_bytes{otel_scope_name=\"documentMigration\"})) and on (exported_instance) (max by (exported_instance,phase,tier) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0)) / 1048576",
+                  "legendFormat": "Max target-batch MiB",
+                  "datasource": {
+                    "type": "prometheus",
+                    "uid": "${DS_PROMETHEUS}"
+                  }
+                },
+                {
+                  "refId": "C",
+                  "expr": "avg((max by (exported_instance) (pipelineBatchConcurrency_count{otel_scope_name=\"documentMigration\"})) and on (exported_instance) (max by (exported_instance,phase,tier) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0))",
+                  "legendFormat": "Request concurrency ceiling",
+                  "datasource": {
+                    "type": "prometheus",
+                    "uid": "${DS_PROMETHEUS}"
+                  }
+                },
+                {
+                  "refId": "D",
+                  "expr": "avg((max by (exported_instance) (pipelinePreparationConcurrency_count{otel_scope_name=\"documentMigration\"})) and on (exported_instance) (max by (exported_instance,phase,tier) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0))",
+                  "legendFormat": "Preparation rails",
+                  "datasource": {
+                    "type": "prometheus",
+                    "uid": "${DS_PROMETHEUS}"
+                  }
+                },
+                {
+                  "refId": "E",
+                  "expr": "avg((max by (exported_instance) (pipelinePreparationChunkDocuments_count{otel_scope_name=\"documentMigration\"})) and on (exported_instance) (max by (exported_instance,phase,tier) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0))",
+                  "legendFormat": "Documents per preparation chunk",
+                  "datasource": {
+                    "type": "prometheus",
+                    "uid": "${DS_PROMETHEUS}"
+                  }
+                }
+              ],
+              "gridPos": {
+                "h": 6,
+                "w": 8,
+                "x": 0,
+                "y": 68
+              },
+              "fieldConfig": {
+                "defaults": {
+                  "unit": "short",
+                  "min": 0
+                },
+                "overrides": []
+              },
+              "options": {
+                "legend": {
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": true
+                },
+                "tooltip": {
+                  "mode": "multi",
+                  "sort": "desc"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "row",
+          "id": 45,
+          "title": "Flow-control internals",
+          "collapsed": true,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 44
           },
           "panels": [
             {
@@ -2408,7 +2599,7 @@ data:
               "targets": [
                 {
                   "refId": "A",
-                  "expr": "sum by (attempt,outcome)(max by (exported_instance,attempt,outcome) (rate(bulkAttempts_count_total{otel_scope_name=\"documentMigration\"}[$__rate_interval])))",
+                  "expr": "sum by (attempt,outcome)((((max by (exported_instance,attempt,outcome) (last_over_time(bulkAttempts_count_total{otel_scope_name=\"documentMigration\"}[$__rate_interval])) - max by (exported_instance,attempt,outcome) (bulkAttempts_count_total{otel_scope_name=\"documentMigration\"} offset $__rate_interval)) or max by (exported_instance,attempt,outcome) (last_over_time(bulkAttempts_count_total{otel_scope_name=\"documentMigration\"}[$__rate_interval]))) / ($__rate_interval_ms / 1000)))",
                   "legendFormat": "{{`{{attempt}}`}} {{`{{outcome}}`}}",
                   "datasource": {
                     "type": "prometheus",
@@ -2420,7 +2611,7 @@ data:
                 "h": 6,
                 "w": 8,
                 "x": 0,
-                "y": 64
+                "y": 45
               },
               "fieldConfig": {
                 "defaults": {
@@ -2460,7 +2651,7 @@ data:
               "targets": [
                 {
                   "refId": "A",
-                  "expr": "(max by (exported_instance) (bulkLimit_count{otel_scope_name=\"documentMigration\"})) and on (exported_instance) (max by (exported_instance,phase) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0)",
+                  "expr": "(max by (exported_instance) (bulkLimit_count{otel_scope_name=\"documentMigration\"})) and on (exported_instance) (max by (exported_instance,phase,tier) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0)",
                   "legendFormat": "{{`{{exported_instance}}`}}",
                   "datasource": {
                     "type": "prometheus",
@@ -2472,7 +2663,7 @@ data:
                 "h": 6,
                 "w": 8,
                 "x": 8,
-                "y": 64
+                "y": 45
               },
               "fieldConfig": {
                 "defaults": {
@@ -2497,7 +2688,7 @@ data:
               "type": "timeseries",
               "id": 48,
               "title": "Adaptive limit state",
-              "description": "Mean and highest current worker limit plus the mean threshold separating fast initial growth from slower congestion-avoidance growth. Use the operator overview for configured ceiling, utilization bands, actual in-flight requests, and target-driven cuts.",
+              "description": "Mean and highest current worker limit plus the mean threshold separating fast initial growth from slower congestion-avoidance growth. Use the migration overview for configured ceiling, utilization bands, actual in-flight requests, and target-driven cuts.",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${DS_PROMETHEUS}"
@@ -2505,7 +2696,7 @@ data:
               "targets": [
                 {
                   "refId": "A",
-                  "expr": "avg((max by (exported_instance) (bulkLimit_count{otel_scope_name=\"documentMigration\"})) and on (exported_instance) (max by (exported_instance,phase) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0))",
+                  "expr": "avg((max by (exported_instance) (bulkLimit_count{otel_scope_name=\"documentMigration\"})) and on (exported_instance) (max by (exported_instance,phase,tier) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0))",
                   "legendFormat": "Mean worker",
                   "datasource": {
                     "type": "prometheus",
@@ -2514,7 +2705,7 @@ data:
                 },
                 {
                   "refId": "B",
-                  "expr": "max((max by (exported_instance) (bulkLimit_count{otel_scope_name=\"documentMigration\"})) and on (exported_instance) (max by (exported_instance,phase) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0))",
+                  "expr": "max((max by (exported_instance) (bulkLimit_count{otel_scope_name=\"documentMigration\"})) and on (exported_instance) (max by (exported_instance,phase,tier) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0))",
                   "legendFormat": "Highest worker",
                   "datasource": {
                     "type": "prometheus",
@@ -2523,7 +2714,7 @@ data:
                 },
                 {
                   "refId": "C",
-                  "expr": "avg((max by (exported_instance) (bulkLimitThreshold_count{otel_scope_name=\"documentMigration\"})) and on (exported_instance) (max by (exported_instance,phase) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0))",
+                  "expr": "avg((max by (exported_instance) (bulkLimitThreshold_count{otel_scope_name=\"documentMigration\"})) and on (exported_instance) (max by (exported_instance,phase,tier) (rfsWorkerPhase_count{otel_scope_name=\"documentMigration\",phase=\"exited\"}) == 0))",
                   "legendFormat": "Growth threshold (mean)",
                   "datasource": {
                     "type": "prometheus",
@@ -2535,7 +2726,7 @@ data:
                 "h": 6,
                 "w": 8,
                 "x": 16,
-                "y": 64
+                "y": 45
               },
               "fieldConfig": {
                 "defaults": {
@@ -2598,7 +2789,7 @@ data:
                 "h": 6,
                 "w": 8,
                 "x": 0,
-                "y": 70
+                "y": 51
               },
               "fieldConfig": {
                 "defaults": {
@@ -2678,7 +2869,7 @@ data:
                 "h": 6,
                 "w": 8,
                 "x": 8,
-                "y": 70
+                "y": 51
               },
               "fieldConfig": {
                 "defaults": {
@@ -2703,7 +2894,7 @@ data:
               "type": "timeseries",
               "id": 51,
               "title": "Batches split per minute (expert)",
-              "description": "Number of request batches divided into smaller batches: status and no_response use binary splitting to isolate repeatedly failing documents; too_large reduces a request the target rejected for size. The actual request sizes reaching the target are shown in Throughput and request shape.",
+              "description": "Number of request batches divided into smaller batches: status and no_response use binary splitting to isolate repeatedly failing documents; too_large reduces a request the target rejected for size. The actual request sizes reaching the target are shown in Throughput and worker resources.",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${DS_PROMETHEUS}"
@@ -2723,7 +2914,7 @@ data:
                 "h": 6,
                 "w": 8,
                 "x": 16,
-                "y": 70
+                "y": 51
               },
               "fieldConfig": {
                 "defaults": {

@@ -347,6 +347,8 @@ metrics:
     # Disable to keep Prometheus/Grafana metrics while suppressing CloudWatch
     # metric export and ACK-managed dashboards.
     enabled: true
+    # Show AWS/ES domain metrics alongside the target feedback reported by RFS.
+    showManagedTargetDomain: true
   metricsCollectorEndpoint: "http://otel-collector:4317"
   env: []
   collectorResources:
@@ -364,6 +366,10 @@ metrics:
         protocols:
           grpc:
             endpoint: 0.0.0.0:4317
+          # OTLP/JSON over HTTP for emitters without a gRPC stack (the python fleet monitor
+          # posts its per-sweep gauges here with plain requests).
+          http:
+            endpoint: 0.0.0.0:4318
       prometheus:
         config:
           scrape_configs:

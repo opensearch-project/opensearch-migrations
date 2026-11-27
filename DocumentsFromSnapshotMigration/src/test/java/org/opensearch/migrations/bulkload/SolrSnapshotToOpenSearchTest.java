@@ -33,7 +33,6 @@ import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.LeaseExpireTrigger;
 import org.opensearch.migrations.bulkload.workcoordination.ScopedWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.WorkCoordinatorFactory;
-import org.opensearch.migrations.bulkload.worker.CompletionStatus;
 import org.opensearch.migrations.bulkload.worker.ShardWorkPreparer;
 import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
 import org.opensearch.migrations.metadata.tracing.MetadataMigrationTestContext;
@@ -252,7 +251,7 @@ public class SolrSnapshotToOpenSearchTest {
                         .build();
 
                     var status = runner.migrateOneShard(testContext::createReindexContext);
-                    if (status == CompletionStatus.NOTHING_DONE) break;
+                    if (status.acquiredNoWork()) break;
                     shardsProcessed++;
                 }
 
@@ -401,7 +400,7 @@ public class SolrSnapshotToOpenSearchTest {
                         .build();
 
                     var status = runner.migrateOneShard(testContext::createReindexContext);
-                    if (status == CompletionStatus.NOTHING_DONE) break;
+                    if (status.acquiredNoWork()) break;
                     shardsProcessed++;
                 }
 
@@ -626,7 +625,7 @@ public class SolrSnapshotToOpenSearchTest {
                         .build();
 
                     var status = runner.migrateOneShard(testContext::createReindexContext);
-                    if (status == CompletionStatus.NOTHING_DONE) break;
+                    if (status.acquiredNoWork()) break;
                     shardsProcessed++;
                 }
 
@@ -969,7 +968,7 @@ public class SolrSnapshotToOpenSearchTest {
                     .build();
 
                 var status = runner.migrateOneShard(testContext::createReindexContext);
-                if (status == CompletionStatus.NOTHING_DONE) {
+                if (status.acquiredNoWork()) {
                     break;
                 }
                 succeeded++;

@@ -20,9 +20,11 @@ metadata:
   name: workflow-deployer-role
   namespace: {{ .Release.Namespace }}
 rules:
-  # Existing permissions for deployments and replicasets
+  # Existing permissions for deployments and replicasets. The deployments/scale
+  # subresource is patched by the RFS memory-tier monitor's per-sweep right-sizing
+  # (rfsTierSweep.py) and needs its own entry — subresources are not implied.
   - apiGroups: ["apps"]
-    resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
+    resources: ["deployments", "deployments/scale", "replicasets", "statefulsets", "daemonsets"]
     verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
 
   # Namespace-scoped batch jobs (metadata migration) and cronjobs

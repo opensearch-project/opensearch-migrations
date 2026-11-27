@@ -1,11 +1,13 @@
 import functools
 import json
 import logging
+import os
 import subprocess
 import time
 import boto3
 from botocore.config import Config as BotoConfig
 from botocore.exceptions import ConnectTimeoutError, EndpointConnectionError
+from botocore.session import get_session
 import pytest
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Iterable, Iterator, List, Tuple
@@ -183,6 +185,18 @@ def _any_candidate_has_recent_data(
     return False
 
 
+def _cloudwatch_client(region: str):
+    """Use the pod identity for real CloudWatch when LocalStack supplies test credentials."""
+    make_client = boto3.client
+    if os.environ.get("AWS_ACCESS_KEY_ID") == "test" and os.environ.get("AWS_CONTAINER_CREDENTIALS_FULL_URI"):
+        # Skip placeholder credentials only for this client. Other test threads still need them for S3.
+        session = get_session()
+        session.get_component("credential_provider").remove("env")
+        make_client = boto3.Session(botocore_session=session).client
+    config = BotoConfig(connect_timeout=10, read_timeout=10, retries={"max_attempts": 1})
+    return make_client("cloudwatch", region_name=region, config=config)
+
+
 def assert_cloudwatch_capture_replay_metrics_for_workflow_run(
         namespace: str = "ma",
         lookback_minutes: int = 20,
@@ -199,11 +213,7 @@ def assert_cloudwatch_capture_replay_metrics_for_workflow_run(
 
     # Add a connect timeout to fail fast in case connection is not available
     # (e.g. isolated VPC without proper VPC endpoint).
-    client = boto3.client(
-        "cloudwatch",
-        region_name=region,
-        config=BotoConfig(connect_timeout=10, read_timeout=10, retries={"max_attempts": 1})
-    )
+    client = _cloudwatch_client(region)
     app_metric_candidates = [
         ("pipelineDocsMigrated", {"qualifier": qualifier, "OTelLib": "documentMigration"}),
         ("pipelineBytesMigrated", {"qualifier": qualifier, "OTelLib": "documentMigration"}),

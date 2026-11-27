@@ -30,7 +30,14 @@ import {getSourceHttpAuthCreds, getTargetHttpAuthCreds} from "./commonUtils/basi
 
 export const CONSOLE_BACKFILL_INFO = z.object({
     sessionName: z.string(),
-    deploymentName: z.string()
+    deploymentName: z.string(),
+    // Present only when documentBackfillConfig.memoryScaling is configured; keys are snake_case
+    // because they land verbatim in the console's services.yaml. Feature off, the key is absent
+    // and the rendered services.yaml is byte-identical to the pre-feature output.
+    memoryScaling: z.object({
+        tiers: z.array(z.string()),
+        max_total_pods: z.number(),
+    }).optional(),
 });
 
 export const configComponentParameters = {
@@ -90,13 +97,24 @@ export const MigrationConsole = WorkflowBuilder.create({
                     ),
                     expr.ternary(expr.isEmpty(c.inputs.backfillSession), expr.makeDict({}), expr.makeDict({
                         "backfill": expr.makeDict({
-                            "reindex_from_snapshot": expr.makeDict({
-                                "k8s": expr.makeDict({
-                                    "namespace": expr.getWorkflowValue("namespace"),
-                                    "deployment_name": expr.get(expr.deserializeRecord(c.inputs.backfillSession), "deploymentName")
+                            "reindex_from_snapshot": expr.mergeDicts(
+                                expr.makeDict({
+                                    "k8s": expr.makeDict({
+                                        "namespace": expr.getWorkflowValue("namespace"),
+                                        "deployment_name": expr.get(expr.deserializeRecord(c.inputs.backfillSession), "deploymentName")
+                                    }),
+                                    "backfill_session_name": expr.get(expr.deserializeRecord(c.inputs.backfillSession), "sessionName")
                                 }),
-                                "backfill_session_name": expr.get(expr.deserializeRecord(c.inputs.backfillSession), "sessionName")
-                            })
+                                // memory_scaling appears only when memory-tier scaling is on, so the
+                                // feature-off services.yaml stays byte-identical.
+                                expr.ternary(
+                                    expr.hasKey(expr.deserializeRecord(c.inputs.backfillSession), "memoryScaling"),
+                                    expr.makeDict({
+                                        "memory_scaling": expr.getLoose(
+                                            expr.deserializeRecord(c.inputs.backfillSession), "memoryScaling")
+                                    }),
+                                    expr.makeDict({}))
+                            )
                         })
                     }))
                 )

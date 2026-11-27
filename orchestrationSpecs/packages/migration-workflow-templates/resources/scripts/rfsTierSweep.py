@@ -1,0 +1,533 @@
+#!/usr/bin/env python3
+"""RFS memory-tier fleet scheduler: one monitor sweep.
+
+Each sweep publishes per-tier lease caps in shard_setup.maxLeases. Workers finish their
+current shard before yielding at their own tier's cap. If the monitor stops, workers keep
+using the most recently published caps.
+
+Allocation precedence (highest wins when the budget cannot satisfy all three):
+  1. busy floor      — never set a tier's allocation below its lease-holding pods (inviolable)
+  2. higher-tier demand, tier-descending — each tier gets min(eligible, remaining budget)
+  3. discovery floor — one pod for the lowest tier with never-attempted items, funded only from
+                       budget left after (2); greedy wins over discovery when they conflict
+
+Usage:
+  rfsTierSweep.py --compute-only   # pure: sweep-input JSON on stdin -> allocation JSON on stdout
+  rfsTierSweep.py                  # gather (kubectl + coordinator) -> compute -> apply
+
+Env (apply mode): TIER_POLICY_CONFIGMAP, SNAPSHOT_MIGRATION_NAME,
+MIGRATION_SERVICES_CONFIG (default /config/migration_services.yaml), POD_NAMESPACE optional.
+"""
+
+import argparse
+import json
+import logging
+import os
+import sys
+import time
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+logger = logging.getLogger("rfs-tier-sweep")
+
+HIGH_DELETION_COST = "10000"
+LOW_DELETION_COST = "0"
+POD_DELETION_COST_ANNOTATION = "controller.kubernetes.io/pod-deletion-cost"
+# Kernel-OOM witness: a cgroup OOM group-kills the whole container (supervisor included), so the
+# evidence can't be recorded in-container. The monitor sees the kubelet's OOMKilled restart record
+# and writes it here; a downward-API volume projects it into the container, where the supervisor
+# merges it into the crash list for the next worker's sweep. Monitor down = evidence missed =
+# same-tier release (safe, just un-escalated).
+CRASH_EVIDENCE_ANNOTATION = "migrations.opensearch.org/rfs-predecessor-crashes"
+CRASH_EVIDENCE_MAX_ENTRIES = 8
+# The supervisor stamps instance ids with its own container-start epoch; the kubelet stamps the
+# dead container's startedAt. Same node clock, read a moment apart.
+OOM_MATCH_SKEW_SECONDS = 10
+# The per-tier caps live as a field ON the shard_setup sentinel work item: every status/work
+# query already excludes that document, so the caps need no index of their own.
+SHARD_SETUP_DOC_ID = "shard_setup"
+CRD_GROUP = "migrations.opensearch.org"
+CRD_VERSION = "v1alpha1"
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Pure allocation arithmetic (exercised by fixture-driven tests via --compute-only)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def pod_name_of_worker_id(worker_id):
+    """workerId is <podName>_<instanceId>; the pod name is everything before the last '_'."""
+    return worker_id.rsplit("_", 1)[0]
+
+
+def instance_epoch_of_worker_id(worker_id):
+    """The supervisor's instance ids are <containerStartEpoch>-<launchN>; returns the epoch, or
+    None for ids from unsupervised workers (uuid-style)."""
+    instance = worker_id.rsplit("_", 1)[-1]
+    head = instance.split("-", 1)[0]
+    return int(head) if head.isdigit() else None
+
+
+def compute_oom_evidence(lease_holder_ids, oom_restarts, current_evidence=None):
+    """Witness arithmetic for kernel OOMs: which pods need their crash-evidence annotation updated.
+
+    lease_holder_ids: full worker ids of every live-lease holder
+    oom_restarts: {podName: [startedAtEpoch, finishedAtEpoch]} — the last terminated state of a
+      container the kubelet recorded as OOMKilled
+    current_evidence: {podName: current annotation value}
+
+    A holder belongs to the dead container when its pod matches and its instance epoch falls inside
+    the dead container's lifetime (± skew): that process can only have died in the group kill, so
+    "<instanceId>=OOMKilled" is positive evidence. Already-known entries are kept (newest last,
+    capped), and only changed annotations are returned.
+    """
+    current_evidence = current_evidence or {}
+    changes = {}
+    for pod_name, window in oom_restarts.items():
+        started, finished = float(window[0]), float(window[1])
+        entries = []
+        for entry in (current_evidence.get(pod_name) or "").split(","):
+            if "=" in entry and not entry.startswith("="):
+                entries.append(entry.strip())
+        known = {e.split("=", 1)[0] for e in entries}
+        for holder in lease_holder_ids:
+            if pod_name_of_worker_id(holder) != pod_name:
+                continue
+            epoch = instance_epoch_of_worker_id(holder)
+            if epoch is None or not (started - OOM_MATCH_SKEW_SECONDS <= epoch <= finished):
+                continue
+            instance = holder.rsplit("_", 1)[-1]
+            if instance not in known:
+                entries.append(instance + "=OOMKilled")
+                known.add(instance)
+        value = ",".join(entries[-CRASH_EVIDENCE_MAX_ENTRIES:])
+        if value and value != (current_evidence.get(pod_name) or ""):
+            changes[pod_name] = value
+    return changes
+
+
+def compute_allocation(sweep_input):
+    """Pure per-sweep arithmetic.
+
+    sweep_input:
+      maxTotalPods: int
+      tiers: [ {tier, eligible, waiting, neverAttempted, busyPods, ghostLeases,
+                deploymentExists, currentReplicas} ]
+        - eligible: incomplete items at this tier (leased + waiting)
+        - waiting: the unclaimed subset (expiration < now)
+        - busyPods: number of DISTINCT running pods (present and not terminating) that hold
+          live leases at this tier
+        - ghostLeases: live leases at this tier whose holder pod is gone or terminating. They
+          can't use a pod until they expire or the leaving pod releases them, so they add no
+          pod demand, but they still occupy lease slots, so they're added to the tier's cap.
+    returns:
+      caps: {tier: maxLeases}           # pod allocation + ghost leases
+      replicas: {tier: n}               # Σ replicas ≤ maxTotalPods (above the inviolable busy floor)
+      create: [tier]                    # tiers to (re)create from the rendered ConfigMap
+    """
+    budget = int(sweep_input["maxTotalPods"])
+    tiers = sorted(sweep_input["tiers"], key=lambda t: int(t["tier"]))
+
+    alloc = {}
+    for state in tiers:
+        tier = int(state["tier"])
+        # Busy floor: inviolable, even if it exceeds the budget (never delete a busy pod).
+        alloc[tier] = int(state.get("busyPods", 0))
+
+    remaining = max(0, budget - sum(alloc.values()))
+
+    # Higher-tier demand first: escalated shards are revealed-long chains whose remaining
+    # length is irreducible wall-clock, so budget funds them before lower-tier breadth.
+    ghosts = {int(state["tier"]): int(state.get("ghostLeases", 0)) for state in tiers}
+    for state in reversed(tiers):
+        tier = int(state["tier"])
+        eligible = max(0, int(state.get("eligible", 0)) - ghosts[tier])
+        want = min(eligible, alloc[tier] + remaining)
+        extra = max(0, want - alloc[tier])
+        alloc[tier] += extra
+        remaining -= extra
+
+    # Discovery floor: keep one pod on the lowest tier that still has never-attempted items,
+    # but only from budget left over (greedy wins over discovery).
+    for state in tiers:
+        tier = int(state["tier"])
+        if int(state.get("neverAttempted", 0)) > 0:
+            if alloc[tier] == 0 and remaining > 0:
+                alloc[tier] = 1
+                remaining -= 1
+            break
+
+    missing_tiers = (int(state["tier"]) for state in tiers if not state.get("deploymentExists"))
+    return {
+        "caps": {str(t): alloc[t] + ghosts[t] for t in alloc},
+        "replicas": {str(t): count for t, count in alloc.items()},
+        "create": [tier for tier in missing_tiers if alloc[tier] > 0],
+    }
+
+
+def compute_pod_deletion_costs(pods_by_tier, busy_pod_names, replicas, current_costs=None):
+    """Annotation plan for over-allocated tiers: busy pods high, idle pods low, set immediately
+    before each scale patch so the ReplicaSet's victim ranking prefers the idle ones. Workers
+    stay Ready while they recover from a crash (their in-container supervisor relaunches them),
+    so this cost, not readiness, decides which pods a scale-down removes.
+
+    current_costs ({pod: annotation value}) drops pods already annotated correctly, so a sweep
+    only writes the annotations that change."""
+    current_costs = current_costs or {}
+    costs = {}
+    for tier, pods in pods_by_tier.items():
+        if int(replicas.get(str(tier), 0)) >= len(pods):
+            continue  # not shrinking this tier; leave annotations alone
+        for pod in pods:
+            desired = HIGH_DELETION_COST if pod in busy_pod_names else LOW_DELETION_COST
+            if current_costs.get(pod) != desired:
+                costs[pod] = desired
+    return costs
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Gather + apply (cluster-touching; not exercised by the fixture tests)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def load_policy(core, namespace, configmap_name):
+    cm = core.read_namespaced_config_map(name=configmap_name, namespace=namespace)
+    policy = json.loads(cm.data["policy.json"])
+    manifests = {}
+    for key, value in cm.data.items():
+        if key.startswith("deployment-t") or key.startswith("pdb-t"):
+            manifests[key] = json.loads(value)
+    return policy, manifests
+
+
+def coordinator_search(cluster, index, body):
+    from console_link.models.cluster import HttpMethod
+    response = cluster.call_api(f"/{index}/_search", method=HttpMethod.POST,
+                                data=json.dumps(body), headers={"Content-Type": "application/json"})
+    return response.json()
+
+
+OTEL_SCOPE_NAME = "fleetMonitor"
+DEFAULT_METRICS_ENDPOINT = "http://otel-collector:4318/v1/metrics"
+
+
+def build_fleet_metrics_payload(tiers, allocation, migration_uid, now_ns):
+    """OTLP/JSON gauges for investigating one scheduler decision by migration and tier."""
+    per_tier = {
+        "tierLeaseCap": lambda state, tier: int(allocation["caps"].get(str(tier), 0)),
+        "tierReplicasDesired": lambda state, tier: int(allocation["replicas"].get(str(tier), 0)),
+        "tierBusyPods": lambda state, tier: int(state.get("busyPods", 0)),
+        "tierGhostLeases": lambda state, tier: int(state.get("ghostLeases", 0)),
+        "tierEligibleItems": lambda state, tier: int(state.get("eligible", 0)),
+        "tierWaitingItems": lambda state, tier: int(state.get("waiting", 0)),
+    }
+    metrics = []
+    for name, value_of in per_tier.items():
+        points = []
+        for state in tiers:
+            tier = int(state["tier"])
+            points.append({
+                "timeUnixNano": str(now_ns),
+                "asDouble": float(value_of(state, tier)),
+                "attributes": [
+                    {"key": "tier", "value": {"stringValue": str(tier)}},
+                    {"key": "migration", "value": {"stringValue": migration_uid}},
+                ],
+            })
+        metrics.append({"name": name, "unit": "count", "gauge": {"dataPoints": points}})
+    return {"resourceMetrics": [{
+        "resource": {"attributes": []},
+        "scopeMetrics": [{"scope": {"name": OTEL_SCOPE_NAME}, "metrics": metrics}],
+    }]}
+
+
+def emit_fleet_metrics(tiers, allocation, migration_uid):
+    """Post the sweep's gauges through the same collector pipeline worker metrics ride (OTLP/HTTP;
+    the collector stamps the qualifier dimension). Metrics must never block scheduling."""
+    import requests
+    endpoint = os.environ.get("MONITOR_METRICS_ENDPOINT", DEFAULT_METRICS_ENDPOINT)
+    if not endpoint:
+        return
+    try:
+        payload = build_fleet_metrics_payload(tiers, allocation, migration_uid, time.time_ns())
+        requests.post(endpoint, json=payload, timeout=5).raise_for_status()
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Fleet metrics emission failed (%s); continuing the sweep", e)
+
+
+def shard_setup_complete(cluster, index):
+    """Whether the shard_setup sentinel work item has completed. Until it has, the item counts are
+    meaningless (work items don't exist yet), so the monitor must lay off: no caps, no trims, no
+    creates — the fleet starts at the full pod budget and workers self-coordinate through the
+    setup barrier exactly as they always have. GET /_doc/{id} is typeless on both OS and ES 6.8."""
+    import requests
+    from console_link.models.cluster import HttpMethod
+    try:
+        response = cluster.call_api(f"/{index}/_doc/{SHARD_SETUP_DOC_ID}", method=HttpMethod.GET)
+    except requests.HTTPError as e:
+        if e.response is not None and e.response.status_code == 404:
+            return False
+        raise
+    doc = response.json()
+    return bool(doc.get("_source", {}).get("completedAt"))
+
+
+def gather_coordinator_state(cluster, index, tier_count):
+    from console_link.models.backfill_rfs import live_lease_holders_by_tier
+    now = int(time.time())
+    body = {
+        "size": 0,
+        "query": {"bool": {
+            "must": [{"exists": {"field": "expiration"}}],
+            "must_not": [{"exists": {"field": "completedAt"}}],
+        }},
+        "aggs": {"byTier": {
+            "terms": {"field": "requiredMemoryTier", "missing": 0, "value_type": "long", "size": 100},
+            "aggs": {
+                "waiting": {"filter": {"range": {"expiration": {"lt": now}}}},
+                "neverAttempted": {"filter": {"bool": {
+                    "must": [{"term": {"expiration": 0}}],
+                    "must_not": [{"exists": {"field": "leaseAcquiredAt"}}],
+                }}},
+            },
+        }},
+    }
+    agg = coordinator_search(cluster, index, body)
+    tiers = {t: {"tier": t, "eligible": 0, "waiting": 0, "neverAttempted": 0}
+             for t in range(tier_count)}
+    for bucket in agg.get("aggregations", {}).get("byTier", {}).get("buckets", []):
+        tier = int(bucket["key"])
+        entry = tiers.setdefault(tier, {"tier": tier, "eligible": 0, "waiting": 0,
+                                        "neverAttempted": 0})
+        entry["eligible"] = bucket["doc_count"]
+        entry["waiting"] = bucket["waiting"]["doc_count"]
+        entry["neverAttempted"] = bucket["neverAttempted"]["doc_count"]
+
+    # Who holds each live lease, by tier. Whether each holder is a running pod is decided against
+    # the k8s pod list (see resolve_lease_holders): a lease names its pod, not whether it exists.
+    lease_holders_by_tier = live_lease_holders_by_tier(cluster, index, now)
+    for tier in lease_holders_by_tier:
+        tiers.setdefault(tier, {"tier": tier, "eligible": 0, "waiting": 0, "neverAttempted": 0})
+    return sorted(tiers.values(), key=lambda t: t["tier"]), lease_holders_by_tier
+
+
+def resolve_lease_holders(tiers, lease_holders_by_tier, running_pod_names):
+    """Set busyPods / ghostLeases on each tier and return the names of the busy pods. A pod
+    counts as busy only while it exists and isn't terminating; a lease held by any other pod is
+    a ghost (it waits for expiry, or for the leaving pod's clean shutdown to release it).
+    lease_holders_by_tier values are full worker ids (<podName>_<instanceId>)."""
+    busy_pod_names = set()
+    for state in tiers:
+        holder_pods = [pod_name_of_worker_id(h) for h in lease_holders_by_tier.get(state["tier"], [])]
+        running = {pod for pod in holder_pods if pod in running_pod_names}
+        state["busyPods"] = len(running)
+        state["ghostLeases"] = sum(1 for pod in holder_pods if pod not in running_pod_names)
+        busy_pod_names.update(running)
+    return busy_pod_names
+
+
+def publish_lease_caps(cluster, index, caps):
+    """Partial-update maxLeases on the shard_setup sentinel. Update-if-exists only: upserting
+    could fabricate a sentinel without the fields the coordination scripts expect. The sentinel
+    is created at setup, so a 404 just means this sweep ran first — the next one retries.
+
+    OS takes the typeless _update path; ES 6.8 has no typeless _update endpoint (only _doc
+    get/index are typeless there), so a 400 invalid_type_name falls back to the typed path the
+    java client writes with."""
+    import requests
+    from console_link.models.cluster import HttpMethod
+    body = json.dumps({"doc": {"maxLeases": caps}})
+    paths = (f"/{index}/_update/{SHARD_SETUP_DOC_ID}?refresh=true",
+             f"/{index}/doc/{SHARD_SETUP_DOC_ID}/_update?refresh=true")
+    for attempt, path in enumerate(paths):
+        try:
+            cluster.call_api(path, method=HttpMethod.POST, data=body,
+                             headers={"Content-Type": "application/json"})
+            return
+        except requests.HTTPError as e:
+            status = e.response.status_code if e.response is not None else None
+            if status == 400 and attempt == 0:
+                continue  # ES 6.8: retry on the typed path
+            if status == 404:
+                logger.info("shard_setup sentinel not created yet; caps publish deferred to next sweep")
+                return
+            raise
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--compute-only", action="store_true",
+                        help="read sweep-input JSON on stdin, print the allocation JSON")
+    args = parser.parse_args()
+
+    if args.compute_only:
+        sweep_input = json.load(sys.stdin)
+        result = compute_allocation(sweep_input)
+        if "podsByTier" in sweep_input:
+            result["podDeletionCosts"] = compute_pod_deletion_costs(
+                {int(k): v for k, v in sweep_input["podsByTier"].items()},
+                set(sweep_input.get("busyPodNames", [])),
+                result["replicas"],
+                sweep_input.get("currentDeletionCosts"))
+        if "oomRestarts" in sweep_input:
+            result["oomEvidence"] = compute_oom_evidence(
+                sweep_input.get("leaseHolderIds", []),
+                sweep_input["oomRestarts"],
+                sweep_input.get("currentEvidence"))
+        json.dump(result, sys.stdout, indent=2, sort_keys=True)
+        print()
+        return 0
+
+    # ── apply mode ────────────────────────────────────────────────────────────
+    from kubernetes import client, config
+    from console_link.environment import Environment
+    from console_link.models.backfill_rfs import working_state_index
+
+    config.load_incluster_config()
+    core = client.CoreV1Api()
+    apps = client.AppsV1Api()
+    policy_api = client.PolicyV1Api()
+    custom = client.CustomObjectsApi()
+    namespace = os.environ.get("POD_NAMESPACE") or open(
+        "/var/run/secrets/kubernetes.io/serviceaccount/namespace").read().strip()
+
+    configmap_name = os.environ["TIER_POLICY_CONFIGMAP"]
+    sm_name = os.environ["SNAPSHOT_MIGRATION_NAME"]
+    services_config = os.environ.get("MIGRATION_SERVICES_CONFIG", "/config/migration_services.yaml")
+
+    try:
+        policy, manifests = load_policy(core, namespace, configmap_name)
+    except Exception as e:  # noqa: BLE001
+        logger.info("Tier policy ConfigMap %s not readable yet (%s); skipping tier sweep",
+                    configmap_name, e)
+        return 0
+
+    env = Environment(config_file=services_config)
+    cluster = env.target_cluster
+    index = working_state_index(policy.get("sessionName", ""))
+    tier_table = policy["tierTable"]
+    tier_label = policy["tierLabel"]
+
+    try:
+        if not shard_setup_complete(cluster, index):
+            logger.info("shard_setup has not completed; laying off (no caps, trims, or creates) "
+                        "until work items exist")
+            return 0
+        tiers, lease_holders_by_tier = gather_coordinator_state(
+            cluster, index, len(tier_table))
+    except Exception as e:  # noqa: BLE001
+        logger.info("Coordinator state unavailable (%s); skipping tier sweep", e)
+        return 0
+
+    # Overlay k8s state: which tier deployments exist, their replicas, and their pods.
+    sm = custom.get_namespaced_custom_object(
+        group=CRD_GROUP, version=CRD_VERSION, namespace=namespace,
+        plural="snapshotmigrations", name=sm_name)
+    sm_uid = sm["metadata"]["uid"]
+    selector = (f"{CRD_GROUP}/component=rfs-worker,"
+                f"{CRD_GROUP}/migration-resource-uid={sm_uid}")
+    deployments = apps.list_namespaced_deployment(namespace, label_selector=selector).items
+    deployment_by_tier = {}
+    for deployment in deployments:
+        tier_value = (deployment.metadata.labels or {}).get(tier_label)
+        if tier_value is not None:
+            deployment_by_tier[int(tier_value)] = deployment
+    pods = core.list_namespaced_pod(namespace, label_selector=selector).items
+    pods_by_tier = {}
+    current_costs = {}
+    oom_restarts = {}
+    current_evidence = {}
+    for pod in pods:
+        tier_value = (pod.metadata.labels or {}).get(tier_label)
+        if tier_value is None:
+            continue
+        annotations = pod.metadata.annotations or {}
+        for status in (pod.status.container_statuses or []) if pod.status else []:
+            terminated = status.last_state.terminated if status.last_state else None
+            if (terminated and terminated.reason == "OOMKilled" and
+                    terminated.started_at and terminated.finished_at):
+                oom_restarts[pod.metadata.name] = (
+                    terminated.started_at.timestamp(), terminated.finished_at.timestamp())
+                current_evidence[pod.metadata.name] = annotations.get(CRASH_EVIDENCE_ANNOTATION)
+        if pod.metadata.deletion_timestamp is None:
+            pods_by_tier.setdefault(int(tier_value), []).append(pod.metadata.name)
+            current_costs[pod.metadata.name] = annotations.get(POD_DELETION_COST_ANNOTATION)
+    running_pod_names = {name for names in pods_by_tier.values() for name in names}
+    busy_pod_names = resolve_lease_holders(tiers, lease_holders_by_tier, running_pod_names)
+
+    # Kernel-OOM witness: give the supervisor the evidence the group kill destroyed, via the
+    # annotation its downward-API volume projects. Costs one small patch per OOMKilled event.
+    all_holder_ids = [h for holders in lease_holders_by_tier.values() for h in holders]
+    for pod_name, value in compute_oom_evidence(
+            all_holder_ids, oom_restarts, current_evidence).items():
+        core.patch_namespaced_pod(pod_name, namespace, {
+            "metadata": {"annotations": {CRASH_EVIDENCE_ANNOTATION: value}}})
+        logger.info("Recorded kernel-OOM evidence on %s: %s", pod_name, value)
+
+    for state in tiers:
+        tier = state["tier"]
+        state["deploymentExists"] = tier in deployment_by_tier
+        state["currentReplicas"] = (deployment_by_tier[tier].spec.replicas or 0) \
+            if tier in deployment_by_tier else 0
+
+    sweep_input = {
+        "maxTotalPods": policy["maxTotalPods"],
+        "tiers": tiers,
+    }
+    result = compute_allocation(sweep_input)
+    logger.info("Sweep input: %s", json.dumps(sweep_input, sort_keys=True))
+    logger.info("Allocation: %s", json.dumps(result, sort_keys=True))
+    emit_fleet_metrics(tiers, result, sm_uid)
+
+    # Publish the caps: the declarative allocation workers consume at every acquire boundary.
+    publish_lease_caps(cluster, index, result["caps"])
+
+    # Trim: annotate costs from lease truth immediately before each scale patch, then patch.
+    costs = compute_pod_deletion_costs(pods_by_tier, busy_pod_names, result["replicas"],
+                                       current_costs)
+    for pod_name, cost in costs.items():
+        core.patch_namespaced_pod(pod_name, namespace, {
+            "metadata": {"annotations": {POD_DELETION_COST_ANNOTATION: cost}}})
+    if costs:
+        # Give the ReplicaSet controller's pod cache a moment to see the new costs before the
+        # scale patch makes it choose victims.
+        time.sleep(2)
+
+    for state in tiers:
+        tier = state["tier"]
+        desired = result["replicas"].get(str(tier), 0)
+        if tier in deployment_by_tier:
+            current = state["currentReplicas"]
+            if current != desired:
+                apps.patch_namespaced_deployment_scale(
+                    deployment_by_tier[tier].metadata.name, namespace,
+                    {"spec": {"replicas": desired}})
+                logger.info("Scaled tier %s: %s -> %s", tier, current, desired)
+
+    # Reactivate: eligible work at a tier with no fleet -> create it from the rendered manifests.
+    from kubernetes.client.rest import ApiException
+    for tier in result["create"]:
+        dep_manifest = manifests.get(f"deployment-t{tier}.json")
+        pdb_manifest = manifests.get(f"pdb-t{tier}.json")
+        if dep_manifest is None:
+            logger.warning("No rendered manifest for tier %s; cannot create its fleet", tier)
+            continue
+        dep_manifest["spec"]["replicas"] = result["replicas"][str(tier)]
+        try:
+            apps.create_namespaced_deployment(namespace, dep_manifest)
+            logger.info("Created tier %s deployment with %s replica(s)", tier,
+                        dep_manifest["spec"]["replicas"])
+        except ApiException as e:
+            if e.status != 409:
+                raise
+            apps.patch_namespaced_deployment_scale(
+                dep_manifest["metadata"]["name"], namespace,
+                {"spec": {"replicas": result["replicas"][str(tier)]}})
+        if pdb_manifest is not None:
+            try:
+                policy_api.create_namespaced_pod_disruption_budget(namespace, pdb_manifest)
+            except ApiException as e:
+                if e.status != 409:
+                    raise
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

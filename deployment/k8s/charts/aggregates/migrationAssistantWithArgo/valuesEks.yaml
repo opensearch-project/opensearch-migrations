@@ -73,6 +73,10 @@ metrics:
         protocols:
           grpc:
             endpoint: 0.0.0.0:4317
+          # OTLP/JSON over HTTP for emitters without a gRPC stack (the python fleet monitor
+          # posts its per-sweep gauges here with plain requests).
+          http:
+            endpoint: 0.0.0.0:4318
       prometheus:
         config:
           scrape_configs:
@@ -96,6 +100,18 @@ metrics:
                 # Keep node name as a label
                 - source_labels: [__meta_kubernetes_node_name]
                   target_label: node
+              metric_relabel_configs:
+                # RFS memory-tier workers carry their tier in the pod name (<session>-rfs-t<n>-<rs>-<pod>, from
+                # getRfsTierDeploymentName; pinned by rfsTierPodNames.test.ts); RFS workers without memory scaling
+                # are tier 0, matching the tier the workers report on their own metrics.
+                - source_labels: [pod]
+                  regex: '.*-rfs-t([0-9]+)-[a-z0-9]{1,10}-[a-z0-9]{5}'
+                  target_label: tier
+                  replacement: '$$1'  # $$ escapes the collector's own env-var expansion
+                - source_labels: [container, tier]
+                  regex: 'bulk-loader;'
+                  target_label: tier
+                  replacement: '0'
     # {{ if .Values.metrics.cloudWatch.enabled }}
       # CloudWatch-only scrape of kubelet PVC statistics. Prometheus continues
       # to use kube-prometheus-stack's kubelet scrape and joins these series to
@@ -176,6 +192,13 @@ metrics:
             action: upsert
     # {{ if .Values.metrics.cloudWatch.enabled }}
       cumulativetodelta:
+      filter/skip-rfs-tier-metrics:
+        metric_conditions:
+          - scope.name == "fleetMonitor" or scope.name == "rfsFleetResources"
+          - metric.name == "workItemsEscalated" or metric.name == "dirtyLeasesReleased"
+      filter/only-rfs-tier-metrics:
+        metric_conditions:
+          - scope.name != "fleetMonitor" and scope.name != "rfsFleetResources" and metric.name != "workItemsEscalated" and metric.name != "dirtyLeasesReleased"
       resource/kafka:
         attributes:
           - key: EKSClusterName
@@ -224,6 +247,22 @@ metrics:
               - action: aggregate_labels
                 label_set: [container, namespace]
                 aggregation_type: sum
+          # Node-summed throttling counters: exact [container, namespace] rows instead of a per-pod SEARCH,
+          # which exceeds CloudWatch's per-graph metric limit once pods churn.
+          - include: container_cpu_cfs_periods_total
+            action: insert
+            new_name: container_cpu_cfs_periods_total_sum
+            operations:
+              - action: aggregate_labels
+                label_set: [container, namespace]
+                aggregation_type: sum
+          - include: container_cpu_cfs_throttled_periods_total
+            action: insert
+            new_name: container_cpu_cfs_throttled_periods_total_sum
+            operations:
+              - action: aggregate_labels
+                label_set: [container, namespace]
+                aggregation_type: sum
     # {{ end }}
       resource/remove_telemetry_sdk_attributes:
         attributes:
@@ -247,10 +286,26 @@ metrics:
         dimension_rollup_option: NoDimensionRollup
         resource_to_telemetry_conversion:
           enabled: true
+      # Route tier telemetry to one log stream. Keep the migration UID in the sweep events
+      # for latest-per-migration queries, outside the billed metric dimensions.
+      awsemf/rfs-tier:
+        namespace: 'OpenSearchMigrations'
+        log_stream_name: 'rfs-tier'
+        dimension_rollup_option: NoDimensionRollup
+        resource_to_telemetry_conversion:
+          enabled: true
+        metric_declarations:
+          - dimensions: [[OTelLib, qualifier, tier]]
+            metric_name_selectors: ['^tier', '^workItemsEscalated$', '^dirtyLeasesReleased$']
+          - dimensions: [[namespace, tier]]
+            metric_name_selectors: ['^rfsFleet(Workers|CpuUsed|MemoryUsed)$']
+          - dimensions: [[namespace]]
+            metric_name_selectors: ['^rfsFleet(CensusSamples|(Cpu|Memory)(Unused|AwaitingSample|MissingWorkers))$']
       awsemf/cadvisor:
         namespace: 'OpenSearchMigrations'
         dimension_rollup_option: NoDimensionRollup
         metric_declarations:
+          # The capture-replay dashboard reads the [container, namespace] working-set row.
           - dimensions: [[container, namespace], [container, namespace, pod]]
             metric_name_selectors:
               - container_memory_working_set_bytes
@@ -268,6 +323,8 @@ metrics:
           - dimensions: [[container, namespace]]
             metric_name_selectors:
               - container_cpu_usage_seconds_total
+              - container_cpu_cfs_periods_total_sum
+              - container_cpu_cfs_throttled_periods_total_sum
           # Broker disk throughput, which on EKS is EBS throughput against each volume's provisioned limit.
           # Kept only for brokers, whose StatefulSet pod names are stable and bounded. Device is a dimension
           # because the exporter drops points that collide on the same dimensions in one batch.
@@ -321,8 +378,12 @@ metrics:
     # {{ if .Values.metrics.cloudWatch.enabled }}
         metrics/app:
           receivers: [otlp]
-          processors: [batch, resource/remove_default_attributes, resource/metrics, cumulativetodelta]
+          processors: [filter/skip-rfs-tier-metrics, batch, resource/remove_default_attributes, resource/metrics, cumulativetodelta]
           exporters: [awsemf/app]
+        metrics/rfs-tier:
+          receivers: [otlp]
+          processors: [filter/only-rfs-tier-metrics, cumulativetodelta, resource/remove_telemetry_sdk_attributes, resource/metrics, batch]
+          exporters: [awsemf/rfs-tier]
     # {{ end }}
         metrics/app-prometheus:
           receivers: [otlp]

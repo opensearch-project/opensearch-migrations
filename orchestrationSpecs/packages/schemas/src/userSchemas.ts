@@ -1165,8 +1165,68 @@ export const USER_RFS_WORKFLOW_OPTIONS = withScalableServiceValidation(z.object(
             "Setting requests lower than limits results in 'Burstable' QoS. " +
             "Ephemeral storage is auto-calculated from maxShardSizeBytes if not specified.")
         .default(DEFAULT_RESOURCES.RFS),
+    memoryScaling: z.object({
+        // Inclusive min (not .gt) because the unified-schema AJV draft rejects boolean exclusiveMinimum.
+        growthFactor: z.number().min(1.1).default(2).optional()
+            .describe("[Expert] Multiplier between consecutive memory tiers (at least 1.1). Tier n's memory is " +
+                "resources.requests.memory × growthFactor^n, with the last tier clamped to exactly maxMemory."),
+        maxMemory: MEMORY_QUANTITY
+            .describe("Upper bound on per-worker memory. Shards that OOM are retried on fleets with " +
+                "geometrically more memory up to this value; if a shard still cannot fit here, the " +
+                "migration ends Failed with a per-index report. Must be at least resources.requests.memory."),
+    }).optional()
+        .describe("Memory-tier scaling for shards that out-size the worker fleet: a worker killed by " +
+            "an out-of-memory condition has its shard escalated and re-run on a fleet with more memory, " +
+            "growing geometrically from resources.requests.memory by growthFactor up to maxMemory. " +
+            "Absent means the feature is entirely off and nothing about the backfill changes. " +
+            "Requires resources requests.memory == limits.memory (the default)."),
+    maxTotalPods: z.number().int().min(1).optional()
+        .describe("Fleet-wide cap on RFS worker pods ACROSS ALL memory tiers (a maximum, not a constant). " +
+            "Pod count is the throughput budget: per-pod load on the target is memory-independent. " +
+            "Only meaningful with memoryScaling; defaults to podReplicas when unset."),
 }))
     .describe("Kubernetes deployment-level options for the Reindex From Snapshot (RFS) document backfill.");
+
+export function validateMemoryScaling(
+    ctx: z.RefinementCtx,
+    data: {
+        memoryScaling?: {growthFactor?: number, maxMemory: string},
+        maxTotalPods?: number,
+        resources?: {requests?: {memory?: string}, limits?: {memory?: string}},
+    }
+) {
+    if (data.maxTotalPods !== undefined && data.memoryScaling === undefined) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "maxTotalPods only applies when memoryScaling is configured; use podReplicas otherwise.",
+            path: ["maxTotalPods"],
+        });
+    }
+    if (data.memoryScaling === undefined) {
+        return;
+    }
+    const requestMemory = data.resources?.requests?.memory;
+    const limitMemory = data.resources?.limits?.memory;
+    if (requestMemory !== undefined && limitMemory !== undefined
+        && parseK8sQuantity(requestMemory) !== parseK8sQuantity(limitMemory)) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `memoryScaling requires resources requests.memory (${requestMemory}) == limits.memory `
+                + `(${limitMemory}): heap sizing follows the limit while scheduling follows the request, so `
+                + "letting them diverge would make each tier's memory ambiguous.",
+            path: ["memoryScaling"],
+        });
+    }
+    if (requestMemory !== undefined
+        && parseK8sQuantity(data.memoryScaling.maxMemory) < parseK8sQuantity(requestMemory)) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `memoryScaling.maxMemory (${data.memoryScaling.maxMemory}) must be at least the starting `
+                + `size resources.requests.memory (${requestMemory}).`,
+            path: ["memoryScaling", "maxMemory"],
+        });
+    }
+}
 
 export const FAILED_DOCUMENT_STREAM_CONFIG = z.discriminatedUnion("type", [
     z.object({
@@ -1358,6 +1418,7 @@ export const USER_RFS_OPTIONS = withOtelExportOptions(z.object({
     .superRefine((data, ctx) => {
         validateMinPodReplicas(ctx, data);
         validateMaxLeaseDuration(ctx, data);
+        validateMemoryScaling(ctx, data);
         validatePipelineRawConfigConflict(ctx, data, "documentTransforms", [
             "docTransformerConfig",
             "docTransformerConfigBase64",

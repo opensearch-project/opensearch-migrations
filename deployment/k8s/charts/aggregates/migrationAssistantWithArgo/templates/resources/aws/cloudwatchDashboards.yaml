@@ -33,5 +33,29 @@ metadata:
     services.k8s.aws/adoption-fields: {{ dict "dashboardName" (printf "MA-%s-%s-ReindexFromSnapshot" .stage .region) | toJson | quote }}
 spec:
   dashboardName: "MA-{{ .stage }}-{{ .region }}-ReindexFromSnapshot"
-  dashboardBody: {{ .root.Files.Get "files/cloudwatch-dashboards/reindex-from-snapshot-dashboard.json" | replace "placeholder-region" .region | replace "placeholder-account-id" .account | replace "placeholder-stage" .stage | replace "placeholder-qualifier" .stage | fromJson | toJson | toJson }}
+  {{- $rfs := .root.Files.Get "files/cloudwatch-dashboards/reindex-from-snapshot-dashboard.json" | replace "placeholder-region" .region | replace "placeholder-account-id" .account | replace "placeholder-namespace" .root.Release.Namespace | replace "placeholder-stage" .stage | replace "placeholder-qualifier" .stage | fromJson }}
+  {{- if not (dig "showManagedTargetDomain" true .root.Values.metrics.cloudWatch) }}
+    {{- $variables := list }}
+    {{- range $rfs.variables }}
+      {{- if ne .id "TC_DOMAIN_NAME" }}{{- $variables = append $variables . }}{{- end }}
+    {{- end }}
+    {{- $_ := set $rfs "variables" $variables }}
+    {{- $widgets := list }}
+    {{- /* Keep the RFS client panels for every target. Compact the grid over the remaining rows. */}}
+    {{- $previousRow := -1 }}
+    {{- $rowY := 0 }}
+    {{- $nextY := 0 }}
+    {{- range $rfs.widgets }}
+      {{- if and .properties.metrics (has "AWS/ES" (first .properties.metrics)) }}{{- continue }}{{- end }}
+      {{- if ne $previousRow (int .y) }}
+        {{- $previousRow = int .y }}
+        {{- $rowY = $nextY }}
+      {{- end }}
+      {{- $nextY = max $nextY (add $rowY (int .height)) }}
+      {{- $_ := set . "y" $rowY }}
+      {{- $widgets = append $widgets . }}
+    {{- end }}
+    {{- $_ := set $rfs "widgets" $widgets }}
+  {{- end }}
+  dashboardBody: {{ $rfs | toJson | toJson }}
 {{- end -}}

@@ -29,7 +29,7 @@ import {
     typeToken,
     WorkflowBuilder
 } from "@opensearch-migrations/argo-workflow-builders";
-import {Deployment} from "@opensearch-migrations/argo-workflow-builders";
+import {Deployment, Volume, VolumeMount} from "@opensearch-migrations/argo-workflow-builders";
 import {OwnerReference} from "@opensearch-migrations/k8s-types";
 import {makeRepoParamDict} from "./metadataMigration";
 import {
@@ -47,10 +47,9 @@ import {
     getTargetHttpAuthCredsEnvVars
 } from "./commonUtils/basicCredsGetters";
 import {K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
-import {RfsCoordinatorCluster, getRfsCoordinatorClusterName, makeRfsCoordinatorConfig} from "./rfsCoordinatorCluster";
+import {getRfsCoordinatorClusterName} from "./rfsCoordinatorCluster";
 import {makePodDisruptionBudgetDefinition} from "./commonUtils/podDisruptionBudget";
 import {
-    minAvailableForSingleReplicaDependency,
     SCALABLE_WORKLOAD_INPUTS,
     scalingFromOptions,
     workflowParameterAsNumber,
@@ -59,6 +58,7 @@ import {
     COMPONENT_LABEL,
     COMPONENTS,
     MIGRATION_RESOURCE_UID_LABEL,
+    RFS_MEMORY_TIER_LABEL,
     WORKLOAD_SELECTOR_LABEL_KEYS,
     workloadSelectorLabels,
 } from "./commonUtils/resourceLabels";
@@ -69,17 +69,6 @@ import {
     workloadZoneSpreadConstraints,
     workloadZoneSpreadResolvedInput,
 } from "./commonUtils/workloadNodePool";
-
-function shouldCreateRfsWorkCoordinationCluster(
-    documentBackfillConfig: BaseExpression<Serialized<z.infer<typeof ARGO_RFS_OPTIONS>>>
-): BaseExpression<boolean, "complicatedExpression"> {
-    return expr.not(
-        expr.get(
-            expr.deserializeRecord(documentBackfillConfig),
-            "useTargetClusterForWorkCoordination"
-        )
-    );
-}
 
 function makeParamsDict(
     sourceVersion: BaseExpression<z.infer<typeof CLUSTER_VERSION_STRING>>,
@@ -125,7 +114,7 @@ function makeParamsDict(
     return base;
 }
 
-function getRfsDeploymentName(sessionName: BaseExpression<string>) {
+export function getRfsDeploymentName(sessionName: BaseExpression<string>) {
     return expr.concat(sessionName, expr.literal("-rfs"));
 }
 
@@ -204,7 +193,12 @@ function getRfsDeploymentManifest
     workloadNodePoolName: BaseExpression<string>,
     workloadZoneSpread: BaseExpression<string>,
     workloadZoneSpreadExtras: BaseExpression<string>,
-    cloudProvider: BaseExpression<string>
+    cloudProvider: BaseExpression<string>,
+    // Memory-tier additions (plain literals, threaded through the volume/mount pipeline).
+    // Absent on the feature-off path, which stays byte-identical.
+    extraEnv?: {name: string, value: string}[],
+    extraVolumeMounts?: VolumeMount[],
+    extraVolumes?: Volume[],
 }): Deployment {
     const ownerReferences: OwnerReference[] = [{
         apiVersion: "migrations.opensearch.org/v1alpha1",
@@ -242,14 +236,16 @@ function getRfsDeploymentManifest
             {
                 name: "CONSOLE_LOG_FORMAT",
                 value: "json"
-            }
+            },
+            ...(args.extraEnv ?? [])
         ],
         args: [
             "org.opensearch.migrations.RfsMigrateDocuments",
             "---INLINE-JSON",
             makeStringTypeProxy(args.jsonConfig)
         ],
-        resources: makeDirectTypeProxy(args.resources)
+        resources: makeDirectTypeProxy(args.resources),
+        ...(args.extraVolumeMounts ? {volumeMounts: args.extraVolumeMounts} : {})
     };
 
     const finalContainerDefinition = setupFileSourcesForContainer(
@@ -260,7 +256,7 @@ function getRfsDeploymentManifest
             setupLog4jConfigForContainer(
                 useCustomLogging,
                 args.loggingConfigMap,
-                {container: baseContainerDefinition, volumes: []},
+                {container: baseContainerDefinition, volumes: args.extraVolumes ?? []},
                 args.jvmArgs
             )
         )
@@ -395,6 +391,10 @@ const documentBulkLoadBaseBuilder = WorkflowBuilder.create({
         .addRequiredInput("usesDedicatedCoordinator", typeToken<string>())
         .addRequiredInput("fromSnapshotMigrationK8sLabel", typeToken<string>())
         .addRequiredInput("consoleConfigContents", typeToken<z.infer<typeof CONSOLE_SERVICES_CONFIG_FILE>>())
+        // Memory-tier scaling: both empty when the feature is off, and the apply script then
+        // renders exactly the same CronJob it always has.
+        .addOptionalInput("memoryScalingEnabled", c => "")
+        .addOptionalInput("tierPolicyConfigMap", c => "")
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
 
         .addContainer(c => c
@@ -422,6 +422,9 @@ const documentBulkLoadBaseBuilder = WorkflowBuilder.create({
                 COMPONENT_LABEL: expr.literal(COMPONENT_LABEL),
                 MONITOR_COMPONENT: expr.literal(COMPONENTS.RFS_MONITOR),
                 MONITOR_TASK: expr.literal("reindexFromSnapshot"),
+                MEMORY_SCALING_ENABLED: c.inputs.memoryScalingEnabled,
+                TIER_POLICY_CONFIGMAP: c.inputs.tierPolicyConfigMap,
+                RFS_MEMORY_TIER_LABEL: expr.literal(RFS_MEMORY_TIER_LABEL),
                 ...workflowScriptRootEnvVars(t.inputs.workflowParameters.workflowScriptsRoot)
             })
             .addArgs([workflowScriptCommand("applyRfsMonitorCronJob.sh")])
@@ -499,52 +502,49 @@ const documentBulkLoadBaseBuilder = WorkflowBuilder.create({
 
 type StartHistoricalBackfillInputExpressions = InputParamsToExpressions<typeof startHistoricalBackfillInputs>;
 
-function makeRfsDeploymentDefinition(
-    inputs: StartHistoricalBackfillInputExpressions
-) {
+function rfsDeploymentArgs(inputs: StartHistoricalBackfillInputExpressions) {
     return {
-        action: "apply" as const,
-        setOwnerReference: false,
-        manifest: getRfsDeploymentManifest({
-            podReplicas: expr.deserializeRecord(inputs.podReplicas),
-            loggingConfigMap: inputs.loggingConfigurationOverrideConfigMap,
-            jvmArgs: inputs.jvmArgs,
-            rootLogLevel: inputs.rootLogLevel,
-            bulkRequestTraceLogLevel: inputs.bulkRequestTraceLogLevel,
-            failedRequestsLogLevel: inputs.failedRequestsLogLevel,
-            fileSourceVolumes: expr.deserializeRecord(inputs.fileSourceVolumes),
-            fileSourceVolumeMounts: expr.deserializeRecord(inputs.fileSourceVolumeMounts),
-            useLocalstackAwsCreds: expr.deserializeRecord(inputs.useLocalStack),
-            sessionName: inputs.sessionName,
-            targetBasicCredsSecretNameOrEmpty: inputs.targetBasicCredsSecretNameOrEmpty,
-            coordinatorBasicCredsSecretNameOrEmpty: inputs.coordinatorBasicCredsSecretNameOrEmpty,
-            azureCredsSecretNameOrEmpty: inputs.azureCredsSecretNameOrEmpty,
-            rfsImageName: inputs.imageReindexFromSnapshotLocation,
-            rfsImagePullPolicy: inputs.imageReindexFromSnapshotPullPolicy,
-            workflowName: expr.getWorkflowValue("name"),
-            jsonConfig: expr.toBase64YamlSafe(inputs.rfsJsonConfig),
-            resources: expr.deserializeRecord(inputs.resources),
-            crdName: inputs.crdName,
-            crdUid: inputs.crdUid,
-            sourceK8sLabel: inputs.sourceK8sLabel,
-            targetK8sLabel: inputs.targetK8sLabel,
-            snapshotK8sLabel: inputs.snapshotK8sLabel,
-            fromSnapshotMigrationK8sLabel: inputs.fromSnapshotMigrationK8sLabel,
-            taskK8sLabel: inputs.taskK8sLabel,
-            workloadNodePoolName: inputs.workloadNodePoolName,
-            workloadZoneSpread: inputs.workloadZoneSpread,
-            workloadZoneSpreadExtras: inputs.workloadZoneSpreadExtras,
-            cloudProvider: inputs.cloudProvider,
-        })
+        podReplicas: expr.deserializeRecord(inputs.podReplicas),
+        loggingConfigMap: inputs.loggingConfigurationOverrideConfigMap,
+        jvmArgs: inputs.jvmArgs,
+        rootLogLevel: inputs.rootLogLevel,
+        bulkRequestTraceLogLevel: inputs.bulkRequestTraceLogLevel,
+        failedRequestsLogLevel: inputs.failedRequestsLogLevel,
+        fileSourceVolumes: expr.deserializeRecord(inputs.fileSourceVolumes),
+        fileSourceVolumeMounts: expr.deserializeRecord(inputs.fileSourceVolumeMounts),
+        useLocalstackAwsCreds: expr.deserializeRecord(inputs.useLocalStack),
+        sessionName: inputs.sessionName,
+        targetBasicCredsSecretNameOrEmpty: inputs.targetBasicCredsSecretNameOrEmpty,
+        coordinatorBasicCredsSecretNameOrEmpty: inputs.coordinatorBasicCredsSecretNameOrEmpty,
+        azureCredsSecretNameOrEmpty: inputs.azureCredsSecretNameOrEmpty,
+        rfsImageName: inputs.imageReindexFromSnapshotLocation,
+        rfsImagePullPolicy: inputs.imageReindexFromSnapshotPullPolicy,
+        workflowName: expr.getWorkflowValue("name"),
+        jsonConfig: expr.toBase64YamlSafe(inputs.rfsJsonConfig),
+        resources: expr.deserializeRecord(inputs.resources),
+        crdName: inputs.crdName,
+        crdUid: inputs.crdUid,
+        sourceK8sLabel: inputs.sourceK8sLabel,
+        targetK8sLabel: inputs.targetK8sLabel,
+        snapshotK8sLabel: inputs.snapshotK8sLabel,
+        fromSnapshotMigrationK8sLabel: inputs.fromSnapshotMigrationK8sLabel,
+        taskK8sLabel: inputs.taskK8sLabel,
+        workloadNodePoolName: inputs.workloadNodePoolName,
+        workloadZoneSpread: inputs.workloadZoneSpread,
+        workloadZoneSpreadExtras: inputs.workloadZoneSpreadExtras,
+        cloudProvider: inputs.cloudProvider,
     };
 }
 
 function makeRfsPodDisruptionBudgetDefinition(
-    inputs: StartHistoricalBackfillInputExpressions
+    inputs: StartHistoricalBackfillInputExpressions, memoryTier?: BaseExpression<string>
 ) {
-    const deploymentName = getRfsDeploymentName(inputs.sessionName);
+    const deploymentName = memoryTier
+        ? getRfsTierDeploymentName(inputs.sessionName, memoryTier)
+        : getRfsDeploymentName(inputs.sessionName);
     const labels = {
         [COMPONENT_LABEL]: COMPONENTS.RFS_WORKER,
+        ...(memoryTier && {[RFS_MEMORY_TIER_LABEL]: memoryTier}),
         "workflows.argoproj.io/workflow": expr.getWorkflowValue("name"),
         "migrations.opensearch.org/source": inputs.sourceK8sLabel,
         "migrations.opensearch.org/target": inputs.targetK8sLabel,
@@ -563,10 +563,151 @@ function makeRfsPodDisruptionBudgetDefinition(
     return makePodDisruptionBudgetDefinition({
         name: deploymentName,
         minAvailable: workflowParameterAsNumber(inputs.minPodReplicas),
-        matchLabels: workloadSelectorLabels(COMPONENTS.RFS_WORKER, inputs.crdUid),
+        matchLabels: {
+            ...workloadSelectorLabels(COMPONENTS.RFS_WORKER, inputs.crdUid),
+            ...(memoryTier && {[RFS_MEMORY_TIER_LABEL]: makeStringTypeProxy(memoryTier)}),
+        },
         labels,
         ownerReferences,
     });
+}
+
+// Comfortably above the worker's shutdown path's worst case (the failed-document-stream flush is
+// bounded at 5 minutes) so a busy pod that loses the pod-deletion-cost race can still checkpoint.
+export const RFS_TERMINATION_GRACE_PERIOD_SECONDS = 390;
+
+// Pod-lifetime supervisor state (crash list + open-launch ledger): survives container restarts so
+// crash evidence outlives a kernel-OOM group kill. Plain env/paths — the wrapper is k8s-unaware.
+export const RFS_STATE_DIR_PATH = "/var/run/rfs-state";
+// The monitor's kernel-OOM witness annotation, projected into the container as a file the
+// supervisor polls when a launch died without a recorded outcome. Keep the annotation name in
+// sync with rfsTierSweep.py's CRASH_EVIDENCE_ANNOTATION.
+export const RFS_CRASH_EVIDENCE_ANNOTATION = "migrations.opensearch.org/rfs-predecessor-crashes";
+export const RFS_CRASH_EVIDENCE_MOUNT_PATH = "/var/run/rfs-evidence";
+export const RFS_CRASH_EVIDENCE_FILE_NAME = "predecessor-crashes";
+
+export function getRfsTierDeploymentName(sessionName: BaseExpression<string>, memoryTier: BaseExpression<string>) {
+    return expr.concat(getRfsDeploymentName(sessionName), expr.literal("-t"), memoryTier);
+}
+
+/** Each tier sets requests.memory and limits.memory to the same tier value (Guaranteed QoS). */
+function tierResourceOverride(
+    resources: BaseExpression<ResourceRequirementsType>,
+    tierMemoryQuantity: BaseExpression<string>
+) {
+    const requests = expr.cast(expr.get(resources, "requests")).to<Record<string, string>>();
+    const limits = expr.cast(expr.get(resources, "limits")).to<Record<string, string>>();
+    return expr.makeDict({
+        requests: expr.mergeDicts(requests, expr.makeDict({memory: tierMemoryQuantity})),
+        limits: expr.mergeDicts(limits, expr.makeDict({memory: tierMemoryQuantity})),
+    });
+}
+
+/**
+ * The per-tier RFS Deployment: the ordinary RFS worker manifest plus the tier label in the
+ * immutable selector / pod labels, the tier env for the worker (which also switches the container's
+ * wrapper into its supervised restart loop), the tier's memory quantity (requests == limits), and
+ * the raised termination grace period.  Built by mutating the base manifest so the two shapes can
+ * never drift apart.
+ */
+function getRfsTierDeploymentManifest(
+    args: Parameters<typeof getRfsDeploymentManifest>[0] & {
+        memoryTier: BaseExpression<string>,
+        tierMemoryQuantity: BaseExpression<string>,
+    }
+): Deployment {
+    const deployment = getRfsDeploymentManifest({
+        ...args,
+        // Supervisor state dir (crash evidence outliving container restarts) and the monitor's
+        // kernel-OOM witness file. See the constants above for why each exists.
+        extraEnv: [
+            {name: "RFS_STATE_DIR", value: RFS_STATE_DIR_PATH},
+            {
+                name: "RFS_CRASH_EVIDENCE_FILE",
+                value: `${RFS_CRASH_EVIDENCE_MOUNT_PATH}/${RFS_CRASH_EVIDENCE_FILE_NAME}`,
+            },
+        ],
+        extraVolumeMounts: [
+            {name: "rfs-state", mountPath: RFS_STATE_DIR_PATH},
+            {name: "rfs-crash-evidence", mountPath: RFS_CRASH_EVIDENCE_MOUNT_PATH, readOnly: true},
+        ],
+        extraVolumes: [
+            {name: "rfs-state", emptyDir: {sizeLimit: "1Mi"}},
+            {
+                name: "rfs-crash-evidence",
+                downwardAPI: {
+                    items: [{
+                        path: RFS_CRASH_EVIDENCE_FILE_NAME,
+                        fieldRef: {fieldPath: `metadata.annotations['${RFS_CRASH_EVIDENCE_ANNOTATION}']`},
+                    }],
+                },
+            },
+        ],
+    }) as any;
+
+    const tierLabelValue = makeStringTypeProxy(args.memoryTier);
+    deployment.metadata.name =
+        makeStringTypeProxy(getRfsTierDeploymentName(args.sessionName, args.memoryTier));
+    deployment.metadata.labels[RFS_MEMORY_TIER_LABEL] = tierLabelValue;
+    deployment.spec.selector.matchLabels[RFS_MEMORY_TIER_LABEL] = tierLabelValue;
+    deployment.spec.template.metadata.labels[RFS_MEMORY_TIER_LABEL] = tierLabelValue;
+    deployment.spec.template.spec.terminationGracePeriodSeconds = RFS_TERMINATION_GRACE_PERIOD_SECONDS;
+
+    const bulkLoader = deployment.spec.template.spec.containers[0];
+    bulkLoader.env.push({name: "RFS_WORKER_MEMORY_TIER", value: tierLabelValue});
+    bulkLoader.resources =
+        makeDirectTypeProxy(tierResourceOverride(args.resources, args.tierMemoryQuantity));
+    return deployment as Deployment;
+}
+
+const backfillConfigInputs = {
+    sessionName: defineRequiredParam<string>(),
+    sourceVersion: defineRequiredParam<z.infer<typeof CLUSTER_VERSION_STRING>>(),
+    sourceLabel: defineRequiredParam<string>(),
+    snapshotConfig: defineRequiredParam<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>(),
+    targetConfig: defineRequiredParam<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>(),
+    rfsCoordinatorConfig: defineRequiredParam<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>(),
+    documentBackfillConfig: defineRequiredParam<z.infer<typeof ARGO_RFS_OPTIONS>>(),
+    migrationLabel: defineRequiredParam<string>(),
+    crdName: defineRequiredParam<string>(),
+    crdUid: defineRequiredParam<string>(),
+    sourceEndpoint: defineParam<string>({expression: ""}),
+    ...makeRequiredImageParametersForKeys(["ReindexFromSnapshot"]),
+};
+
+function workerSettingsFromConfig(inputs: InputParamsToExpressions<typeof backfillConfigInputs>) {
+    const backfillConfig = expr.deserializeRecord(inputs.documentBackfillConfig);
+    return {
+        minPodReplicas: scalingFromOptions(inputs.documentBackfillConfig).minPodReplicas,
+        targetBasicCredsSecretNameOrEmpty: getHttpAuthSecretName(inputs.targetConfig),
+        coordinatorBasicCredsSecretNameOrEmpty: getHttpAuthSecretName(inputs.rfsCoordinatorConfig),
+        azureCredsSecretNameOrEmpty: expr.dig(expr.deserializeRecord(inputs.snapshotConfig), ["repoConfig", "azureCredentialsSecretName"], ""),
+        loggingConfigurationOverrideConfigMap: expr.dig(backfillConfig, ["loggingConfigurationOverrideConfigMap"], ""),
+        jvmArgs: expr.dig(backfillConfig, ["jvmArgs"], ""),
+        rootLogLevel: expr.getLoose(expr.getLoose(backfillConfig, "logLevels"), "root"),
+        bulkRequestTraceLogLevel: expr.getLoose(expr.getLoose(backfillConfig, "logLevels"), "bulkRequestTrace"),
+        failedRequestsLogLevel: expr.getLoose(expr.getLoose(backfillConfig, "logLevels"), "failedRequests"),
+        fileSourceVolumes: expr.serialize(expr.dig(backfillConfig, ["fileSourceVolumes"], [])),
+        fileSourceVolumeMounts: expr.serialize(expr.dig(backfillConfig, ["fileSourceVolumeMounts"], [])),
+        useLocalStack: expr.dig(expr.deserializeRecord(inputs.snapshotConfig), ["repoConfig", "useLocalStack"], false),
+        rfsJsonConfig: expr.asString(expr.serialize(
+            makeParamsDict(inputs.sourceVersion,
+                inputs.targetConfig,
+                inputs.rfsCoordinatorConfig,
+                inputs.snapshotConfig,
+                inputs.documentBackfillConfig,
+                inputs.sessionName,
+                inputs.crdUid,
+                inputs.sourceEndpoint)
+        )),
+        resources: expr.serialize(expr.jsonPathStrict(inputs.documentBackfillConfig, "resources")),
+        crdName: inputs.crdName,
+        crdUid: inputs.crdUid,
+        sourceK8sLabel: inputs.sourceLabel,
+        targetK8sLabel: expr.jsonPathStrict(inputs.targetConfig, "label"),
+        snapshotK8sLabel: expr.jsonPathStrict(inputs.snapshotConfig, "label"),
+        fromSnapshotMigrationK8sLabel: inputs.migrationLabel
+    };
 }
 
 export const DocumentBulkLoad = documentBulkLoadBaseBuilder
@@ -581,8 +722,49 @@ export const DocumentBulkLoad = documentBulkLoadBaseBuilder
     .addTemplate("createRfsDeployment", t => t
         .addInputsFromRecord(startHistoricalBackfillInputs)
         .addResourceTask(b => b
-            .setDefinition(makeRfsDeploymentDefinition(b.inputs)))
+            .setDefinition({
+                action: "apply", setOwnerReference: false,
+                manifest: getRfsDeploymentManifest(rfsDeploymentArgs(b.inputs)),
+            }))
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+    )
+
+    // Each tier has its own Deployment and PDB so their selectors cover the same worker pods.
+    .addTemplate("createRfsTierPodDisruptionBudget", t => t
+        .addInputsFromRecord(startHistoricalBackfillInputs)
+        .addRequiredInput("memoryTier", typeToken<string>())
+        .addRequiredInput("tierMemoryQuantity", typeToken<string>())
+        .addResourceTask(b => b
+            .setDefinition(makeRfsPodDisruptionBudgetDefinition(b.inputs, b.inputs.memoryTier)))
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+    )
+
+    .addTemplate("createRfsTierDeployment", t => t
+        .addInputsFromRecord(startHistoricalBackfillInputs)
+        .addRequiredInput("memoryTier", typeToken<string>())
+        .addRequiredInput("tierMemoryQuantity", typeToken<string>())
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "apply", setOwnerReference: false,
+                manifest: getRfsTierDeploymentManifest({
+                    ...rfsDeploymentArgs(b.inputs),
+                    memoryTier: b.inputs.memoryTier,
+                    tierMemoryQuantity: b.inputs.tierMemoryQuantity,
+                }),
+            }))
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+    )
+
+    .addTemplate("startTierHistoricalBackfill", t => t
+        .addInputsFromRecord(startHistoricalBackfillInputs)
+        .addRequiredInput("memoryTier", typeToken<string>())
+        .addRequiredInput("tierMemoryQuantity", typeToken<string>())
+        .addSteps(b => b
+            .addStep("createTierPodDisruptionBudget", INTERNAL, "createRfsTierPodDisruptionBudget", c =>
+                c.register({...selectInputsForRegister(b, c)}))
+            .addStep("createTierDeployment", INTERNAL, "createRfsTierDeployment", c =>
+                c.register({...selectInputsForRegister(b, c)}))
+        )
     )
 
     .addTemplate("startHistoricalBackfill", t => t
@@ -597,18 +779,7 @@ export const DocumentBulkLoad = documentBulkLoadBaseBuilder
 
 
     .addTemplate("startHistoricalBackfillFromConfig", t => t
-        .addRequiredInput("sessionName", typeToken<string>())
-        .addRequiredInput("sourceVersion", typeToken<z.infer<typeof CLUSTER_VERSION_STRING>>())
-        .addRequiredInput("sourceLabel", typeToken<string>())
-        .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
-        .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
-        .addRequiredInput("rfsCoordinatorConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
-        .addRequiredInput("documentBackfillConfig", typeToken<z.infer<typeof ARGO_RFS_OPTIONS>>())
-        .addRequiredInput("migrationLabel", typeToken<string>())
-        .addRequiredInput("crdName", typeToken<string>())
-        .addRequiredInput("crdUid", typeToken<string>())
-        .addOptionalInput("sourceEndpoint", c => "")
-        .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot"]))
+        .addInputsFromRecord(backfillConfigInputs)
 
         .addSteps(b => b
             .addStep("startHistoricalBackfill", INTERNAL, "startHistoricalBackfill", c => {
@@ -616,35 +787,31 @@ export const DocumentBulkLoad = documentBulkLoadBaseBuilder
                 return c.register({
                     ...selectInputsForRegister(b, c),
                     podReplicas: scaling.podReplicas,
-                    minPodReplicas: scaling.minPodReplicas,
-                    targetBasicCredsSecretNameOrEmpty: getHttpAuthSecretName(b.inputs.targetConfig),
-                    coordinatorBasicCredsSecretNameOrEmpty: getHttpAuthSecretName(b.inputs.rfsCoordinatorConfig),
-                    azureCredsSecretNameOrEmpty: expr.dig(expr.deserializeRecord(b.inputs.snapshotConfig), ["repoConfig", "azureCredentialsSecretName"], ""),
-                    loggingConfigurationOverrideConfigMap: expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["loggingConfigurationOverrideConfigMap"], ""),
-                    jvmArgs: expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["jvmArgs"], ""),
-                    rootLogLevel: expr.getLoose(expr.getLoose(expr.deserializeRecord(b.inputs.documentBackfillConfig), "logLevels"), "root"),
-                    bulkRequestTraceLogLevel: expr.getLoose(expr.getLoose(expr.deserializeRecord(b.inputs.documentBackfillConfig), "logLevels"), "bulkRequestTrace"),
-                    failedRequestsLogLevel: expr.getLoose(expr.getLoose(expr.deserializeRecord(b.inputs.documentBackfillConfig), "logLevels"), "failedRequests"),
-                    fileSourceVolumes: expr.serialize(expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["fileSourceVolumes"], [])),
-                    fileSourceVolumeMounts: expr.serialize(expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["fileSourceVolumeMounts"], [])),
-                    useLocalStack: expr.dig(expr.deserializeRecord(b.inputs.snapshotConfig), ["repoConfig", "useLocalStack"], false),
-                    rfsJsonConfig: expr.asString(expr.serialize(
-                        makeParamsDict(b.inputs.sourceVersion,
-                            b.inputs.targetConfig,
-                            b.inputs.rfsCoordinatorConfig,
-                            b.inputs.snapshotConfig,
-                            b.inputs.documentBackfillConfig,
-                            b.inputs.sessionName,
-                            b.inputs.crdUid,
-                            b.inputs.sourceEndpoint)
-                    )),
-                    resources: expr.serialize(expr.jsonPathStrict(b.inputs.documentBackfillConfig, "resources")),
-                    crdName: b.inputs.crdName,
-                    crdUid: b.inputs.crdUid,
-                    sourceK8sLabel: b.inputs.sourceLabel,
-                    targetK8sLabel: expr.jsonPathStrict(b.inputs.targetConfig, "label"),
-                    snapshotK8sLabel: expr.jsonPathStrict(b.inputs.snapshotConfig, "label"),
-                    fromSnapshotMigrationK8sLabel: b.inputs.migrationLabel
+                    ...workerSettingsFromConfig(b.inputs),
+                });
+            })
+        )
+    )
+
+
+    // Provision tier 0 during shard setup. The monitor can resize it once the work items exist.
+    .addTemplate("startTierZeroBackfillFromConfig", t => t
+        .addInputsFromRecord(backfillConfigInputs)
+
+        .addSteps(b => b
+            .addStep("startTierHistoricalBackfill", INTERNAL, "startTierHistoricalBackfill", c => {
+                const backfillConfig = expr.deserializeRecord(b.inputs.documentBackfillConfig);
+                const tierTable = expr.cast(
+                    expr.getLoose(backfillConfig, "memoryScalingTierTable")).to<string[]>();
+                return c.register({
+                    ...selectInputsForRegister(b, c),
+                    memoryTier: expr.literal("0"),
+                    tierMemoryQuantity: expr.index(tierTable, expr.literal(0)),
+                    // Start at the full budget (maxTotalPods, or podReplicas as its stand-in):
+                    // excess pods idle cheaply and the monitor trims them after shard setup.
+                    podReplicas: expr.dig(backfillConfig, ["maxTotalPods"],
+                        expr.cast(expr.get(backfillConfig, "podReplicas")).to<number>()),
+                    ...workerSettingsFromConfig(b.inputs),
                 });
             })
         )
@@ -703,86 +870,5 @@ export const DocumentBulkLoad = documentBulkLoadBaseBuilder
 
     .addTemplate("doNothing", t => t
         .addSteps(b => b.addStepGroup(c => c)))
-
-
-    .addTemplate("setupAndRunBulkLoad", t => t
-        .addRequiredInput("sourceVersion", typeToken<z.infer<typeof CLUSTER_VERSION_STRING>>())
-        .addRequiredInput("sourceLabel", typeToken<string>())
-        .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
-        .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
-        .addRequiredInput("sessionName", typeToken<string>())
-        .addRequiredInput("documentBackfillConfig", typeToken<z.infer<typeof ARGO_RFS_OPTIONS>>())
-        .addRequiredInput("migrationLabel", typeToken<string>())
-        .addRequiredInput("crdName", typeToken<string>())
-        .addRequiredInput("crdUid", typeToken<string>())
-        .addRequiredInput("configChecksum", typeToken<string>())
-        .addRequiredInput("checksumForReplayer", typeToken<string>())
-        .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot", "MigrationConsole", "CoordinatorCluster"]))
-
-        .addSteps(b => {
-            const createRfsCluster = shouldCreateRfsWorkCoordinationCluster(b.inputs.documentBackfillConfig);
-            const rfsCoordinatorConfig = expr.ternary(
-                createRfsCluster,
-                expr.serialize(makeRfsCoordinatorConfig(getRfsCoordinatorClusterName(b.inputs.sessionName))),
-                b.inputs.targetConfig
-            );
-            const scaling = scalingFromOptions(b.inputs.documentBackfillConfig);
-            return b
-                .addStep("setupRfsConsoleConfig", MigrationConsole, "getConsoleConfig", c =>
-                    c.register({
-                        ...selectInputsForRegister(b, c),
-                        targetConfig: rfsCoordinatorConfig,
-                        backfillSession: expr.serialize(expr.makeDict({
-                            sessionName: b.inputs.sessionName,
-                            deploymentName: getRfsDeploymentName(b.inputs.sessionName)
-                        }))
-                    })
-                )
-
-                .addStep("applyRfsDoneCronJob", INTERNAL, "applyRfsDoneCronJob", c =>
-                    c.register({
-                        ...selectInputsForRegister(b, c),
-                        sessionName: b.inputs.sessionName,
-                        crdName: b.inputs.crdName,
-                        crdUid: b.inputs.crdUid,
-                        configChecksum: b.inputs.configChecksum,
-                        checksumForReplayer: b.inputs.checksumForReplayer,
-                        usesDedicatedCoordinator: expr.ternary(createRfsCluster, expr.literal("true"), expr.literal("false")),
-                        fromSnapshotMigrationK8sLabel: b.inputs.migrationLabel,
-                        consoleConfigContents: c.steps.setupRfsConsoleConfig.outputs.configContents
-                    })
-                )
-
-                .addStep("createRfsCoordinator", RfsCoordinatorCluster, "createRfsCoordinator", c =>
-                        c.register({
-                            clusterName: getRfsCoordinatorClusterName(b.inputs.sessionName),
-                            coordinatorImage: b.inputs.imageCoordinatorClusterLocation,
-                            ownerName: b.inputs.crdName,
-                            ownerUid: b.inputs.crdUid,
-                            minPodReplicas: minAvailableForSingleReplicaDependency(scaling.minPodReplicas),
-                            sourceK8sLabel: b.inputs.sourceLabel,
-                            targetK8sLabel: expr.jsonPathStrict(b.inputs.targetConfig, "label"),
-                            snapshotK8sLabel: expr.jsonPathStrict(b.inputs.snapshotConfig, "label"),
-                            fromSnapshotMigrationK8sLabel: b.inputs.migrationLabel
-                        }),
-                    {when: {templateExp: createRfsCluster}}
-                )
-
-                .addStep("startHistoricalBackfillFromConfig", INTERNAL, "startHistoricalBackfillFromConfig", c =>
-                    c.register({
-                        ...selectInputsForRegister(b, c),
-                        rfsCoordinatorConfig
-                    }))
-
-                .addStep("waitIndefinitelyForSnapshotMigration", ResourceManagement, "waitIndefinitelyForSnapshotMigration", c =>
-                    c.register({
-                        ...selectInputsForRegister(b, c),
-                        resourceName: b.inputs.crdName,
-                        configChecksum: b.inputs.configChecksum,
-                        checksumField: expr.literal("configChecksum")
-                    })
-                );
-        })
-    )
 
     .getFullScope();

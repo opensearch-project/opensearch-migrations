@@ -81,7 +81,22 @@ class CoordinatorRetryJitterTest {
     void clockDriftRetriesJitterEachWait() throws Exception {
         // An update-by-query that matched an item but changed nothing looks like clock drift to the coordinator.
         var drift = new TestResponse(200, "OK", "{\"total\":1,\"updated\":0,\"noops\":1,\"version_conflicts\":0}");
-        try (var coordinator = new WorkCoordinatorFactory(VERSION).get(new MockHttpClient(drift), 2, "worker");
+        // Answer the acquisition precheck (census search + lease-cap read) so the flow reaches
+        // the update_by_query whose drift-shaped response is under test.
+        var census = new TestResponse(200, "OK",
+            "{\"hits\":{\"total\":{\"value\":2,\"relation\":\"eq\"}},"
+                + "\"aggregations\":{\"byTier\":{\"buckets\":"
+                + "[{\"key\":0,\"doc_count\":2,\"waiting\":{\"doc_count\":2}}]}}}");
+        var notFound = new TestResponse(404, "Not Found", "{}");
+        AbstractedHttpClient driftingClient = (method, path, headers, payload) -> {
+            if (path.contains("_update_by_query")) {
+                return drift;
+            } else if (path.contains("/_doc/" + OpenSearchWorkCoordinator.SHARD_SETUP_DOC_ID)) {
+                return notFound;
+            }
+            return census;
+        };
+        try (var coordinator = new WorkCoordinatorFactory(VERSION).get(driftingClient, 2, "worker");
              var logs = new CloseableLogSetup(coordinator.getLoggerName())) {
             Assertions.assertThrows(OpenSearchWorkCoordinator.RetriesExceededException.class,
                 () -> coordinator.acquireNextWorkItem(Duration.ofMillis(500),

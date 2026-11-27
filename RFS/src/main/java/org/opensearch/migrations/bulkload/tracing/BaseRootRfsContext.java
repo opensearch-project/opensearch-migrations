@@ -1,5 +1,7 @@
 package org.opensearch.migrations.bulkload.tracing;
 
+import java.util.function.IntConsumer;
+
 import org.opensearch.migrations.bulkload.common.retry.AdaptiveLimit;
 import org.opensearch.migrations.bulkload.common.retry.RetryBudget;
 import org.opensearch.migrations.tracing.IContextTracker;
@@ -25,21 +27,21 @@ public class BaseRootRfsContext extends RootOtelContext {
         deltaStreamInstruments = RfsContexts.DeltaStreamContext.makeMetrics(meter);
     }
 
-    /**
-     * Instruments for one target's bulk flow control, with gauges reading {@code budget} and {@code limit} (either
-     * may be null). Create once per process and target.
-     */
     public static final String WORKER_PHASE = "rfsWorkerPhase";
+    public static final String WORK_ITEMS_ESCALATED = "workItemsEscalated";
     public static final AttributeKey<String> PHASE = AttributeKey.stringKey("phase");
+    public static final AttributeKey<String> MEMORY_TIER = AttributeKey.stringKey("tier");
 
     /**
      * A gauge of this process's {@link WorkerPhase}: one series per phase, 1 for the current phase and 0 for the
-     * others, reported on every export, so a dashboard can count workers in each phase at any moment. Keep the
-     * returned handle for as long as the gauge should report.
+     * others, reported on every export, so a dashboard can count workers in each phase at any moment. The worker's
+     * memory tier is a dimension so dashboards can show fleet composition per tier (0 when memory scaling is off).
+     * Keep the returned handle for as long as the gauge should report.
      */
-    public AutoCloseable makeWorkerPhaseGauge() {
+    public AutoCloseable makeWorkerPhaseGauge(int memoryTier) {
+        var tier = Integer.toString(memoryTier);
         var phases = java.util.Arrays.stream(WorkerPhase.Phase.values())
-            .map(p -> java.util.Map.entry(p, Attributes.of(PHASE, p.label()))).toList();
+            .map(p -> java.util.Map.entry(p, Attributes.of(PHASE, p.label(), MEMORY_TIER, tier))).toList();
         return getMeterProvider().get(scopeName).gaugeBuilder(WORKER_PHASE).setUnit("count").ofLongs()
             .buildWithCallback(m -> {
                 var current = WorkerPhase.current();
@@ -47,6 +49,35 @@ public class BaseRootRfsContext extends RootOtelContext {
             });
     }
 
+    /**
+     * Counts work items this worker escalated to a higher memory tier after an OOM verdict; the {@code tier}
+     * dimension is the tier escalated TO, so dashboards can chart the climb per level.
+     */
+    public IntConsumer makeEscalationRecorder() {
+        return makeTierCounter(WORK_ITEMS_ESCALATED);
+    }
+
+    public static final String DIRTY_LEASES_RELEASED = "dirtyLeasesReleased";
+
+    /**
+     * Counts dirty leases the startup sweep released at the SAME tier (a dead predecessor without OOM
+     * evidence — the non-escalating counterpart of {@link #WORK_ITEMS_ESCALATED}); the {@code tier}
+     * dimension is the tier the lease stayed at. Together the two counters chart every sweep decision.
+     */
+    public IntConsumer makeDirtyLeaseReleaseRecorder() {
+        return makeTierCounter(DIRTY_LEASES_RELEASED);
+    }
+
+    private IntConsumer makeTierCounter(String metricName) {
+        var counter = getMeterProvider().get(scopeName).counterBuilder(metricName)
+            .setUnit("count").build();
+        return tier -> counter.add(1, Attributes.of(MEMORY_TIER, Integer.toString(tier)));
+    }
+
+    /**
+     * Instruments for one target's bulk flow control, with gauges reading {@code budget} and {@code limit} (either
+     * may be null). Create once per process and target.
+     */
     public BulkFlowInstruments makeBulkFlowInstruments(RetryBudget budget, AdaptiveLimit limit) {
         return new BulkFlowInstruments(getMeterProvider().get(scopeName), budget, limit);
     }

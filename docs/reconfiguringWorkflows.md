@@ -411,6 +411,8 @@ Every field of `documentBackfillConfig` is listed here; a test in `orchestration
 | `spec.documentBackfillConfig.failedDocumentStreamS3Endpoint` | Safe |  | ❌ |
 | `spec.documentBackfillConfig.failedDocumentStreamMaxBufferBytes` | Safe |  | ❌ |
 | `spec.documentBackfillConfig.positionGapStopword` | Impossible |  | ✅ |
+| `spec.documentBackfillConfig.memoryScaling` | Safe | Workflow renders the tier policy into the ConfigMap read by the monitor | ❌ |
+| `spec.documentBackfillConfig.maxTotalPods` | Safe | Fleet-wide pod budget across tiers; throughput only | ❌ |
 
 ---
 

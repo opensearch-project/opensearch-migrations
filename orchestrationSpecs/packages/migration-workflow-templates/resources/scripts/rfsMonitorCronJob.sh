@@ -53,6 +53,12 @@ cj_rv="$(echo "$cronjob_json" | jq -r '.metadata.resourceVersion')"
 cj_namespace="$(echo "$cronjob_json" | jq -r '.metadata.namespace')"
 
 sm_json="$(kubectl get snapshotmigration "$SNAPSHOT_MIGRATION_NAME" -o json 2>/dev/null || true)"
+sm_uid="$(echo "$sm_json" | jq -r '.metadata.uid // ""' 2>/dev/null || echo "")"
+
+# RFS runtime objects are selected by LABEL, not fixed name: with memory-tier scaling each tier
+# runs its own Deployment (<session>-rfs-t<n>), and component + migration-resource-uid selects
+# the whole set in both modes. The label keys are stable constants (docs/kubernetesLabels.md).
+RFS_WORKER_SELECTOR="migrations.opensearch.org/component=rfs-worker,migrations.opensearch.org/migration-resource-uid=${sm_uid}"
 
 # delete_cronjob_with_preconditions: INV-5 atomic self-delete. kubectl
 # delete does not expose --uid / --resource-version; use the raw API.
@@ -68,7 +74,16 @@ delete_cronjob_with_preconditions() {
 }
 
 delete_runtime_resources() {
-    kubectl delete deployment "$RFS_DEPLOYMENT_NAME" --ignore-not-found
+    if [ -n "$sm_uid" ]; then
+        kubectl delete deployment -l "$RFS_WORKER_SELECTOR" --ignore-not-found
+    else
+        kubectl delete deployment "$RFS_DEPLOYMENT_NAME" --ignore-not-found
+    fi
+    if [ -n "${MEMORY_SCALING_ENABLED:-}" ]; then
+        kubectl delete poddisruptionbudget -l "$RFS_WORKER_SELECTOR" --ignore-not-found
+        [ -n "${TIER_POLICY_CONFIGMAP:-}" ] && \
+            kubectl delete configmap "$TIER_POLICY_CONFIGMAP" --ignore-not-found
+    fi
     if [ "$USES_DEDICATED_COORDINATOR" = "true" ]; then
         kubectl delete statefulset "$RFS_COORDINATOR_NAME" --ignore-not-found
         kubectl delete service     "$RFS_COORDINATOR_NAME" --ignore-not-found
@@ -143,13 +158,22 @@ parent_workflow_running() {
 }
 
 runtime_resource_exists() {
-    kubectl get deployment "$RFS_DEPLOYMENT_NAME" >/dev/null 2>&1
+    # Label-selected: matches both the plain <session>-rfs Deployment and any per-tier
+    # <session>-rfs-t<n> Deployments. Only consulted when the SnapshotMigration exists,
+    # so sm_uid is available.
+    if [ -n "$sm_uid" ]; then
+        [ -n "$(kubectl get deployment -l "$RFS_WORKER_SELECTOR" -o name 2>/dev/null)" ]
+    else
+        kubectl get deployment "$RFS_DEPLOYMENT_NAME" >/dev/null 2>&1
+    fi
 }
 
 # 1. RECOVERY CLEANUP (INV-6 b) ----------------------------------------------
+# Failed is terminal like Completed: a monitor killed between the Failed commit and teardown
+# must finish the teardown on its next run rather than resume polling.
 sm_phase="$(echo "$sm_json" | jq -r '.status.phase // ""' 2>/dev/null || echo "")"
 sm_status_cc="$(echo "$sm_json" | jq -r '.status.configChecksum // ""' 2>/dev/null || echo "")"
-if [ -n "$sm_json" ] && [ "$sm_phase" = "Completed" ] && [ "$sm_status_cc" = "$CONFIG_CHECKSUM" ]; then
+if [ -n "$sm_json" ] && { [ "$sm_phase" = "Completed" ] || [ "$sm_phase" = "Failed" ]; } && [ "$sm_status_cc" = "$CONFIG_CHECKSUM" ]; then
     echo "phase 1: recovery cleanup (status already reflects env.CONFIG_CHECKSUM)"
     delete_runtime_resources
     delete_cronjob_with_preconditions || true
@@ -170,6 +194,17 @@ if [ -z "$sm_json" ] || ! runtime_resource_exists; then
     echo "phase 2: orphaned (sm or runtime missing, parent gone, grace expired); self-deleting"
     delete_cronjob_with_preconditions || true
     exit 0
+fi
+
+# 2.5 MEMORY-TIER FLEET SWEEP (scheduler role) --------------------------------
+# Per-sweep reconciliation: publish per-tier lease caps from coordinator truth, annotate
+# deletion costs, trim idle pods, and create/reactivate tier fleets from the rendered
+# ConfigMap. Tolerates a missing policy ConfigMap or unreachable coordinator (skips quietly);
+# a failed sweep must never block the status poll below.
+if [ -n "${MEMORY_SCALING_ENABLED:-}" ]; then
+    MIGRATION_SERVICES_CONFIG=/config/migration_services.yaml \
+        python3 "$WORKFLOW_SCRIPTS_ROOT/rfsTierSweep.py" || \
+        echo "tier sweep failed (non-fatal this sweep); continuing"
 fi
 
 # 3. STATUS POLL + COMMIT (+ CLEANUP) (INV-6 a+b) ----------------------------
@@ -194,22 +229,37 @@ status_message="$(printf '%s' "$status_json" | jq -r '
 patch_backfill_status "$status" "$status_message" "$status_json"
 
 # CompletedWithErrors is terminal too — treating it as in-progress would loop forever.
-if [ "$status" != "Completed" ] && [ "$status" != "CompletedWithErrors" ]; then
+# Failed is terminal as well (memory-tier scaling: incomplete shards exceed maxMemory with
+# nothing in progress); it runs the same commit-and-teardown path with phase Failed, so the
+# parent workflow's waiter fails and propagates instead of hanging.
+if [ "$status" != "Completed" ] && [ "$status" != "CompletedWithErrors" ] && [ "$status" != "Failed" ]; then
     progress="$(printf '%s' "$status_json" | jq -r '"complete: \(.percentage_completed // 0)%, shards: \(.shard_complete // 0)/\(.shard_total // 0)"')"
     echo "phase 3: still working ($progress)"
     exit 0
+fi
+
+terminal_phase="Completed"
+if [ "$status" = "Failed" ]; then
+    terminal_phase="Failed"
+    # Surface the per-index rollup (succeeded vs incomplete, with the shards that exceed
+    # maxMemory) in the terminal message so operators see it without the console.
+    rollup="$(printf '%s' "$status_json" | jq -c '.indices // empty' 2>/dev/null || true)"
+    if [ -n "$rollup" ]; then
+        status_message="$(printf '%s; indices: %s' "$status_message" "$rollup" | head -c 4096)"
+    fi
 fi
 
 # Backfill is done. Lock-on-Complete VAP freezes spec the instant this
 # PATCH returns, so there is no spec-change window between commit and the
 # cleanup below. If the status PATCH fails, this execution exits non-zero and
 # leaves the runtime + CronJob in place so a future run can retry safely.
-echo "phase 3: backfill complete; committing and cleaning up"
+echo "phase 3: backfill terminal ($terminal_phase); committing and cleaning up"
 patch_body="$(jq -nc \
+    --arg phase "$terminal_phase" \
     --arg cc "$CONFIG_CHECKSUM" \
     --arg cr "$CHECKSUM_FOR_REPLAYER" \
     --argjson backfill "$(make_backfill_status_patch "$status" "$status_message" "$status_json" | jq -c '.status.documentBackfill')" \
-    '{status:{phase:"Completed",configChecksum:$cc,checksumForReplayer:$cr,documentBackfill:$backfill}}')"
+    '{status:{phase:$phase,configChecksum:$cc,checksumForReplayer:$cr,documentBackfill:$backfill}}')"
 kubectl patch snapshotmigration "$SNAPSHOT_MIGRATION_NAME" \
     --subresource=status --type=merge -p "$patch_body"
 

@@ -18,6 +18,7 @@ def test_eks_application_metrics_keep_prometheus_cumulative_and_awsemf_instance_
     assert pipelines["metrics/app"] == {
         "receivers": ["otlp"],
         "processors": [
+            "filter/skip-rfs-tier-metrics",
             "batch",
             "resource/remove_default_attributes",
             "resource/metrics",
@@ -44,7 +45,7 @@ def test_eks_application_metrics_keep_prometheus_cumulative_and_awsemf_instance_
     assert "resource_to_telemetry_conversion" not in collector["exporters"]["prometheus"]
 
 
-def test_eks_emf_metric_names_and_dimensions_are_unchanged():
+def test_eks_emf_preserves_capture_replay_and_kafka_dimensions():
     collector = _load_collector_config(CHART_DIR / "valuesEks.yaml")
 
     assert collector["exporters"]["awsemf/app"] == {
@@ -52,39 +53,21 @@ def test_eks_emf_metric_names_and_dimensions_are_unchanged():
         "dimension_rollup_option": "NoDimensionRollup",
         "resource_to_telemetry_conversion": {"enabled": True},
     }
-    assert collector["exporters"]["awsemf/cadvisor"] == {
-        "namespace": "OpenSearchMigrations",
-        "dimension_rollup_option": "NoDimensionRollup",
-        "metric_declarations": [
-            {
-                "dimensions": [["container", "namespace"], ["container", "namespace", "pod"]],
-                "metric_name_selectors": ["container_memory_working_set_bytes"],
-            },
-            {
-                "dimensions": [["container", "namespace", "pod"]],
-                "metric_name_selectors": [
-                    "container_spec_cpu_quota",
-                    "container_spec_cpu_period",
-                    "container_spec_memory_limit_bytes",
-                    "container_cpu_cfs_periods_total",
-                    "container_cpu_cfs_throttled_periods_total",
-                    "container_cpu_cfs_throttled_seconds_total",
-                ],
-            },
-            {
-                "dimensions": [["container", "namespace"]],
-                "metric_name_selectors": ["container_cpu_usage_seconds_total"],
-            },
-            {
-                "dimensions": [["container", "namespace", "pod", "device"]],
-                "label_matchers": [{"label_names": ["container"], "regex": "^kafka$"}],
-                "metric_name_selectors": [
-                    "container_fs_writes_bytes_total",
-                    "container_fs_reads_bytes_total",
-                ],
-            },
-        ],
-    }
+    exporter = collector["exporters"]["awsemf/cadvisor"]
+    assert exporter["namespace"] == "OpenSearchMigrations"
+    assert exporter["dimension_rollup_option"] == "NoDimensionRollup"
+    declarations = {metric: decl for decl in exporter["metric_declarations"]
+                    for metric in decl["metric_name_selectors"]}
+    assert declarations["container_memory_working_set_bytes"]["dimensions"] == [
+        ["container", "namespace"], ["container", "namespace", "pod"]]
+    for name in ("container_spec_cpu_quota", "container_spec_cpu_period", "container_spec_memory_limit_bytes",
+                 "container_cpu_cfs_periods_total", "container_cpu_cfs_throttled_periods_total",
+                 "container_cpu_cfs_throttled_seconds_total"):
+        assert declarations[name]["dimensions"] == [["container", "namespace", "pod"]]
+    assert declarations["container_cpu_usage_seconds_total"]["dimensions"] == [["container", "namespace"]]
+    for name in ("container_fs_writes_bytes_total", "container_fs_reads_bytes_total"):
+        assert declarations[name]["dimensions"] == [["container", "namespace", "pod", "device"]]
+        assert declarations[name]["label_matchers"] == [{"label_names": ["container"], "regex": "^kafka$"}]
     pipelines = collector["service"]["pipelines"]
     assert pipelines["metrics/cadvisor"] == {
         "receivers": ["prometheus"],
@@ -114,17 +97,31 @@ def test_eks_cadvisor_cpu_is_summed_per_node_from_deltas_before_emf():
             "match_type": "strict",
         },
     }
-    assert collector["processors"]["metricstransform/cadvisor"] == {
-        "transforms": [{
-            "include": "container_cpu_usage_seconds_total",
-            "action": "update",
-            "operations": [{
-                "action": "aggregate_labels",
-                "label_set": ["container", "namespace"],
-                "aggregation_type": "sum",
-            }],
-        }],
-    }
+    transforms = collector["processors"]["metricstransform/cadvisor"]["transforms"]
+    cpu = [t for t in transforms if t["include"] == "container_cpu_usage_seconds_total"]
+    assert [(t["action"], t["operations"]) for t in cpu] == [
+        ("update", [{"action": "aggregate_labels", "label_set": ["container", "namespace"],
+                     "aggregation_type": "sum"}]),
+    ]
+
+
+def test_tier_event_export_retains_writer_identity_outside_cloudwatch_dimensions():
+    collector = _load_collector_config(CHART_DIR / "valuesEks.yaml")
+    pipeline = collector["service"]["pipelines"]["metrics/rfs-tier"]
+    assert "service.instance.id" not in _deleted_resource_keys(collector, pipeline)
+    assert "cumulativetodelta" in pipeline["processors"]
+    exporter = collector["exporters"]["awsemf/rfs-tier"]
+    assert exporter["metric_declarations"][0]["dimensions"] == [["OTelLib", "qualifier", "tier"]]
+    assert exporter["log_stream_name"] == "rfs-tier"
+
+
+def test_eks_fleet_snapshots_have_one_series_per_tier_and_no_pod_dimensions():
+    collector = _load_collector_config(CHART_DIR / "valuesEks.yaml")
+    declarations = collector["exporters"]["awsemf/rfs-tier"]["metric_declarations"]
+    assert declarations[1]["dimensions"] == [["namespace", "tier"]]
+    assert declarations[2]["dimensions"] == [["namespace"]]
+    assert "rfsFleetResources" in str(collector["processors"]["filter/only-rfs-tier-metrics"])
+    assert "rfsFleetResources" in str(collector["processors"]["filter/skip-rfs-tier-metrics"])
 
 
 def test_docker_awsemf_configs_remove_instance_identity_before_export():

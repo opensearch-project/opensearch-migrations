@@ -1,9 +1,11 @@
+import os
 from datetime import datetime, timezone
 from unittest.mock import Mock, patch
 
 from integ_test.metric_operations import (
     CW_NAMESPACE,
     _any_candidate_has_recent_data,
+    _cloudwatch_client,
     assert_cloudwatch_capture_replay_metrics_for_workflow_run,
 )
 
@@ -158,6 +160,22 @@ def test_any_candidate_returns_false_when_matching_dimensions_have_no_data():
         lookback_minutes=20,
     )
     assert client.metric_data_calls == [("pipelineDocsMigrated", _dimension_key(matching_dimensions))]
+
+
+def test_cloudwatch_session_ignores_only_localstack_env_credentials(monkeypatch):
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "test")
+    monkeypatch.setenv("AWS_CONTAINER_CREDENTIALS_FULL_URI", "http://169.254.170.23/v1/credentials")
+
+    def check_session(botocore_session):
+        methods = [provider.METHOD for provider in botocore_session.get_component("credential_provider").providers]
+        assert "env" not in methods
+        assert "container-role" in methods
+        assert os.environ["AWS_ACCESS_KEY_ID"] == "test"
+        return Mock()
+
+    with patch("integ_test.metric_operations.boto3.Session", side_effect=check_session) as session:
+        _cloudwatch_client("us-east-1")
+    session.assert_called_once()
 
 
 def test_cloudwatch_workflow_assertion_prefers_backfill_completion_metrics():

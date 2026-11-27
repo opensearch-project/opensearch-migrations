@@ -22,15 +22,12 @@ import re
 import sys
 
 NS = "OpenSearchMigrations"
-Q = "MA_QUALIFIER"
-RFS_SESSION = "RFS_SESSION"
 R = "REGION"
 RI = "$__rate_interval"
 MIB = 1048576
 RFS = "documentMigration"
 WC = "workCoordination"
 CONTAINER = "bulk-loader"
-FLEET_CAPACITY_LABEL = "% (fleet capacity)"
 DOCS_PER_SECOND_UNIT = "docs/s"
 ATTEMPTS_PER_SECOND_UNIT = "attempts/s"
 PER_MINUTE_UNIT = "per min"
@@ -89,7 +86,7 @@ METRICS = {
     "bulkDocsWaitingOnTarget": ("count", "gauge", RFS, ()),
     "bulkDocsTargetUnavailable": ("count", "counter", RFS, ("reason",)),
     "bulkDocumentsFailed": ("count", "counter", RFS, ("failureClass",)),
-    "rfsWorkerPhase": ("count", "gauge", RFS, ("phase",)),
+    "rfsWorkerPhase": ("count", "gauge", RFS, ("phase", "tier")),
     "bulkAttemptGap": ("milliseconds", "histogram", RFS, ()),
     "bulkAttemptsPerBatch": ("count", "histogram", RFS, ()),
     "bulkItemErrors": ("count", "counter", RFS, ("errorType", "retryable")),
@@ -136,6 +133,15 @@ def prom_dedup(name, suffix="", where=None, rate=False, offset=None):
     metric = f"{prom_name(name, suffix)}{sel(name, where)}"
     if offset:
         metric += f" offset {offset}"
+    if rate and name in {"bulkAttempts", "bulkAttemptDuration", "bulkItemErrors", "bulkRequestDocuments",
+                         "bulkRequestBytes", "bulkRequestSentBytes", "bulkDocsTargetUnavailable"}:
+        # A worker can complete all its requests in its first export. These cumulative series are
+        # keyed by process lifetime. Subtract the prior reading when present and count the first
+        # reading in full. Deduplicate before subtraction so a collector handoff counts once.
+        group = f"max by ({','.join(labels)})"
+        current = f"{group} (last_over_time({metric}[{RI}]))"
+        previous = f"{group} ({metric} offset {RI})"
+        return f"((({current} - {previous}) or {current}) / ($__rate_interval_ms / 1000))"
     if rate:
         metric = f"rate({metric}[{RI}])"
     return f"max by ({','.join(labels)}) ({metric})"
@@ -158,20 +164,21 @@ class W:
         self.n += 1
         return f"{p}{self.n}"
 
-    def m(self, name, stat, period=None):
-        i = self._id("m")
-        lib = METRICS[name][2]
-        opts = {"id": i, "stat": stat, "visible": False, "region": R}
-        if period:
-            opts["period"] = period
-        self.rows.append([NS, name, "OTelLib", lib, "qualifier", Q, opts])
-        return i
+    def m(self, name, stat):
+        """One aggregated series for a metric with no attributes: a SEARCH across every qualifier
+        folded to a single line. Emission stays partitioned by the qualifier dimension; only the
+        dashboard view is global (per-resource dashboards can filter the same metrics later)."""
+        agg = {"Sum": "SUM", "SampleCount": "SUM", "Maximum": "MAX",
+               "Minimum": "MIN", "Average": "AVG"}[stat]
+        return self.e(f"{agg}({self.search(name, stat)})", "", visible=False)
 
     def search(self, name, stat, where=None):
+        # The qualifier dimension stays in the schema (it is on every emitted series) but carries
+        # no value filter, so the dashboard reads globally across deployments.
         _, _, lib, attrs = METRICS[name]
         dims = ",".join(["OTelLib", *sorted(attrs), "qualifier"])
         terms = "".join(f' {k}="{v}"' for k, v in (where or {}).items())
-        return f"SEARCH('{{{NS},{dims}}} MetricName=\"{name}\" OTelLib=\"{lib}\" qualifier=\"{Q}\"{terms}', '{stat}', 60)"
+        return f"SEARCH('{{{NS},{dims}}} MetricName=\"{name}\" OTelLib=\"{lib}\"{terms}', '{stat}', 60)"
 
     def e(self, expr, label, visible=True):
         i = self._id("e")
@@ -221,10 +228,10 @@ class Rate:
                 # CloudWatch does not expand PROP dynamic labels after a SEARCH array is used in metric math.
                 # Leave the expression label empty so it retains each result's native dimension label, or add a
                 # short static prefix when two searches need to distinguish otherwise similar result sets.
-                return [w.e(f"{q} / 60{scale}", self.cw_label or "")]
+                return [w.e(f"REMOVE_EMPTY({q} / 60{scale})", self.cw_label or "")]
             return [w.e(f"SUM({q}) / 60{scale}", self.label)]
         s = w.m(self.name, "SampleCount" if METRICS[self.name][1] == "histogram" else "Sum")
-        return [w.e(f"FILL({s}, 0) / PERIOD({s}){scale}", self.label)]
+        return [w.e(f"FILL({s}, 0) / 60{scale}", self.label)]
 
 
 class TrafficBackedAggregateRate(Rate):
@@ -238,8 +245,20 @@ class TrafficBackedAggregateRate(Rate):
         super().__init__(*args, **kwargs)
         self.traffic_metric = traffic_metric
 
+    def prom(self):
+        targets = super().prom()
+        if self.by:
+            # No error-type series exists until a bulk item fails. Show a healthy zero only
+            # while requests are being made, retaining individual error types when available.
+            expr, label = targets[0]
+            traffic = prom_dedup(self.traffic_metric, rate=True)
+            zero = f'label_replace(0 * (sum({traffic}) > 0), "{self.by}", "none", "", "")'
+            return [(f"({expr}) or on() {zero}", label)]
+        return targets
+
     def cw(self, w):
-        q = w.search(self.name, "Sum", self.where)
+        stat = "SampleCount" if METRICS[self.name][1] == "histogram" else "Sum"
+        q = w.search(self.name, stat, self.where)
         traffic = w.search(self.traffic_metric, "Sum")
         f = self._factor()
         scale = "" if f == 1 else f" * {f:g}"
@@ -260,7 +279,7 @@ class HistogramSumRate:
 
     def cw(self, w):
         metric = w.m(self.name, "Sum")
-        expression = f"FILL({metric}, 0) / PERIOD({metric})"
+        expression = f"FILL({metric}, 0) / 60"
         if self.scale != 1:
             expression = f"{expression} / {self.scale}"
         return [w.e(expression, self.label)]
@@ -287,7 +306,7 @@ class Gauge:
             return []
         if self.agg == "sum":
             s = w.m(self.name, "Sum")
-            return [w.e(self._scaled(f"{s} / PERIOD({s})"), self.label)]
+            return [w.e(self._scaled(f"{s} / 60"), self.label)]
         stat = {"max": "Maximum", "min": "Minimum", "avg": "Average"}[self.agg]
         return [w.e(self._scaled(w.m(self.name, stat)), self.label)]
 
@@ -403,14 +422,11 @@ class WorkerPhases:
         ]
 
     def cw(self, w):
-        return [
-            w.e(
-                f"SUM(SEARCH('{{{NS},OTelLib,phase,qualifier}} MetricName=\"rfsWorkerPhase\" OTelLib=\"{RFS}\" "
-                f"qualifier=\"{Q}\" phase=\"{phase}\"', 'Sum', 60)) / 60",
-                label,
-            )
-            for phase, label in self.PHASES
-        ]
+        out = []
+        for phase, label in self.PHASES:
+            search = w.search("rfsWorkerPhase", "Sum", {"phase": phase})
+            out.append(w.e(f"SUM({search}) / 60", label))
+        return out
 
 
 class AttemptOutcomeGroups:
@@ -427,17 +443,16 @@ class AttemptOutcomeGroups:
 
     @staticmethod
     def _prom_term(attempt, outcome):
-        attempt_selector = "" if attempt == "*" else f',attempt="{attempt}"'
-        metric = (
-            f'{prom_name("bulkAttempts")}{{otel_scope_name="{RFS}"{attempt_selector},outcome="{outcome}"}}'
-        )
-        return f"sum(max by (exported_instance,attempt,outcome) (rate({metric}[{RI}])))"
+        where = {"outcome": outcome}
+        if attempt != "*":
+            where["attempt"] = attempt
+        return f"(sum({prom_dedup('bulkAttempts', where=where, rate=True)}) or vector(0))"
 
     def prom(self):
         series = []
         for label, terms in self.GROUPS:
             expression = " + ".join(self._prom_term(attempt, outcome) for attempt, outcome in terms)
-            series.append((f"({expression}) or vector(0)", label))
+            series.append((expression, label))
         return series
 
     def cw(self, w):
@@ -449,6 +464,7 @@ class AttemptOutcomeGroups:
                 if attempt != "*":
                     where["attempt"] = attempt
                 searches.append(f"SUM({w.search('bulkAttempts', 'Sum', where)})")
+            searches.append(f"0 * SUM({w.search('rfsWorkerPhase', 'SampleCount')})")
             series.append(w.e(f"({' + '.join(searches)}) / 60", label))
         return series
 
@@ -482,72 +498,109 @@ class LimitUtilizationBands:
         ]
 
 
-class ContainerUtilization:
-    """CPU or memory usage as a percentage of the RFS containers' configured limits."""
+def _cw_container_row(w, name, stat):
+    """One exact, node-summed [container, namespace] cadvisor row for the RFS bulk loader."""
+    i = w._id("m")
+    w.rows.append([NS, name, "container", CONTAINER, "namespace", "ma",
+                   {"id": i, "stat": stat, "visible": False, "region": R}])
+    return i
 
-    def __init__(self, what, agg):
-        self.what, self.agg = what, agg
+
+GIB = 1073741824
+
+
+CW_TIER_LABEL = "tier ${PROP('Dim.tier')}"
+ORDERED_CW_TIERS = range(10)
+LIMIT_ABOVE_USAGE = "Limit above measured usage"
+LIMIT_COLOR = "#879596"
+POD_SUFFIX = "-[a-z0-9]{1,10}-[a-z0-9]{5}"
+TIER_POD_PATTERN = ".*-rfs-t([0-9]+)" + POD_SUFFIX
+
+
+def _by_pod_tier(pods):
+    # kube-state-metrics and the non-EKS kubelet scrape have pod names on both old and tiered workers.
+    with_default = f'label_replace({pods}, "tier", "0", "pod", ".*")'
+    return f'label_replace({with_default}, "tier", "$1", "pod", "{TIER_POD_PATTERN}")'
+
+
+def _fleet_tiers(name, tier_filter=""):
+    return (f"SEARCH('{{{NS},namespace,tier}} MetricName=\"rfsFleet{name}\" "
+            f"namespace=\"placeholder-namespace\"{tier_filter}', 'Sum', 60)")
+
+
+def _observed_tiers(w, name, scale=1):
+    census = _fleet_metric(w, "CensusSamples")
+    # CloudWatch's interactive stacked legend reads metric rows from last to first.
+    # An exact SEARCH contributes no line for a tier that hasn't reported. Keep an
+    # open-ended search for larger ladders as well, disjoint from the ordered rows.
+    tiers = [f'tier="{tier}"' for tier in ORDERED_CW_TIERS]
+    filters = [f" NOT ({' OR '.join(tiers)})", *(f" {term}" for term in reversed(tiers))]
+    lines = []
+    for tier_filter in filters:
+        values = _fleet_tiers(name, tier_filter)
+        if scale != 1:
+            values += f" / {scale}"
+        # Backfill a newly observed tier with zeros only when the fleet census ran.
+        lines.append(w.e(f"FILL({values}, IF({census} > 0, 0))", CW_TIER_LABEL))
+    return lines
+
+
+def _fleet_metric(w, name, label=""):
+    key = w._id("m")
+    options = {"id": key, "stat": "Sum", "visible": bool(label), "region": R}
+    if label:
+        options["label"] = label
+    w.rows.append([NS, "rfsFleet" + name, "namespace", "placeholder-namespace", options])
+    return key
+
+
+class FleetUsedVsAllocated:
+    def __init__(self, resource):
+        self.resource = resource
+        self.scale = GIB if resource == "memory" else 1
+
+    def pod_usage(self):
+        labels = (f'job="otel-collector",exported_job=~"cadvisor|kubelet-cadvisor",namespace="$namespace",'
+                  f'container="{CONTAINER}",image!=""')
+        if self.resource == "cpu":
+            return f"max by (pod) (rate(container_cpu_usage_seconds_total{{{labels}}}[{RI}]))"
+        metric = f"container_memory_working_set_bytes{{{labels}}}"
+        newest = f"topk by (pod) (1, timestamp({metric}))"
+        return f"max by (pod) ({metric} and ({newest} > time() - 60))"
+
+    def running(self):
+        return (f'max by (pod) (kube_pod_container_status_running{{namespace="$namespace",'
+                f'container="{CONTAINER}"}}) == 1')
+
+    def limits(self):
+        return (f'max by (pod) (kube_pod_container_resource_limits{{namespace="$namespace",'
+                f'container="{CONTAINER}",resource="{self.resource}"}}) and on (pod) ({self.running()})')
 
     def prom(self):
-        s = (f'{{job="otel-collector",exported_job=~"cadvisor|kubelet-cadvisor",namespace="$namespace",'
-             f'container="{CONTAINER}",container!="POD",image!=""}}')
-        if self.what == "cpu":
-            usage = f"max by (pod) (rate(container_cpu_usage_seconds_total{s}[{RI}]))"
-            quota = f"max by (pod) (container_spec_cpu_quota{s})"
-            period = f"max by (pod) (container_spec_cpu_period{s})"
-            limit = f"({quota}) / ({period})"
-        else:
-            usage = f"max by (pod) (container_memory_working_set_bytes{s})"
-            limit = f"max by (pod) (container_spec_memory_limit_bytes{s})"
-        if self.agg == "sum":
-            expression = f"100 * sum({usage}) / sum({limit})"
-            label = FLEET_CAPACITY_LABEL
-        else:
-            expression = f"100 * max(({usage}) / ({limit}))"
-            label = "% (hottest pod)"
-        return [(expression, label)]
-
-    @staticmethod
-    def _cw_search(name, stat):
-        return (f"SEARCH('{{{NS},container,namespace,pod}} MetricName=\"{name}\" "
-                f"container=\"{CONTAINER}\" namespace=\"ma\" {RFS_SESSION}', '{stat}', 60)")
+        usage = self.pod_usage()
+        running_usage = f"({usage}) and on (pod) ({self.running()})"
+        limits = self.limits()
+        # If there is no usage sample for a running pod, its full limit lies above measured usage.
+        remainder = f"clamp_min(({limits}) - on (pod) ({usage}), 0) or on (pod) ({limits})"
+        return [(f"sum by (tier) ({_by_pod_tier(running_usage)}) / {self.scale}", "tier {{tier}} used"),
+                (f"sum({remainder}) / {self.scale}", LIMIT_ABOVE_USAGE)]
 
     def cw(self, w):
-        if self.what == "cpu" and self.agg == "max":
-            # The EKS CloudWatch exporter aggregates CPU by node to avoid colliding pod datapoints. Grafana can
-            # still calculate the hottest pod from the unaggregated Prometheus copy.
-            return []
+        resource = self.resource.capitalize()
+        tiers = _observed_tiers(w, resource + "Used", self.scale)
+        unused = _fleet_metric(w, resource + "Unused")
+        awaiting = _fleet_metric(w, resource + "AwaitingSample")
+        # Both inputs come from the same fleet census. Draw the band only for a complete pair.
+        remainder = f"IF(DATAPOINT_COUNT([{unused},{awaiting}]) == 2, ({unused} + {awaiting}) / {self.scale})"
+        band = w.e(remainder, LIMIT_ABOVE_USAGE)
+        w.rows[-1][0]["color"] = LIMIT_COLOR
+        return [*tiers, band]
 
-        name = ("container_cpu_usage_seconds_total"
-                if self.what == "cpu" else "container_memory_working_set_bytes")
-        if self.what == "cpu":
-            # The collector intentionally aggregates this counter to [container, namespace] before EMF export.
-            # Keep it as an exact metric row: unlike the per-pod capacity metrics below, it has neither a pod
-            # dimension nor a run qualifier to use in a SEARCH expression.
-            usage = w._id("m")
-            w.rows.append([
-                NS, name, "container", CONTAINER, "namespace", "ma",
-                {"id": usage, "stat": "Sum", "visible": False, "region": R},
-            ])
-            quota = self._cw_search("container_spec_cpu_quota", "Average")
-            period = self._cw_search("container_spec_cpu_period", "Average")
-            # CPU quota is per pod while the CFS period is a common divisor. Summing both would cancel the pod
-            # count and leave one pod's limit; sum all quotas and divide by the average period for fleet capacity.
-            limit = f"SUM({quota}) / AVG({period})"
-            return [w.e(f"100 * ({usage} / PERIOD({usage})) / ({limit})", FLEET_CAPACITY_LABEL)]
 
-        stat = "Average" if self.agg == "sum" else "Maximum"
-        usage_search = self._cw_search(name, stat)
-        memory_limit = self._cw_search("container_spec_memory_limit_bytes", "Average")
-        if self.agg == "sum":
-            usage = f"SUM({usage_search})"
-            limit = f"SUM({memory_limit})"
-            label = FLEET_CAPACITY_LABEL
-        else:
-            usage = f"MAX({usage_search})"
-            limit = f"MAX({memory_limit})"
-            label = "% (hottest pod)"
-        return [w.e(f"IF(({limit}) > 0, 100 * ({usage}) / ({limit}))", label)]
+class HottestPod(FleetUsedVsAllocated):
+    def prom(self):
+        ratio = f"({self.pod_usage()}) / on (pod) (({self.limits()}) > 0)"
+        return [(f"100 * topk(1, {ratio})", "{{pod}}")]
 
 
 class ContainerCpuThrottling:
@@ -561,17 +614,9 @@ class ContainerCpuThrottling:
         return [(f"100 * ({throttled}) / ({periods})", "% throttled periods")]
 
     def cw(self, w):
-        dimensions = f"{{{NS},container,namespace,pod}}"
-        common = f'container="{CONTAINER}" namespace="ma" {RFS_SESSION}'
-        throttled = (
-            f"SUM(SEARCH('{dimensions} MetricName=\"container_cpu_cfs_throttled_periods_total\" "
-            f"{common}', 'Sum', 60))"
-        )
-        periods = (
-            f"SUM(SEARCH('{dimensions} MetricName=\"container_cpu_cfs_periods_total\" "
-            f"{common}', 'Sum', 60))"
-        )
-        return [w.e(f"100 * ({throttled}) / ({periods})", "% throttled periods")]
+        throttled = _cw_container_row(w, "container_cpu_cfs_throttled_periods_total_sum", "Sum")
+        periods = _cw_container_row(w, "container_cpu_cfs_periods_total_sum", "Sum")
+        return [w.e(f"IF({periods} > 0, 100 * {throttled} / {periods})", "% throttled periods")]
 
 
 class Domain:
@@ -610,23 +655,41 @@ class Right:
         return ids
 
 
+class WorkersByTier:
+    def prom(self):
+        running = f'max by (pod) (kube_pod_container_status_running{{namespace="$namespace",container="{CONTAINER}"}})'
+        return [(f"sum by (tier) ({_by_pod_tier(running)})", "tier {{tier}}")]
+
+    def cw(self, w):
+        return _observed_tiers(w, "Workers")
+
+
+class FleetSampling:
+    def cw(self, w):
+        return [_fleet_metric(w, "CensusSamples", "fleet snapshots"),
+                _fleet_metric(w, "CpuMissingWorkers", "workers awaiting CPU"),
+                _fleet_metric(w, "MemoryMissingWorkers", "workers awaiting memory")]
+
+
 # --- panels --------------------------------------------------------------------------------------------------
+
 
 class Panel:
     def __init__(self, title, desc, unit, series, stacked=False, cw_only=False, grafana_only=False,
-                 right_unit=None, transformations=None, min_interval=None):
+                 right_unit=None, transformations=None, min_interval=None, show_bulk_activity=False):
         self.title, self.desc, self.unit, self.series, self.stacked = title, desc, unit, series, stacked
         self.cw_only, self.grafana_only, self.right_unit = cw_only, grafana_only, right_unit
         self.transformations, self.min_interval = transformations or [], min_interval
+        self.show_bulk_activity = show_bulk_activity
 
 
 SECTIONS = [
     # Three aligned columns answer the first operator questions: result, worker capacity, and target feedback.
-    ("Operator overview", False, [
-        Panel("Documents migrated per second",
-              "Documents successfully written to the target, fleet total per second. A sustained drop matters only "
-              "after comparing it with the worker-capacity and target-feedback panels in the same row.",
-              DOCS_PER_SECOND_UNIT, [Rate("pipelineDocsMigrated", "Documents/s")]),
+    ("Migration overview", False, [
+        Panel("Source documents processed per second",
+              "Source documents in batches that advanced, including documents recorded as failures. Compare "
+              "with Failed documents per minute to see whether documents need attention.",
+              DOCS_PER_SECOND_UNIT, [Rate("pipelineDocsMigrated", "Source processed")]),
         Panel("Workers by phase",
               "Number of RFS worker processes in each lifecycle phase. The stack is ordered from the first phase at "
               "the bottom to the last at the top: starting, acquiring work, downloading and unpacking a shard, "
@@ -640,17 +703,16 @@ SECTIONS = [
               "Bulk HTTP requests per second, grouped into operator-facing outcomes. The stack is ordered with "
               "requests accepted on the first try at the bottom, then requests accepted after retry, item errors, "
               "target throttling, no response, and other errors. A growing upper portion means more request work is "
-              "being repeated or rejected. The detailed first-versus-retry outcome matrix is in the expert section.",
+              "being repeated or rejected. The detailed first-versus-retry outcome matrix is in Flow-control internals.",
               ATTEMPTS_PER_SECOND_UNIT, [AttemptOutcomeGroups()], stacked=True),
-        Panel("Documents requiring manual action (per minute)",
-              "Documents that did not migrate and were recorded as terminal failures, by failure class. "
-              "NON_RETRYABLE is a document/request problem that retrying cannot fix; RETRYABLE_EXHAUSTED was given "
-              "up after its retry policy. These are the documents an operator must inspect and replay or correct. "
-              "Target throttles and temporary unavailability do not appear here unless a document ultimately fails.",
+        Panel("Failed documents per minute",
+              "Documents RFS stopped trying to migrate. The stack shows the total that need inspection. "
+              "A non-retryable error requires a correction. For documents that reached the retry limit, "
+              "see the reason breakdown in Retries and document failures.",
               PER_MINUTE_UNIT, [
-                  Rate("bulkDocumentsFailed", "Cannot be retried",
+                  Rate("bulkDocumentsFailed", "Non-retryable error",
                        where={"failureClass": "NON_RETRYABLE"}, per_min=True),
-                  Rate("bulkDocumentsFailed", "Retries exhausted",
+                  Rate("bulkDocumentsFailed", "Retry limit reached",
                        where={"failureClass": "RETRYABLE_EXHAUSTED"}, per_min=True),
               ], stacked=True),
         Panel("Workers by connection-limit utilization",
@@ -675,13 +737,12 @@ SECTIONS = [
                        where={"signal": "admission_rejected"}, per_min=True),
                   Rate("bulkLimitCuts", "Response timeout", where={"signal": "timeout"}, per_min=True),
               ], stacked=True),
-        Panel("Documents sent vs migrated per second",
-              "Documents included in bulk requests on every attempt, documents successfully migrated, and the "
-              "subset sent again during retries. Sent can briefly lead migrated while requests are in flight. "
-              "Sustained re-sends or a widening sent-versus-migrated gap means retries or failures are consuming "
-              "target capacity.",
+        Panel("Source progress and target sends (docs/s)",
+              "Sent counts target operations on every bulk attempt, including re-sends. Source processed counts "
+              "source documents as their batches advance, including recorded failures. Retries, transformations "
+              "and requests still in flight can all cause these rates to differ.",
               DOCS_PER_SECOND_UNIT, [HistogramSumRate("bulkRequestDocuments", "Sent"),
-                                     Rate("pipelineDocsMigrated", "Migrated"),
+                                     Rate("pipelineDocsMigrated", "Source processed"),
                                      Rate("bulkDocsResent", "Re-sent")]),
         Panel("Requests in flight vs adaptive allowance",
               "Fleet totals for bulk requests currently in flight, the workers' current adaptive allowances, their "
@@ -701,24 +762,22 @@ SECTIONS = [
               "succeed; a sustained nonzero value means migration work is being held for target recovery.",
               "docs", [Gauge("bulkDocsWaitingOnTarget", "Paused documents")]),
     ]),
-    ("Throughput and request shape", False, [
+    ("Throughput and worker resources", False, [
         Panel("Document and bulk request bytes (MiB/s)",
-              "Three different byte boundaries, shown as absolute rates. Migrated document source is the original "
-              "document-source payload successfully advanced by the pipeline; it excludes bulk action metadata and "
-              "NDJSON framing. Uncompressed bulk NDJSON is the assembled request body for every attempt, including "
+              "Three different byte boundaries, shown as absolute rates. Processed source bytes are the original "
+              "payload of source documents in batches that advanced, including recorded failures. Uncompressed "
+              "bulk NDJSON is the assembled request body for every attempt, including "
               "metadata, framing, and retries. Bulk request body sent is that same body after optional compression. "
               "Compare the two request lines to see compression; compare document send/re-send rates above to "
               "separate retries from request overhead.",
-              MIB_PER_SECOND_UNIT, [Rate("pipelineBytesMigrated", "Migrated document source", scale=MIB),
+              MIB_PER_SECOND_UNIT, [Rate("pipelineBytesMigrated", "Processed source bytes", scale=MIB),
                                     HistogramSumRate("bulkRequestBytes", "Uncompressed bulk NDJSON", scale=MIB),
                                     HistogramSumRate("bulkRequestSentBytes", "Bulk request body sent", scale=MIB)]),
-        Panel("RFS CPU utilization (%)",
-              "Bulk-loader CPU usage divided by its configured CPU limit. This panel and RFS memory are vertically "
-              "aligned under the request allowance panel so worker resource saturation can be compared with unused "
-              "allowance. Both dashboards show the fleet's share of total configured CPU; Grafana also shows the "
-              "hottest pod. CloudWatch cannot calculate the hottest pod because EKS aggregates CPU by node before "
-              "export.",
-              "percent", [ContainerUtilization("cpu", "sum"), ContainerUtilization("cpu", "max")]),
+        Panel("RFS CPU used vs allocated (cores)",
+              "Average CPU cores consumed by workers in each tier. The gray band adds the portion of each "
+              "running worker’s CPU limit above its measured usage. CPU requests determine placement. Compare throttling and "
+              "throughput to diagnose a CPU bottleneck.",
+              "cores", [FleetUsedVsAllocated("cpu")], stacked=True),
         Panel("Bulk request size",
               "Mean documents per bulk request and mean KiB per request before and after compression. Falling request "
               "sizes can explain lower MiB/s even when request rate is steady; retries and batch splits can change "
@@ -741,12 +800,113 @@ SECTIONS = [
                   },
               }],
               min_interval="1m"),
-        Panel("RFS memory utilization (%)",
-              "Bulk-loader working-set memory divided by its configured memory limit: fleet capacity and hottest "
-              "pod. It is vertically aligned with RFS CPU and the request allowance panel above.",
-              "percent", [ContainerUtilization("mem", "sum"), ContainerUtilization("mem", "max")]),
+        Panel("RFS memory used vs allocated (GiB)",
+              "Sampled container working set by tier. The gray band adds the portion of each running worker’s "
+              "memory limit above its measured working set. A short-lived peak or a single OOM can occur between samples.",
+              "GiB", [FleetUsedVsAllocated("memory")], stacked=True),
+        Panel("Workers by memory tier",
+              "Running bulk-loader containers, including supervisors between JVM launches. A pending container "
+              "appears when it starts. Workers without memory scaling contribute to tier 0.",
+              "count", [WorkersByTier()], stacked=True),
     ]),
-    ("Pipeline performance diagnosis", False, [
+    ("Target health and response", False, [
+        Panel("Bulk request duration seen by RFS (s)",
+              "Time workers spend waiting for a bulk HTTP response or transport error. Compare the mean with "
+              "the configured response timeout. Grafana also shows p50 and p99.",
+              "s", [Mean("bulkAttemptDuration", "Mean", scale=1000),
+                    Quantile("bulkAttemptDuration", "p50", q=0.5, scale=1000),
+                    Quantile("bulkAttemptDuration", "p99", q=0.99, scale=1000)]),
+        Panel("Target-unavailable document attempts per minute",
+              "Document attempts that could not be written because the target was unavailable, grouped by reason: "
+              "a write block, unavailable shards, HTTP 503, or connection failure/reset. This does not include HTTP "
+              "429 throttles; correlate the overview's paused-document gauge with its limit-cut panel for those. "
+              "A document is counted again on each attempt, so this is refusal volume rather than a "
+              "distinct-document count.",
+              PER_MINUTE_UNIT, [Rate("bulkDocsTargetUnavailable", "{by}", by="reason", per_min=True)], stacked=True),
+        Panel("Target indexing rate and write queue",
+              "Fleet-total AWS/ES IndexingRate (operations per minute) and, on the right axis, the write thread "
+              "pool's queue (maximum over nodes) and rejections. Indexing-pressure rejections (429s for too many "
+              "bytes in flight) appear in Target request outcomes and the domain's 4xx count.",
+              "ops/min", [Domain("IndexingRate", "Sum", "Indexing rate (fleet ops/min)"),
+                          Right(Domain("ThreadpoolWriteQueue", "Maximum", "Write queue (max)")),
+                          Right(Domain("ThreadpoolWriteRejected", "Sum", "Write rejected"))],
+              cw_only=True, right_unit="count"),
+        Panel("Target CPU and JVM pressure (%)",
+              "AWS/ES CPUUtilization and JVMMemoryPressure, maximum over nodes.",
+              "percent", [Domain("CPUUtilization", "Maximum", "CPU (max node)"),
+                          Domain("JVMMemoryPressure", "Maximum", "JVM pressure (max node)")], cw_only=True),
+        Panel("Target latency and HTTP status codes (all clients)",
+              "AWS/ES IndexingLatency (ms per operation) and, on the right axis, 4xx and 5xx responses per minute, "
+              "from every client. Bulk item errors such as cluster_block_exception are carried inside an HTTP 200 "
+              "bulk response. The Item errors returned by the target panel counts those errors.",
+              "ms", [Domain("IndexingLatency", "Average", "Indexing latency (ms)"),
+                     Right(Domain("4xx", "Sum", "4xx")), Right(Domain("5xx", "Sum", "5xx"))],
+              cw_only=True, right_unit=PER_MINUTE_UNIT),
+        Panel("Target searchable documents (thousands) and used space (GB)",
+              "AWS/ES SearchableDocuments and, on the right axis, ClusterUsedSpace.",
+              "thousands of docs",
+              [Domain("SearchableDocuments", "Maximum", "Searchable docs (k)", scale=1000),
+               Right(Domain("ClusterUsedSpace", "Maximum", "Used space (GB)", scale=1024))],
+              cw_only=True, right_unit="GB"),
+        Panel("Target EBS throttling",
+              "Each line reaches 1 when any data node on the selected domain hits its EBS throughput or IOPS "
+              "limit during the minute.",
+              "0 or 1", [Domain("ThroughputThrottle", "Maximum", "Throughput throttled"),
+                         Domain("IopsThrottle", "Maximum", "IOPS throttled")], cw_only=True),
+    ]),
+    ("Retries and document failures", True, [
+        Panel("Delay between retries for each batch (s)",
+              "For each retrying batch, time from the end of its previous HTTP attempt until its next attempt was "
+              "sent. This is per batch/retry chain, not per connection. It includes planned backoff and any later "
+              "wait for retry capacity or a target-request slot. The right axis counts observed retries. Delay is measured when a retry "
+              "occurs. Grafana also shows p95.",
+              "s", [Mean("bulkAttemptGap", "Mean", scale=1000),
+                    Quantile("bulkAttemptGap", "p95", scale=1000),
+                    Right(TrafficBackedAggregateRate("bulkAttemptGap", "Observed retries/min", per_min=True,
+                                                     traffic_metric="rfsWorkerPhase"))], right_unit=PER_MINUTE_UNIT),
+        Panel("Batch completion time and oldest unfinished batch (s)",
+              "A batch is one request-sized group of documents followed through all of its retries. Mean completion "
+              "time runs from the first attempt until the batch succeeds or gives up. Oldest unfinished is the "
+              "highest age of any still-open batch in a worker. If the oldest rises while other batches complete, "
+              "some early work may be starved.",
+              "s", [Mean("bulkBatchAge", "Mean completion time", scale=1000),
+                    Gauge("bulkOldestOpenBatchAge", "Oldest unfinished (highest worker)", "max", scale=1000)]),
+        Panel("Retry budget tokens and exhaustion",
+              "Tokens remaining in each worker's shared retry budget (500 initially), shown for the lowest and "
+              "highest worker. The right axis counts times retries had to wait because a worker ran out. A low "
+              "minimum means at least one worker is seeing sustained failures even if the rest are healthy.",
+              "tokens", [Gauge("retryBudgetTokens", "Lowest worker", "min"),
+                         Gauge("retryBudgetTokens", "Highest worker", "max"),
+                         Right(Rate("retryBudgetEmpty", "Ran out per minute", per_min=True))],
+              right_unit=PER_MINUTE_UNIT),
+        Panel("Why documents reached the retry limit (docs/min)",
+              "The stack breaks down the Retry limit reached series in Failed documents per minute. A response "
+              "timeout means the worker waited too long for a reply. A repeated item error came back for one "
+              "document inside a bulk response. An unexpected HTTP status applied to the whole request.",
+              PER_MINUTE_UNIT, [
+                  Rate("bulkDocsGaveUp", "Response timed out", where={"reason": "no_response"}, per_min=True),
+                  Rate("bulkDocsGaveUp", "Repeated item error", where={"reason": "item_failures"}, per_min=True),
+                  Rate("bulkDocsGaveUp", "Unexpected HTTP status", where={"reason": "unknown_failures"}, per_min=True),
+              ], stacked=True),
+        Panel("Item errors returned by the target (errors/s)",
+              "Each failed item in a bulk response counts once per attempt. A document can contribute several "
+              "retryable errors before it succeeds or reaches its retry limit. A response timeout produces no "
+              "item error. Grafana also groups the errors by type.",
+              "errors/s", [
+                  TrafficBackedAggregateRate(
+                      "bulkItemErrors", "Retryable · {by}", by="errorType", where={"retryable": "true"},
+                      cw_label="Retryable", traffic_metric="bulkAttempts"),
+                  TrafficBackedAggregateRate(
+                      "bulkItemErrors", "Non-retryable · {by}", by="errorType", where={"retryable": "false"},
+                      cw_label="Non-retryable", traffic_metric="bulkAttempts"),
+              ],
+              stacked=True, show_bulk_activity=True),
+    ]),
+    ("Worker pipeline bottlenecks", True, [
+        Panel("Hottest RFS pod by CPU limit", "Highest CPU usage relative to that running pod's own CPU limit.",
+              "percent", [HottestPod("cpu")], grafana_only=True),
+        Panel("Hottest RFS pod by memory limit", "Highest working set relative to that running pod's own memory limit.",
+              "percent", [HottestPod("memory")], grafana_only=True),
         Panel("Documents per second through pipeline stages",
               "The same source documents counted at successive bounded pipeline boundaries. Source is chunked for "
               "preparation; prepared has completed validation/encoding; ordered prep has cleared the ordered "
@@ -815,7 +975,7 @@ SECTIONS = [
         Panel("Pipeline service time (ms)",
               "Mean CPU preparation time per chunk, serial exact-packer time per chunk, and complete sink-call time "
               "per successful request group. Request-group duration includes target requests and their response "
-              "handling, so compare it with Bulk attempt duration and the client-side timings.",
+              "handling, so compare it with the bulk request duration seen by RFS and the client-side timings.",
               "ms", [
                   Mean("pipelinePreparationDuration", "Prepare chunk", where={"outcome": "success"}),
                   Mean("pipelinePackingDuration", "Exact packer"),
@@ -845,7 +1005,7 @@ SECTIONS = [
                        where={"result": "response"}),
                   Mean("bulkResponseClassificationDuration", "Classify no response",
                        where={"result": "no_response"}),
-              ]),
+              ], show_bulk_activity=True),
         Panel("RFS CPU throttled periods (%)",
               "Percentage of Linux CFS scheduling periods in which bulk-loader containers wanted more CPU than "
               "their configured limits allowed. High CPU utilization without throttled periods means workers are "
@@ -863,95 +1023,12 @@ SECTIONS = [
                   Gauge("pipelinePreparationConcurrency", "Preparation rails", "avg"),
                   Gauge("pipelinePreparationChunkDocuments", "Documents per preparation chunk", "avg"),
               ]),
+        Panel("Fleet resource sampling per minute",
+              "The sampler takes up to four fleet snapshots per minute. Worker counts show the average number "
+              "awaiting a fresh CPU or memory sample during those snapshots.",
+              "count", [FleetSampling()], cw_only=True),
     ]),
-    ("Target domain", True, [
-        Panel("Target indexing rate and write queue",
-              "Fleet-total AWS/ES IndexingRate (operations per minute) and, on the right axis, the write thread "
-              "pool's queue (maximum over nodes) and rejections. Indexing-pressure rejections (429s for too many "
-              "bytes in flight) aren't in the thread pool: see Bulk attempts by outcome and the 4xx count.",
-              "ops/min", [Domain("IndexingRate", "Sum", "Indexing rate (fleet ops/min)"),
-                          Right(Domain("ThreadpoolWriteQueue", "Maximum", "Write queue (max)")),
-                          Right(Domain("ThreadpoolWriteRejected", "Sum", "Write rejected"))],
-              cw_only=True, right_unit="count"),
-        Panel("Target CPU and JVM pressure (%)",
-              "AWS/ES CPUUtilization and JVMMemoryPressure, maximum over nodes.",
-              "percent", [Domain("CPUUtilization", "Maximum", "CPU (max node)"),
-                          Domain("JVMMemoryPressure", "Maximum", "JVM pressure (max node)")], cw_only=True),
-        Panel("Target latency and HTTP status codes (all clients)",
-              "AWS/ES IndexingLatency (ms per operation) and, on the right axis, 4xx and 5xx responses per minute, "
-              "from every client. Bulk item errors such as cluster_block_exception are carried inside an HTTP 200 "
-              "bulk response and do not appear as 4xx here; correlate this panel with Bulk attempts, Why the target "
-              "couldn't take documents, and Item errors.",
-              "ms", [Domain("IndexingLatency", "Average", "Indexing latency (ms)"),
-                     Right(Domain("4xx", "Sum", "4xx")), Right(Domain("5xx", "Sum", "5xx"))],
-              cw_only=True, right_unit=PER_MINUTE_UNIT),
-        Panel("Target searchable documents (thousands) and used space (GB)",
-              "AWS/ES SearchableDocuments and, on the right axis, ClusterUsedSpace.",
-              "thousands of docs",
-              [Domain("SearchableDocuments", "Maximum", "Searchable docs (k)", scale=1000),
-               Right(Domain("ClusterUsedSpace", "Maximum", "Used space (GB)", scale=1024))],
-              cw_only=True, right_unit="GB"),
-    ]),
-    ("Retry and recovery", True, [
-        Panel("Delay between retries for each batch (s)",
-              "For each retrying batch, time from the end of its previous HTTP attempt until its next attempt was "
-              "sent. This is per batch/retry chain, not per connection. It includes planned backoff and any later "
-              "wait for retry capacity or a target-request slot. No line means no retries happened in the selected "
-              "window. The panel shows the mean and p95.",
-              "s", [Mean("bulkAttemptGap", "Mean", scale=1000),
-                    Quantile("bulkAttemptGap", "p95", scale=1000)]),
-        Panel("Target-unavailable document attempts per minute",
-              "Document attempts that could not be written because the target was unavailable, grouped by reason: "
-              "a write block, unavailable shards, HTTP 503, or connection failure/reset. This does not include HTTP "
-              "429 throttles; correlate the overview's paused-document gauge with its limit-cut panel for those. "
-              "A document is counted again on each attempt, so this is refusal volume rather than a "
-              "distinct-document count.",
-              PER_MINUTE_UNIT, [Rate("bulkDocsTargetUnavailable", "{by}", by="reason", per_min=True)], stacked=True),
-        Panel("Bulk attempt duration (s)",
-              "Time from sending a bulk HTTP request until its response or transport error. The panel shows the "
-              "mean, p50, and p99. Durations approaching the configured bulk response timeout indicate responses "
-              "are arriving too slowly.",
-              "s", [Mean("bulkAttemptDuration", "Mean", scale=1000),
-                    Quantile("bulkAttemptDuration", "p50", q=0.5, scale=1000),
-                    Quantile("bulkAttemptDuration", "p99", q=0.99, scale=1000)]),
-        Panel("Batch completion time and oldest unfinished batch (s)",
-              "A batch is one request-sized group of documents followed through all of its retries. Mean completion "
-              "time runs from the first attempt until the batch succeeds or gives up. Oldest unfinished is the "
-              "highest age of any still-open batch in a worker. If the oldest rises while other batches complete, "
-              "some early work may be starved.",
-              "s", [Mean("bulkBatchAge", "Mean completion time", scale=1000),
-                    Gauge("bulkOldestOpenBatchAge", "Oldest unfinished (highest worker)", "max", scale=1000)]),
-        Panel("Retry budget tokens and exhaustion",
-              "Tokens remaining in each worker's shared retry budget (500 initially), shown for the lowest and "
-              "highest worker. The right axis counts times retries had to wait because a worker ran out. A low "
-              "minimum means at least one worker is seeing sustained failures even if the rest are healthy.",
-              "tokens", [Gauge("retryBudgetTokens", "Lowest worker", "min"),
-                         Gauge("retryBudgetTokens", "Highest worker", "max"),
-                         Right(Rate("retryBudgetEmpty", "Ran out per minute", per_min=True))],
-              right_unit=PER_MINUTE_UNIT),
-    ]),
-    ("Failure diagnosis", True, [
-        Panel("Documents given up after retries (per minute)",
-              "Documents abandoned after repeated unknown status, no-response, or item failures. This explains the "
-              "RETRYABLE_EXHAUSTED portion of the overview's manual-action graph. "
-              "Throttling and temporary target unavailability do not give documents up by themselves.",
-              PER_MINUTE_UNIT, [Rate("bulkDocsGaveUp", "", by="reason", per_min=True)]),
-        Panel("Item errors per second",
-              "Per-document errors returned inside otherwise successful bulk HTTP responses. Retried errors may "
-              "reflect target state; terminal errors were attributed to the document and recorded for manual action. "
-              "CloudWatch aggregates error types into retried and terminal totals and shows zero while healthy bulk "
-              "traffic is present; Grafana retains the per-error-type breakdown.",
-              "errors/s", [
-                  TrafficBackedAggregateRate(
-                      "bulkItemErrors", "{by} (retried)", by="errorType", where={"retryable": "true"},
-                      cw_label="Retried", traffic_metric="bulkAttempts"),
-                  TrafficBackedAggregateRate(
-                      "bulkItemErrors", "{by} (terminal)", by="errorType", where={"retryable": "false"},
-                      cw_label="Terminal", traffic_metric="bulkAttempts"),
-              ],
-              stacked=True),
-    ]),
-    ("Flow-control internals (expert)", True, [
+    ("Flow-control internals", True, [
         Panel("Target request detail: first vs retry by outcome",
               "Every bulk HTTP attempt split by first attempt or retry and by the exact internal outcome. Use this "
               "after the grouped overview graph identifies a problem and the distinction between first attempts and "
@@ -963,7 +1040,7 @@ SECTIONS = [
               "connections", [Gauge("bulkLimit", "", "pod")], grafana_only=True),
         Panel("Adaptive limit state",
               "Mean and highest current worker limit plus the mean threshold separating fast initial growth from "
-              "slower congestion-avoidance growth. Use the operator overview for configured ceiling, utilization "
+              "slower congestion-avoidance growth. Use the migration overview for configured ceiling, utilization "
               "bands, actual in-flight requests, and target-driven cuts.",
               "connections", [Gauge("bulkLimit", "Mean worker", "avg"),
                               Gauge("bulkLimit", "Highest worker", "max"),
@@ -987,23 +1064,21 @@ SECTIONS = [
         Panel("Batches split per minute (expert)",
               "Number of request batches divided into smaller batches: status and no_response use binary splitting "
               "to isolate repeatedly failing documents; too_large reduces a request the target rejected for size. "
-              "The actual request sizes reaching the target are shown in Throughput and request shape.",
+              "The actual request sizes reaching the target are shown in Throughput and worker resources.",
               PER_MINUTE_UNIT, [Rate("bulkBatchSplits", "", by="reason", per_min=True)], stacked=True),
     ]),
 ]
 
 SECTION_HEADERS = {
-    "Operator overview": ["Migration results", "Worker capacity", "Target feedback"],
-    "Throughput and request shape": ["Migration volume", "Worker resources", "Request shape"],
+    "Migration overview": ["Migration progress", "Worker capacity", "Target feedback"],
 }
 
 READING_GUIDE = (
-    "**How to read this dashboard.** The first section is aligned into three vertical stories: migration results, "
-    "worker capacity, and target feedback. Read across a row to explain a rate change, then down a column for detail. "
-    "The second section shows throughput and request shape; later sections are diagnosis and controller internals. "
-    "Rates are fleet totals unless marked otherwise. CloudWatch fleet gauges are one-minute averages, so worker "
-    "counts can be fractional during transitions. The controls are specified in "
-    "RFS/docs/BULK_TRAFFIC_CONTROL.md.")
+    "**Migration progress.** Source processed includes recorded failures. Failed documents are final outcomes. "
+    "Retries can produce several item errors for one document.  \n"
+    "**Worker resources.** Colored bands show measured usage by tier. Gray fills the remaining container limit, "
+    "including workers awaiting a reading. CloudWatch averages up to four fleet snapshots per minute. An idle "
+    "fleet reads zero. Gray baselines on application charts mark an idle fleet or missing application samples.")
 
 PANEL_W, PANEL_H, COLUMNS = 8, 6, 3
 
@@ -1043,11 +1118,33 @@ CW_VARIABLES = [
      "defaultValue": "placeholder-name", "visible": True},
     {"type": "pattern", "pattern": "ACCOUNT_ID", "inputType": "input", "id": "ACCOUNT_ID", "label": "Account ID",
      "defaultValue": "placeholder-account-id", "visible": False},
-    {"type": "pattern", "pattern": "MA_QUALIFIER", "inputType": "input", "id": "MA_QUALIFIER",
-     "label": "Migration Qualifier", "defaultValue": "placeholder-qualifier", "visible": False},
-    {"type": "pattern", "pattern": "RFS_SESSION", "inputType": "input", "id": "RFS_SESSION",
-     "label": "RFS Session Name", "defaultValue": "placeholder-rfs-session", "visible": True},
 ]
+
+
+def add_application_sample_status(w, panel):
+    """Keep the absence of measurements distinct from a measured zero, including during shutdown."""
+    # Counter panels with an explicit zero already cover observed idle periods.
+    if any("FILL(" in row[-1].get("expression", "") for row in w.rows if row[-1].get("visible", True)):
+        return
+    visible = [row[-1]["id"] for row in w.rows if row[-1].get("visible", True)]
+    # Every outcome group already uses the phase heartbeat. Referencing all its nested SEARCHes
+    # a second time can exceed CloudWatch's expression evaluation limits.
+    missing_label = "Zero reported samples"
+    if panel.show_bulk_activity:
+        # Count the requests directly. Re-evaluating every client timing or error SEARCH in
+        # DATAPOINT_COUNT can exceed the CloudWatch expression evaluation limits.
+        observed = f"SUM({w.search('bulkAttempts', 'Sum')})"
+        missing_label = "No reported bulk attempts"
+    elif isinstance(panel.series[0], AttemptOutcomeGroups):
+        observed = f"SUM({w.search('rfsWorkerPhase', 'SampleCount')})"
+    else:
+        observed = f"DATAPOINT_COUNT([{','.join(visible)}])"
+    workers = w.e(f"SUM({_fleet_tiers('Workers')})", "", visible=False)
+    # -1 makes an absent census ineligible for either marker.
+    w.e(f"IF(FILL({workers}, -1) == 0, 0)", "Fleet idle")
+    w.rows[-1][0]["color"] = "#879596"
+    w.e(f"IF((FILL({workers}, -1) > 0) AND (FILL({observed}, 0) == 0), 0)", missing_label)
+    w.rows[-1][0]["color"] = "#60676D"
 
 
 def cloudwatch():
@@ -1067,6 +1164,8 @@ def cloudwatch():
             s.cw(w)
         if not w.rows:
             continue
+        if not isinstance(item.series[0], (Domain, FleetUsedVsAllocated, WorkersByTier, FleetSampling)):
+            add_application_sample_status(w, item)
         y_axis = {"left": {"label": item.unit, "showUnits": False, "min": 0}}
         if item.right_unit:
             y_axis["right"] = {"label": item.right_unit, "showUnits": False, "min": 0}
@@ -1074,7 +1173,7 @@ def cloudwatch():
                         "properties": {"title": item.title, "view": "timeSeries", "stacked": item.stacked,
                                        "region": R, "period": 60, "stat": "Sum", "metrics": w.rows,
                                        "yAxis": y_axis}})
-    return {"variables": CW_VARIABLES, "widgets": widgets}
+    return {"periodOverride": "inherit", "variables": CW_VARIABLES, "widgets": widgets}
 
 
 # --- Grafana --------------------------------------------------------------------------------------------------
@@ -1085,7 +1184,7 @@ GRAFANA_UNITS = {DOCS_PER_SECOND_UNIT: "suffix: docs/s", MIB_PER_SECOND_UNIT: "s
                  "min": "m", "count": "short", "short": "short", "ops": "ops", "percent": "percent", "docs": "short",
                  ATTEMPTS_PER_SECOND_UNIT: "suffix: attempts/s", "errors/s": "suffix: errors/s",
                  "ops/min": "suffix: /min", "ms": "ms", "GB": "suffix: GB", "docs / KiB": "short",
-                 "cores": "suffix: cores", "MiB": "suffix: MiB", "thousands of docs": "short",
+                 "cores": "suffix: cores", "MiB": "suffix: MiB", "GiB": "suffix: GiB", "thousands of docs": "short",
                  "tokens": "suffix: tokens", "connections": "suffix: connections",
                  "events (see legend)": "short"}
 
@@ -1116,6 +1215,9 @@ def grafana():  # NOSONAR - one renderer keeps panel ordering, row ownership, an
             for expr, legend in s.prom():
                 ref = chr(65 + len(targets))
                 targets.append({"refId": ref, "expr": expr, "legendFormat": legend, "datasource": DS})
+                if legend == LIMIT_ABOVE_USAGE:
+                    overrides.append({"matcher": {"id": "byFrameRefID", "options": ref}, "properties": [
+                        {"id": "color", "value": {"mode": "fixed", "fixedColor": LIMIT_COLOR}}]})
                 if isinstance(s, Right):
                     overrides.append({"matcher": {"id": "byFrameRefID", "options": ref}, "properties": [
                         {"id": "custom.axisPlacement", "value": "right"},

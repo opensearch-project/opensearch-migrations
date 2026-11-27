@@ -34,7 +34,7 @@ class WorkerPhaseTest {
     @Test
     void theGaugeReportsOneForTheCurrentPhaseAndZeroForTheRest() throws Exception {
         var context = DocumentMigrationTestContext.factory().withAllTracking();
-        try (var gauge = context.makeWorkerPhaseGauge()) {
+        try (var gauge = context.makeWorkerPhaseGauge(0)) {
             WorkerPhase.enter(WorkerPhase.Phase.MIGRATING);
             var values = phaseGauge(context);
             Assertions.assertEquals(WorkerPhase.Phase.values().length, values.size(), values.toString());

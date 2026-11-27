@@ -1,7 +1,9 @@
 import importlib.util
+import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -106,8 +108,8 @@ class GeneratedDashboardTest(unittest.TestCase):
         cloudwatch = self.cloudwatch_widget(title)
         self.assertIsNotNone(cloudwatch)
         self.assertIsNone(self.grafana_panel(title))
-        target_section = next(section for section in dashboard_generator.SECTIONS if section[0] == "Target domain")
-        target_panel = next(panel for panel in target_section[2] if panel.title == title)
+        target_panel = next(panel for _, _, panels in dashboard_generator.SECTIONS for panel in panels
+                            if panel.title == title)
         self.assertIn("inside an HTTP 200", target_panel.desc)
 
     def test_target_indexing_rate_is_the_fleet_total(self):
@@ -119,13 +121,59 @@ class GeneratedDashboardTest(unittest.TestCase):
         )
         self.assertEqual("Sum", indexing_rate[-1]["stat"])
 
+    def test_target_health_starts_with_rfs_observations_for_any_target(self):
+        target_health = next(panels for section, _, panels in dashboard_generator.SECTIONS
+                             if section == "Target health and response")
+        self.assertEqual(
+            ["Bulk request duration seen by RFS (s)", "Target-unavailable document attempts per minute"],
+            [panel.title for panel in target_health if not panel.cw_only],
+        )
+        metrics = self.cloudwatch_widget("Target EBS throttling")["properties"]["metrics"]
+        self.assertEqual([("AWS/ES", "ThroughputThrottle", "Maximum"), ("AWS/ES", "IopsThrottle", "Maximum")],
+                         [(row[0], row[1], row[-1]["stat"]) for row in metrics])
+
+    @unittest.skipUnless(shutil.which("helm"), "requires Helm to render the dashboard")
+    def test_self_managed_target_keeps_all_rfs_widgets(self):
+        rendered = subprocess.check_output([
+            "helm", "template", "verify", str(CHART_DIRECTORY), "--kube-version", "1.35.0",
+            "-f", str(CHART_DIRECTORY / "valuesEks.yaml"),
+            "--set-string", "stageName=verify,aws.region=us-east-2,aws.account=123456789012,aws.eksClusterName=verify",
+            "--set", "metrics.cloudWatch.showManagedTargetDomain=false",
+            "--show-only", "templates/resources/aws/cloudwatchDashboardManifests.yaml",
+        ], text=True)
+        body = re.search(r'dashboardName: "[^"]*-ReindexFromSnapshot"\n\s+dashboardBody: (.+)', rendered)
+        dashboard = json.loads(json.loads(body.group(1)))
+        self.assertNotIn("TC_DOMAIN_NAME", {v["id"] for v in dashboard["variables"]})
+        expected = [w["properties"] for w in self.cloudwatch["widgets"]
+                    if not any(row[0] == "AWS/ES" for row in w["properties"].get("metrics", []))]
+        self.assertEqual([p.get("title") or p["markdown"] for p in expected],
+                         [w["properties"].get("title") or w["properties"]["markdown"] for w in dashboard["widgets"]])
+        bottom = 0
+        for widget in dashboard["widgets"]:
+            self.assertLessEqual(widget["y"], bottom, "Removed domain widgets left an empty row")
+            bottom = max(bottom, widget["y"] + widget["height"])
+
+    def test_retry_limit_breakdown_aggregates_each_reason_under_a_short_label(self):
+        title = "Why documents reached the retry limit (docs/min)"
+        reasons = {"Response timed out": "no_response", "Repeated item error": "item_failures",
+                   "Unexpected HTTP status": "unknown_failures"}
+        _, expressions = self._cw_rows_and_expressions(title)
+        cw = {row["label"]: row["expression"] for row in expressions if row["label"] in reasons}
+        grafana = {t["legendFormat"]: t["expr"] for t in self.grafana_panel(title)["targets"]}
+        self.assertEqual(reasons.keys(), grafana.keys())
+        for label, reason in reasons.items():
+            self.assertIn('SUM(SEARCH(', cw[label])
+            for expr in (cw[label], grafana[label]):
+                self.assertIn("bulkDocsGaveUp", expr)
+                self.assertIn(f'reason="{reason}"', expr)
+
     def test_retry_wait_panels_explain_clean_runs(self):
         title = "Delay between retries for each batch (s)"
         self.assertIsNotNone(self.cloudwatch_widget(title))
         retry_gap = self.grafana_panel(title)
         self.assertIsNotNone(retry_gap)
         self.assertIn("not per connection", retry_gap["description"])
-        self.assertIn("No line means no retries", retry_gap["description"])
+        self.assertIn("Observed retries/min", str(self.cloudwatch_widget(title)))
 
         slot_wait = self.grafana_panel("Retry delay breakdown (expert)")
         self.assertIsNotNone(slot_wait)
@@ -133,17 +181,17 @@ class GeneratedDashboardTest(unittest.TestCase):
 
     def test_grafana_deduplicates_collector_handoffs(self):
         expected = {
-            "Documents migrated per second": "max by (exported_instance) (rate(",
+            "Source documents processed per second": "max by (exported_instance) (rate(",
             "Workers by phase": "max by (exported_instance) (",
             "Adaptive limit by worker": "max by (exported_instance) (",
             "Retry delay breakdown (expert)": "max by (exported_instance,errorClass) (rate(",
-            "Bulk attempt duration (s)": (
-                "sum by (le) (max by (exported_instance,outcome,le) (rate("
+            "Bulk request duration seen by RFS (s)": (
+                "max by (exported_instance,outcome,le) (last_over_time(bulkAttemptDuration_milliseconds_bucket"
             ),
             "Document and bulk request bytes (MiB/s)": "max by (exported_instance) (rate(",
             "Shards completed (cumulative)": "count(max by (exported_instance) (",
-            "RFS CPU utilization (%)": "max by (pod) (rate(",
-            "RFS memory utilization (%)": "max by (pod) (",
+            "RFS CPU used vs allocated (cores)": "max by (pod) (rate(",
+            "RFS memory used vs allocated (GiB)": "max by (pod) (",
         }
         for title, fragment in expected.items():
             panel = self.grafana_panel(title)
@@ -154,13 +202,12 @@ class GeneratedDashboardTest(unittest.TestCase):
     def test_operator_first_layout_and_worker_limit_distribution(self):
         self.assertEqual(
             [
-                "Operator overview",
-                "Throughput and request shape",
-                "Pipeline performance diagnosis",
-                "Target domain",
-                "Retry and recovery",
-                "Failure diagnosis",
-                "Flow-control internals (expert)",
+                "Migration overview",
+                "Throughput and worker resources",
+                "Target health and response",
+                "Retries and document failures",
+                "Worker pipeline bottlenecks",
+                "Flow-control internals",
             ],
             [section[0] for section in dashboard_generator.SECTIONS],
         )
@@ -168,21 +215,21 @@ class GeneratedDashboardTest(unittest.TestCase):
         overview = dashboard_generator.SECTIONS[0][2]
         self.assertEqual(
             [
-                "Documents migrated per second",
+                "Source documents processed per second",
                 "Workers by phase",
                 "Target request outcomes (attempts/s)",
-                "Documents requiring manual action (per minute)",
+                "Failed documents per minute",
                 "Workers by connection-limit utilization",
                 "Adaptive-limit cuts per minute (fleet total)",
-                "Documents sent vs migrated per second",
+                "Source progress and target sends (docs/s)",
                 "Requests in flight vs adaptive allowance",
                 "Documents paused for target recovery",
             ],
             [panel.title for panel in overview],
         )
         self.assertEqual(
-            ["Migration results", "Worker capacity", "Target feedback"],
-            dashboard_generator.SECTION_HEADERS["Operator overview"],
+            ["Migration progress", "Worker capacity", "Target feedback"],
+            dashboard_generator.SECTION_HEADERS["Migration overview"],
         )
         self.assertIn("bulkLimitMax", dashboard_generator.METRICS)
         self.assertIn("bulkWorkersByLimitUtilization", dashboard_generator.METRICS)
@@ -207,9 +254,9 @@ class GeneratedDashboardTest(unittest.TestCase):
         )
         self.assertEqual("suffix: attempts/s", outcomes["fieldConfig"]["defaults"]["unit"])
 
-        failures = self.grafana_panel("Documents requiring manual action (per minute)")
+        failures = self.grafana_panel("Failed documents per minute")
         self.assertEqual(
-            ["Cannot be retried", "Retries exhausted"],
+            ["Non-retryable error", "Retry limit reached"],
             [target["legendFormat"] for target in failures["targets"]],
         )
 
@@ -231,7 +278,11 @@ class GeneratedDashboardTest(unittest.TestCase):
 
     def test_cloudwatch_worker_phase_stack_has_one_labeled_series_per_phase(self):
         phases = self.cloudwatch_widget("Workers by phase")
-        rows = phases["properties"]["metrics"]
+        rows = [
+            row for row in phases["properties"]["metrics"]
+            if len(row) == 1 and row[0].get("visible", True)
+            if row[0].get("label") not in ("Fleet idle", "Zero reported samples")
+        ]
         self.assertEqual(
             ["Starting", "Acquiring work", "Downloading shard", "Migrating", "Completing"],
             [row[0]["label"] for row in rows],
@@ -260,12 +311,12 @@ class GeneratedDashboardTest(unittest.TestCase):
             self.cloudwatch_widget("Bulk request size")["properties"]["yAxis"]["left"]["label"],
         )
         self.assertEqual(
-            "percent",
-            self.cloudwatch_widget("RFS CPU utilization (%)")["properties"]["yAxis"]["left"]["label"],
+            "cores",
+            self.cloudwatch_widget("RFS CPU used vs allocated (cores)")["properties"]["yAxis"]["left"]["label"],
         )
         self.assertEqual(
-            "percent",
-            self.cloudwatch_widget("RFS memory utilization (%)")["properties"]["yAxis"]["left"]["label"],
+            "GiB",
+            self.cloudwatch_widget("RFS memory used vs allocated (GiB)")["properties"]["yAxis"]["left"]["label"],
         )
 
     def test_limit_cuts_explain_fleet_wide_steady_sawtooth(self):
@@ -288,22 +339,6 @@ class GeneratedDashboardTest(unittest.TestCase):
                 self.cloudwatch_widget(title)["properties"]["yAxis"]["left"]["label"],
                 title,
             )
-
-    def test_cloudwatch_cpu_uses_fleet_capacity_while_grafana_adds_hottest_pod(self):
-        cloudwatch = self.cloudwatch_widget("RFS CPU utilization (%)")
-        labels = [
-            row[-1]["label"]
-            for row in cloudwatch["properties"]["metrics"]
-            if isinstance(row[-1], dict) and "label" in row[-1]
-        ]
-        self.assertEqual(["% (fleet capacity)"], labels)
-
-        grafana = self.grafana_panel("RFS CPU utilization (%)")
-        self.assertEqual(
-            ["% (fleet capacity)", "% (hottest pod)"],
-            [target["legendFormat"] for target in grafana["targets"]],
-        )
-        self.assertIn("CloudWatch cannot calculate the hottest pod", grafana["description"])
 
     def test_pipeline_diagnostics_expose_boundaries_and_hidden_client_timings(self):
         stages = self.grafana_panel("Documents per second through pipeline stages")
@@ -376,13 +411,9 @@ class GeneratedDashboardTest(unittest.TestCase):
         title = "RFS CPU throttled periods (%)"
         cloudwatch = self.cloudwatch_widget(title)
         self.assertIsNotNone(cloudwatch)
-        cloudwatch_expressions = "\n".join(
-            row[-1].get("expression", "")
-            for row in cloudwatch["properties"]["metrics"]
-            if isinstance(row[-1], dict)
-        )
-        self.assertIn("container_cpu_cfs_throttled_periods_total", cloudwatch_expressions)
-        self.assertIn("container_cpu_cfs_periods_total", cloudwatch_expressions)
+        cloudwatch_rows = json.dumps(cloudwatch["properties"]["metrics"])
+        self.assertIn("container_cpu_cfs_throttled_periods_total_sum", cloudwatch_rows)
+        self.assertIn("container_cpu_cfs_periods_total_sum", cloudwatch_rows)
 
         grafana = self.grafana_panel(title)
         self.assertIsNotNone(grafana)
@@ -430,6 +461,7 @@ class GeneratedDashboardTest(unittest.TestCase):
         )
 
         target_titles = {
+            "Target EBS throttling",
             "Target indexing rate and write queue",
             "Target CPU and JVM pressure (%)",
             "Target latency and HTTP status codes (all clients)",
@@ -448,10 +480,9 @@ class GeneratedDashboardTest(unittest.TestCase):
             violations.append("CloudWatch is missing native target-domain panels")
         if target_titles & grafana_titles:
             violations.append("Grafana contains CloudWatch-native target-domain panels")
-        if "Target domain" not in cloudwatch_markdown:
-            violations.append("CloudWatch is missing the native Target domain section")
-        if "Target domain" in grafana_titles:
-            violations.append("Grafana contains the CloudWatch-native Target domain section")
+        target_section = "Target health and response"
+        if f"## {target_section}" not in cloudwatch_markdown or target_section not in grafana_titles:
+            violations.append("Target health and response must be visible in both dashboards")
 
         self.assertEqual([], violations)
 
@@ -459,7 +490,7 @@ class GeneratedDashboardTest(unittest.TestCase):
         overview = dashboard_generator.SECTIONS[0][2]
         self.assertEqual(
             [
-                "Documents sent vs migrated per second",
+                "Source progress and target sends (docs/s)",
                 "Requests in flight vs adaptive allowance",
                 "Documents paused for target recovery",
             ],
@@ -468,15 +499,16 @@ class GeneratedDashboardTest(unittest.TestCase):
 
         throughput = next(
             panels for title, _, panels in dashboard_generator.SECTIONS
-            if title == "Throughput and request shape"
+            if title == "Throughput and worker resources"
         )
         self.assertEqual(
             [
                 "Document and bulk request bytes (MiB/s)",
-                "RFS CPU utilization (%)",
+                "RFS CPU used vs allocated (cores)",
                 "Bulk request size",
                 "Shards completed (cumulative)",
-                "RFS memory utilization (%)",
+                "RFS memory used vs allocated (GiB)",
+                "Workers by memory tier",
             ],
             [panel.title for panel in throughput],
         )
@@ -490,13 +522,13 @@ class GeneratedDashboardTest(unittest.TestCase):
         }
         self.assertEqual(
             {
-                "Migrated document source",
+                "Processed source bytes",
                 "Uncompressed bulk NDJSON",
                 "Bulk request body sent",
             },
             set(byte_targets),
         )
-        self.assertIn("pipelineBytesMigrated", byte_targets["Migrated document source"])
+        self.assertIn("pipelineBytesMigrated", byte_targets["Processed source bytes"])
         self.assertIn("bulkRequestBytes_bytes_sum", byte_targets["Uncompressed bulk NDJSON"])
         self.assertIn("bulkRequestSentBytes_bytes_sum", byte_targets["Bulk request body sent"])
 
@@ -522,56 +554,28 @@ class GeneratedDashboardTest(unittest.TestCase):
         )
 
         requests = self.grafana_panel("Requests in flight vs adaptive allowance")
-        cpu = self.grafana_panel("RFS CPU utilization (%)")
-        memory = self.grafana_panel("RFS memory utilization (%)")
+        cpu = self.grafana_panel("RFS CPU used vs allocated (cores)")
+        memory = self.grafana_panel("RFS memory used vs allocated (GiB)")
         self.assertEqual(8, requests["gridPos"]["x"])
         self.assertEqual(8, cpu["gridPos"]["x"])
         self.assertEqual(8, memory["gridPos"]["x"])
         self.assertLess(requests["gridPos"]["y"], cpu["gridPos"]["y"])
         self.assertLess(cpu["gridPos"]["y"], memory["gridPos"]["y"])
 
-    def test_rfs_resources_are_percentages_of_configured_limits(self):
-        cpu_title = "RFS CPU utilization (%)"
-        memory_title = "RFS memory utilization (%)"
-        self.assertIsNone(self.cloudwatch_widget("RFS CPU (cores)"))
-        self.assertIsNone(self.grafana_panel("RFS memory (MiB)"))
-
-        cpu = self.grafana_panel(cpu_title)
-        memory = self.grafana_panel(memory_title)
-        self.assertEqual("percent", cpu["fieldConfig"]["defaults"]["unit"])
-        self.assertEqual("percent", memory["fieldConfig"]["defaults"]["unit"])
-        cpu_expressions = "\n".join(target["expr"] for target in cpu["targets"])
-        memory_expressions = "\n".join(target["expr"] for target in memory["targets"])
-        self.assertIn("container_spec_cpu_quota", cpu_expressions)
-        self.assertIn("container_spec_cpu_period", cpu_expressions)
-        self.assertIn("container_spec_memory_limit_bytes", memory_expressions)
-
-        cloudwatch_cpu = self.cloudwatch_widget(cpu_title)
-        cloudwatch_memory = self.cloudwatch_widget(memory_title)
-        self.assertEqual("percent", cloudwatch_cpu["properties"]["yAxis"]["left"]["label"])
-        self.assertEqual("percent", cloudwatch_memory["properties"]["yAxis"]["left"]["label"])
-        cloudwatch_expressions = "\n".join(
-            row[0].get("expression", "")
-            for panel in (cloudwatch_cpu, cloudwatch_memory)
-            for row in panel["properties"]["metrics"]
-            if len(row) == 1 and isinstance(row[0], dict)
-        )
-        self.assertIn("container_spec_cpu_quota", cloudwatch_expressions)
-        self.assertIn("container_spec_cpu_period", cloudwatch_expressions)
-        self.assertIn("container_spec_memory_limit_bytes", cloudwatch_expressions)
-
-    def test_cloudwatch_rfs_container_searches_are_scoped_to_the_selected_session(self):
-        session_variable = next(
-            variable
-            for variable in self.cloudwatch["variables"]
-            if variable["id"] == dashboard_generator.RFS_SESSION
-        )
-        self.assertEqual("RFS Session Name", session_variable["label"])
-        self.assertTrue(session_variable["visible"])
+    def test_cloudwatch_dashboard_is_global_with_no_session_or_qualifier_inputs(self):
+        # The session input proved unusable (nobody remembers a session id, and a stage name does
+        # not match pod names), so the dashboard reads globally. Emission stays partitioned: the
+        # qualifier/pod dimensions remain in the SEARCH schemas for future per-resource dashboards.
+        variable_ids = {variable["id"] for variable in self.cloudwatch["variables"]}
+        self.assertNotIn("RFS_SESSION", variable_ids)
+        self.assertNotIn("MA_QUALIFIER", variable_ids)
+        dashboard_text = json.dumps(self.cloudwatch)
+        self.assertNotIn("RFS_SESSION", dashboard_text)
+        self.assertNotIn("MA_QUALIFIER", dashboard_text)
 
         for title in (
-            "RFS CPU utilization (%)",
-            "RFS memory utilization (%)",
+            "RFS CPU used vs allocated (cores)",
+            "RFS memory used vs allocated (GiB)",
             "RFS CPU throttled periods (%)",
         ):
             widget = self.cloudwatch_widget(title)
@@ -580,60 +584,17 @@ class GeneratedDashboardTest(unittest.TestCase):
                 for row in widget["properties"]["metrics"]
                 if len(row) == 1 and isinstance(row[0], dict)
             )
-            searches = re.findall(r"SEARCH\('([^']+)'", expressions)
-            self.assertTrue(searches, title)
-            self.assertTrue(
-                all(dashboard_generator.RFS_SESSION in search for search in searches),
-                f"{title} has an unscoped container search: {searches}",
-            )
-            self.assertTrue(
-                all(dashboard_generator.Q not in search for search in searches),
-                f"{title} incorrectly uses the application-metric qualifier for container metrics: {searches}",
-            )
-
-        values_eks = Path(__file__).resolve().parents[2].joinpath(
-            "charts/aggregates/migrationAssistantWithArgo/valuesEks.yaml"
-        ).read_text()
-        self.assertIn("- container_spec_cpu_quota", values_eks)
-        self.assertIn("- container_spec_cpu_period", values_eks)
-        self.assertIn("- container_spec_memory_limit_bytes", values_eks)
-
-    def test_cloudwatch_cpu_capacity_sums_all_pod_limits(self):
-        cpu = self.cloudwatch_widget("RFS CPU utilization (%)")
-        usage = next(
-            row
-            for row in cpu["properties"]["metrics"]
-            if len(row) > 1 and row[1] == "container_cpu_usage_seconds_total"
-        )
-        expression = next(
-            row[0]["expression"]
-            for row in cpu["properties"]["metrics"]
-            if len(row) == 1 and isinstance(row[0], dict) and "expression" in row[0]
-        )
-        self.assertEqual(
-            [
-                dashboard_generator.NS,
-                "container_cpu_usage_seconds_total",
-                "container",
-                dashboard_generator.CONTAINER,
-                "namespace",
-                "ma",
-            ],
-            usage[:-1],
-        )
-        self.assertIn(f"{usage[-1]['id']} / PERIOD({usage[-1]['id']})", expression)
-        self.assertNotIn('MetricName="container_cpu_usage_seconds_total"', expression)
-        self.assertIn("/ AVG(SEARCH(", expression)
-        self.assertNotIn("/ SUM(SEARCH(", expression)
+            self.assertNotRegex(expressions, r"SEARCH\('[^}]*,pod[,}]")
 
     def test_cloudwatch_item_errors_use_static_labels_and_a_traffic_backed_zero(self):
-        item_errors = self.cloudwatch_widget("Item errors per second")
+        item_errors = self.cloudwatch_widget("Item errors returned by the target (errors/s)")
         expressions = [
             row[0]
             for row in item_errors["properties"]["metrics"]
-            if len(row) == 1 and isinstance(row[0], dict)
+            if len(row) == 1 and isinstance(row[0], dict) and row[0].get("visible", True)
+            if row[0].get("label") not in ("Fleet idle", "No reported bulk attempts")
         ]
-        self.assertEqual(["Retried", "Terminal"], [expression["label"] for expression in expressions])
+        self.assertEqual(["Retryable", "Non-retryable"], [expression["label"] for expression in expressions])
         self.assertNotIn("${PROP(", str(item_errors))
         for expression in expressions:
             self.assertIn(
@@ -646,32 +607,128 @@ class GeneratedDashboardTest(unittest.TestCase):
             )
             self.assertIn('MetricName="bulkAttempts"', expression["expression"])
 
-    def test_cloudwatch_memory_utilization_avoids_dividing_by_an_empty_limit_series(self):
-        memory = self.cloudwatch_widget("RFS memory utilization (%)")
-        expressions = [
-            row[0]["expression"]
-            for row in memory["properties"]["metrics"]
-            if len(row) == 1 and isinstance(row[0], dict)
-        ]
-        self.assertEqual(2, len(expressions))
-        self.assertTrue(all(expression.startswith("IF(") for expression in expressions))
-        self.assertTrue(all("container_spec_memory_limit_bytes" in expression for expression in expressions))
+    def test_grafana_uses_single_export_request_counts_and_observed_traffic_for_healthy_zeros(self):
+        title = "Item errors returned by the target (errors/s)"
+        for target in self.grafana_panel(title)["targets"]:
+            expr = target["expr"]
+            self.assertIn("last_over_time(bulkItemErrors_count_total", expr)
+            self.assertIn("offset $__rate_interval", expr)
+            self.assertIn("or on() label_replace(0 * (sum(", expr)
+            self.assertIn("last_over_time(bulkAttempts_count_total", expr)
+            self.assertNotIn("or vector(0)", expr)
+
+    def test_complex_bulk_panels_use_independent_request_activity(self):
+        for title in ("Item errors returned by the target (errors/s)", "Client preparation and response handling (ms)"):
+            _, expressions = self._cw_rows_and_expressions(title)
+            status = next(row for row in expressions if row["label"] == "No reported bulk attempts")
+            self.assertIn('MetricName="bulkAttempts"', status["expression"])
+            self.assertNotIn("DATAPOINT_COUNT", status["expression"])
 
     def test_documents_sent_panel_uses_request_document_totals(self):
-        title = "Documents sent vs migrated per second"
+        title = "Source progress and target sends (docs/s)"
         cloudwatch = self.cloudwatch_widget(title)
         self.assertIsNotNone(cloudwatch)
+        # Attribute-less metrics render as qualifier-agnostic SEARCH expressions now (global view).
         request_documents = next(
-            row for row in cloudwatch["properties"]["metrics"]
-            if len(row) > 1 and row[0] == "OpenSearchMigrations" and row[1] == "bulkRequestDocuments"
+            row[0]["expression"] for row in cloudwatch["properties"]["metrics"]
+            if len(row) == 1 and isinstance(row[0], dict) and
+            'MetricName="bulkRequestDocuments"' in row[0].get("expression", "")
         )
-        self.assertEqual("Sum", request_documents[-1]["stat"])
+        self.assertIn("'Sum'", request_documents)
+        self.assertTrue(request_documents.startswith("SUM(SEARCH("), request_documents)
 
         grafana = self.grafana_panel(title)
         self.assertIsNotNone(grafana)
         targets = {target["legendFormat"]: target["expr"] for target in grafana["targets"]}
-        self.assertEqual({"Sent", "Migrated", "Re-sent"}, set(targets))
+        self.assertEqual({"Sent", "Source processed", "Re-sent"}, set(targets))
         self.assertIn("bulkRequestDocuments_count_sum", targets["Sent"])
+
+    def test_only_the_worker_chart_exposes_memory_tier_scaling(self):
+        for title in ("Work items moved to a higher tier per minute", "Unfinished work by required memory tier"):
+            self.assertIsNone(self.cloudwatch_widget(title))
+            self.assertIsNone(self.grafana_panel(title))
+        worker = "Workers by memory tier"
+        memory = "RFS memory used vs allocated (GiB)"
+        for workers, usage in ((self.cloudwatch_widget(worker), self.cloudwatch_widget(memory)),
+                               (self.grafana_panel(worker)["gridPos"], self.grafana_panel(memory)["gridPos"])):
+            self.assertEqual(workers["y"], usage["y"])
+            self.assertGreater(workers["x"], usage["x"])
+
+    def _cw_rows_and_expressions(self, title):
+        metrics = self.cloudwatch_widget(title)["properties"]["metrics"]
+        rows = {row[-1]["id"]: row for row in metrics if len(row) > 1}
+        expressions = [row[0] for row in metrics if len(row) == 1 and isinstance(row[0], dict)]
+        return rows, expressions
+
+    def test_resource_stacks_show_measured_usage_and_one_band_to_the_limit(self):
+        for title, unit in (("RFS CPU used vs allocated (cores)", "cores"),
+                            ("RFS memory used vs allocated (GiB)", "GiB")):
+            widget = self.cloudwatch_widget(title)
+            self.assertTrue(widget["properties"]["stacked"], title)
+            labels = [row[-1]["label"] for row in widget["properties"]["metrics"]
+                      if row[-1].get("visible", True)]
+            self.assertEqual({"tier ${PROP('Dim.tier')}"}, set(labels[:-1]), title)
+            self.assertEqual("Limit above measured usage", labels[-1], title)
+            rows, expressions = self._cw_rows_and_expressions(title)
+            unused, awaiting = [next(key for key, row in rows.items() if row[1].endswith(suffix))
+                                for suffix in ("Unused", "AwaitingSample")]
+            self.assertIn(f"DATAPOINT_COUNT([{unused},{awaiting}]) == 2", expressions[-1]["expression"])
+            self.assertIn(f"({unused} + {awaiting})", expressions[-1]["expression"])
+            grafana = self.grafana_panel(title)
+            self.assertEqual(["tier {{tier}} used", "Limit above measured usage"],
+                             [target["legendFormat"] for target in grafana["targets"]], title)
+            self.assertEqual(f"suffix: {unit}", grafana["fieldConfig"]["defaults"]["unit"], title)
+            self.assertIn("sum by (tier)", grafana["targets"][0]["expr"])
+            self.assertIn("or on (pod)", grafana["targets"][-1]["expr"])
+            self.assertNotIn("kube_pod_container_info", str(widget))
+
+    def test_cloudwatch_stacked_legends_show_observed_tiers_in_ascending_order(self):
+        for title in ("Workers by memory tier", "RFS CPU used vs allocated (cores)",
+                      "RFS memory used vs allocated (GiB)"):
+            _, expressions = self._cw_rows_and_expressions(title)
+            tier_lines = [e["expression"] for e in expressions if e["label"] == "tier ${PROP('Dim.tier')}"]
+            overflow, *ordered = tier_lines
+            self.assertIn(" NOT (", overflow, title)
+            tiers = re.findall(r'tier="(\d+)"', overflow)
+            self.assertEqual([str(tier) for tier in range(10)], tiers, title)
+            self.assertEqual([[tier] for tier in tiers],
+                             [re.findall(r'tier="(\d+)"', expr) for expr in reversed(ordered)], title)
+
+    def test_resource_charts_use_matched_samples_without_dividing_by_coverage(self):
+        for resource, name, unit in [("CPU", "Cpu", "cores"), ("memory", "Memory", "GiB")]:
+            title = f"RFS {resource} used vs allocated ({unit})"
+            rows, expressions = self._cw_rows_and_expressions(title)
+            used = expressions[0]["expression"]
+            self.assertIn(f'MetricName="rfsFleet{name}Used"', used)
+            self.assertEqual({"rfsFleet" + name + suffix for suffix in ["AwaitingSample", "Unused"]},
+                             {r[1] for r in rows.values()} - {"rfsFleetCensusSamples"})
+            self.assertNotRegex(used, r"/ [em]\d+")
+            self.assertIn("FILL(", used)
+            self.assertIn(" > 0, 0)", used)
+            self.assertIn("kube_pod_container_status_running", self.grafana_panel(title)["targets"][-1]["expr"])
+
+    def test_hottest_pod_is_paired_with_its_own_running_limit_in_grafana(self):
+        for resource in ["CPU", "memory"]:
+            title = f"Hottest RFS pod by {resource} limit"
+            self.assertIsNone(self.cloudwatch_widget(title))
+            target = self.grafana_panel(title)["targets"][0]
+            for term in ("topk(1,", "/ on (pod)", "kube_pod_container_resource_limits",
+                         "kube_pod_container_status_running"):
+                self.assertIn(term, target["expr"])
+            self.assertEqual("{{pod}}", target["legendFormat"])
+
+    def test_dashboard_pod_pattern_matches_the_collectors_tier_label(self):
+        values = (CHART_DIRECTORY / "valuesEks.yaml").read_text()
+        patterns = set(re.findall(r"regex: '(\.\*-rfs-t\(\[0-9\]\+\)[^']*)'", values))
+        self.assertEqual({dashboard_generator.TIER_POD_PATTERN}, patterns)
+        name = "example-rfs-t12-7467b44f5f-ct9jm"
+        self.assertEqual("12", re.fullmatch(dashboard_generator.TIER_POD_PATTERN, name).group(1))
+
+    def test_fleet_census_has_one_writer_during_rollouts(self):
+        template = (CHART_DIRECTORY / "templates/resources/otel/rfsFleetResources.yaml").read_text()
+        self.assertIn("replicas: 1", template)
+        self.assertIn("type: Recreate", template)
+        self.assertNotIn("prometheus/ksm-cloudwatch", (CHART_DIRECTORY / "valuesEks.yaml").read_text())
 
 
 if __name__ == "__main__":

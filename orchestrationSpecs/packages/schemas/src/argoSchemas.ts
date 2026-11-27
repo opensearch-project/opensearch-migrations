@@ -263,8 +263,15 @@ export const ARGO_RFS_OPTIONS = makeOptionalDefaultedFieldsRequired(
     dropRefinements(USER_RFS_OPTIONS.in).omit({
         documentTransforms: true,
         failedDocumentStream: true,
+        memoryScaling: true,
         ...OTEL_EXPORT_CONTROL_FIELD_MASK,
     }).extend({
+        // The user-facing memoryScaling block is lowered by the config processor to a precomputed
+        // tier table so neither Argo expressions nor bash ever do quantity arithmetic. Absent
+        // means the memory-tier scaling feature is entirely off.
+        memoryScalingTierTable: z.array(z.string()).optional()
+            .describe("Resolved per-tier memory quantities [start, start×growthFactor, …], last entry " +
+                "clamped to exactly memoryScaling.maxMemory. Index == tier number."),
         // The user-facing failedDocumentStream union is lowered to the flat arguments consumed by RFS.
         failedDocumentStreamS3Prefix: z.string().default("rfs-failed-document-stream/").optional()
             .describe("Resolved S3 key prefix passed to RFS."),
@@ -303,6 +310,10 @@ export const ARGO_RFS_WORKFLOW_OPTION_KEYS = [
     "resources",
     "fileSourceVolumes",
     "fileSourceVolumeMounts",
+    // Memory-tier scaling is fleet policy, consumed by the workflow/monitor — the RFS process
+    // only ever receives its single opaque tier via RFS_WORKER_MEMORY_TIER.
+    "maxTotalPods",
+    "memoryScalingTierTable",
 ] as const satisfies readonly (keyof z.infer<typeof ARGO_RFS_OPTIONS>)[];
 
 // Fields config lowering adds on top of the user-facing proxy schema, named as a

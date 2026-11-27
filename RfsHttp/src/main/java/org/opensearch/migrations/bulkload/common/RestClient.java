@@ -223,6 +223,7 @@ public class RestClient {
                 )
             )
             .doOnError(t -> {
+                FatalErrors.haltIfFatal(t);
                 if (context != null) {
                     context.addTraceException(t, true);
                 }

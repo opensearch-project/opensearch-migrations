@@ -1,0 +1,540 @@
+{
+  "apiVersion": "argoproj.io/v1alpha1",
+  "kind": "WorkflowTemplate",
+  "metadata": {
+    "name": "rfs-backfill"
+  },
+  "spec": {
+    "serviceAccountName": "argo-workflow-executor",
+    "parallelism": 100,
+    "arguments": {
+      "parameters": [
+        {
+          "name": "s3SnapshotConfigMap",
+          "value": "s3-snapshot-config"
+        },
+        {
+          "name": "gcsSnapshotConfigMap",
+          "value": "gcs-snapshot-config"
+        },
+        {
+          "name": "imageConfigMapName",
+          "value": "migration-image-config"
+        },
+        {
+          "name": "migrationRunNumber",
+          "value": "0"
+        },
+        {
+          "name": "workflowScriptsRoot",
+          "value": "/root/workflows/.workflowScripts"
+        }
+      ]
+    },
+    "templates": [
+      {
+        "name": "rendertierpolicy",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "sessionName"
+            },
+            {
+              "name": "crdName"
+            },
+            {
+              "name": "crdUid"
+            },
+            {
+              "name": "tierTableJson"
+            },
+            {
+              "name": "maxTotalPods"
+            },
+            {
+              "name": "imageMigrationConsoleLocation"
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy"
+            }
+          ]
+        },
+        "container": {
+          "env": [
+            {
+              "name": "SESSION_NAME",
+              "value": "{{inputs.parameters.sessionName}}"
+            },
+            {
+              "name": "SNAPSHOT_MIGRATION_NAME",
+              "value": "{{inputs.parameters.crdName}}"
+            },
+            {
+              "name": "SM_UID",
+              "value": "{{inputs.parameters.crdUid}}"
+            },
+            {
+              "name": "TIER_TABLE_JSON",
+              "value": "{{inputs.parameters.tierTableJson}}"
+            },
+            {
+              "name": "MAX_TOTAL_PODS",
+              "value": "{{inputs.parameters.maxTotalPods}}"
+            },
+            {
+              "name": "TIER_POLICY_CONFIGMAP",
+              "value": "{{=inputs.parameters.sessionName+'-rfs-tier-policy'}}"
+            },
+            {
+              "name": "TIER0_WORKLOAD_NAME",
+              "value": "{{=inputs.parameters.sessionName+'-rfs'+'-t0'}}"
+            },
+            {
+              "name": "RFS_MEMORY_TIER_LABEL",
+              "value": "migrations.opensearch.org/rfs-memory-tier"
+            },
+            {
+              "name": "BULK_LOADER_CONTAINER",
+              "value": "bulk-loader"
+            },
+            {
+              "name": "WORKFLOW_SCRIPTS_ROOT",
+              "value": "{{workflow.parameters.workflowScriptsRoot}}"
+            }
+          ],
+          "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+          "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+          "resources": {
+            "limits": {
+              "cpu": "500m",
+              "memory": "500Mi"
+            },
+            "requests": {
+              "cpu": "500m",
+              "memory": "500Mi"
+            }
+          },
+          "command": [
+            "/bin/bash",
+            "-lc"
+          ],
+          "args": [
+            "exec \"${WORKFLOW_SCRIPTS_ROOT}/renderRfsTierPolicy.sh\""
+          ]
+        },
+        "metadata": {
+          "annotations": {
+            "karpenter.sh/do-not-disrupt": "true"
+          }
+        },
+        "retryStrategy": {
+          "limit": "3",
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "setupandrunrfsbackfill",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "sourceVersion"
+            },
+            {
+              "name": "sourceLabel"
+            },
+            {
+              "name": "targetConfig"
+            },
+            {
+              "name": "snapshotConfig"
+            },
+            {
+              "name": "sessionName"
+            },
+            {
+              "name": "documentBackfillConfig"
+            },
+            {
+              "name": "migrationLabel"
+            },
+            {
+              "name": "crdName"
+            },
+            {
+              "name": "crdUid"
+            },
+            {
+              "name": "configChecksum"
+            },
+            {
+              "name": "checksumForReplayer"
+            },
+            {
+              "name": "imageReindexFromSnapshotLocation"
+            },
+            {
+              "name": "imageReindexFromSnapshotPullPolicy"
+            },
+            {
+              "name": "imageMigrationConsoleLocation"
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy"
+            },
+            {
+              "name": "imageCoordinatorClusterLocation"
+            },
+            {
+              "name": "imageCoordinatorClusterPullPolicy"
+            }
+          ]
+        },
+        "steps": [
+          [
+            {
+              "templateRef": {
+                "template": "getconsoleconfig",
+                "name": "migration-console"
+              },
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "snapshotConfig",
+                    "value": "{{inputs.parameters.snapshotConfig}}"
+                  },
+                  {
+                    "name": "targetConfig",
+                    "value": "{{=((!(fromJSON(inputs.parameters.documentBackfillConfig)['useTargetClusterForWorkCoordination'])) ? (toJSON(sprig.dict(\"endpoint\", 'https://'+inputs.parameters.sessionName+'-rfs-coordinator'+':9200', \"label\", inputs.parameters.sessionName+'-rfs-coordinator', \"allowInsecure\", true, \"authConfig\", sprig.dict(\"basic\", sprig.dict(\"secretName\", inputs.parameters.sessionName+'-rfs-coordinator'+'-creds'))))) : (inputs.parameters.targetConfig))}}"
+                  },
+                  {
+                    "name": "backfillSession",
+                    "value": "{{=(('memoryScalingTierTable' in fromJSON(inputs.parameters.documentBackfillConfig)) ? (toJSON(sprig.dict(\"sessionName\", inputs.parameters.sessionName, \"deploymentName\", inputs.parameters.sessionName+'-rfs', \"memoryScaling\", sprig.dict(\"tiers\", fromJSON(inputs.parameters.documentBackfillConfig)['memoryScalingTierTable'], \"max_total_pods\", sprig.dig('maxTotalPods', fromJSON(inputs.parameters.documentBackfillConfig)['podReplicas'], fromJSON(inputs.parameters.documentBackfillConfig)))))) : (toJSON(sprig.dict(\"sessionName\", inputs.parameters.sessionName, \"deploymentName\", inputs.parameters.sessionName+'-rfs'))))}}"
+                  }
+                ]
+              },
+              "name": "setupRfsConsoleConfig"
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "applyrfsdonecronjob",
+                "name": "document-bulk-load"
+              },
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "sessionName",
+                    "value": "{{inputs.parameters.sessionName}}"
+                  },
+                  {
+                    "name": "crdName",
+                    "value": "{{inputs.parameters.crdName}}"
+                  },
+                  {
+                    "name": "crdUid",
+                    "value": "{{inputs.parameters.crdUid}}"
+                  },
+                  {
+                    "name": "configChecksum",
+                    "value": "{{inputs.parameters.configChecksum}}"
+                  },
+                  {
+                    "name": "checksumForReplayer",
+                    "value": "{{inputs.parameters.checksumForReplayer}}"
+                  },
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
+                  {
+                    "name": "usesDedicatedCoordinator",
+                    "value": "{{=((!(fromJSON(inputs.parameters.documentBackfillConfig)['useTargetClusterForWorkCoordination'])) ? ('true') : ('false'))}}"
+                  },
+                  {
+                    "name": "fromSnapshotMigrationK8sLabel",
+                    "value": "{{inputs.parameters.migrationLabel}}"
+                  },
+                  {
+                    "name": "consoleConfigContents",
+                    "value": "{{steps.setupRfsConsoleConfig.outputs.parameters.configContents}}"
+                  },
+                  {
+                    "name": "memoryScalingEnabled",
+                    "value": "{{=(('memoryScalingTierTable' in fromJSON(inputs.parameters.documentBackfillConfig)) ? ('true') : (''))}}"
+                  },
+                  {
+                    "name": "tierPolicyConfigMap",
+                    "value": "{{=(('memoryScalingTierTable' in fromJSON(inputs.parameters.documentBackfillConfig)) ? (inputs.parameters.sessionName+'-rfs-tier-policy') : (''))}}"
+                  }
+                ]
+              },
+              "name": "applyRfsDoneCronJob"
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "createrfscoordinator",
+                "name": "rfs-coordinator-cluster"
+              },
+              "when": "{{=!(fromJSON(inputs.parameters.documentBackfillConfig)['useTargetClusterForWorkCoordination'])}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "clusterName",
+                    "value": "{{=inputs.parameters.sessionName+'-rfs-coordinator'}}"
+                  },
+                  {
+                    "name": "coordinatorImage",
+                    "value": "{{inputs.parameters.imageCoordinatorClusterLocation}}"
+                  },
+                  {
+                    "name": "ownerName",
+                    "value": "{{inputs.parameters.crdName}}"
+                  },
+                  {
+                    "name": "ownerUid",
+                    "value": "{{inputs.parameters.crdUid}}"
+                  },
+                  {
+                    "name": "minPodReplicas",
+                    "value": "{{=((sprig.dig('minPodReplicas', 0, fromJSON(inputs.parameters.documentBackfillConfig)) > 0) ? (1) : (0))}}"
+                  },
+                  {
+                    "name": "sourceK8sLabel",
+                    "value": "{{inputs.parameters.sourceLabel}}"
+                  },
+                  {
+                    "name": "targetK8sLabel",
+                    "value": "{{=jsonpath(inputs.parameters.targetConfig, '$.label')}}"
+                  },
+                  {
+                    "name": "snapshotK8sLabel",
+                    "value": "{{=jsonpath(inputs.parameters.snapshotConfig, '$.label')}}"
+                  },
+                  {
+                    "name": "fromSnapshotMigrationK8sLabel",
+                    "value": "{{inputs.parameters.migrationLabel}}"
+                  }
+                ]
+              },
+              "name": "createRfsCoordinator"
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "starthistoricalbackfillfromconfig",
+                "name": "document-bulk-load"
+              },
+              "when": "{{=!('memoryScalingTierTable' in fromJSON(inputs.parameters.documentBackfillConfig))}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "sessionName",
+                    "value": "{{inputs.parameters.sessionName}}"
+                  },
+                  {
+                    "name": "sourceVersion",
+                    "value": "{{inputs.parameters.sourceVersion}}"
+                  },
+                  {
+                    "name": "sourceLabel",
+                    "value": "{{inputs.parameters.sourceLabel}}"
+                  },
+                  {
+                    "name": "snapshotConfig",
+                    "value": "{{inputs.parameters.snapshotConfig}}"
+                  },
+                  {
+                    "name": "targetConfig",
+                    "value": "{{inputs.parameters.targetConfig}}"
+                  },
+                  {
+                    "name": "documentBackfillConfig",
+                    "value": "{{inputs.parameters.documentBackfillConfig}}"
+                  },
+                  {
+                    "name": "migrationLabel",
+                    "value": "{{inputs.parameters.migrationLabel}}"
+                  },
+                  {
+                    "name": "crdName",
+                    "value": "{{inputs.parameters.crdName}}"
+                  },
+                  {
+                    "name": "crdUid",
+                    "value": "{{inputs.parameters.crdUid}}"
+                  },
+                  {
+                    "name": "imageReindexFromSnapshotLocation",
+                    "value": "{{inputs.parameters.imageReindexFromSnapshotLocation}}"
+                  },
+                  {
+                    "name": "imageReindexFromSnapshotPullPolicy",
+                    "value": "{{inputs.parameters.imageReindexFromSnapshotPullPolicy}}"
+                  },
+                  {
+                    "name": "rfsCoordinatorConfig",
+                    "value": "{{=((!(fromJSON(inputs.parameters.documentBackfillConfig)['useTargetClusterForWorkCoordination'])) ? (toJSON(sprig.dict(\"endpoint\", 'https://'+inputs.parameters.sessionName+'-rfs-coordinator'+':9200', \"label\", inputs.parameters.sessionName+'-rfs-coordinator', \"allowInsecure\", true, \"authConfig\", sprig.dict(\"basic\", sprig.dict(\"secretName\", inputs.parameters.sessionName+'-rfs-coordinator'+'-creds'))))) : (inputs.parameters.targetConfig))}}"
+                  }
+                ]
+              },
+              "name": "startHistoricalBackfillFromConfig"
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "starttierzerobackfillfromconfig",
+                "name": "document-bulk-load"
+              },
+              "when": "{{='memoryScalingTierTable' in fromJSON(inputs.parameters.documentBackfillConfig)}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "sessionName",
+                    "value": "{{inputs.parameters.sessionName}}"
+                  },
+                  {
+                    "name": "sourceVersion",
+                    "value": "{{inputs.parameters.sourceVersion}}"
+                  },
+                  {
+                    "name": "sourceLabel",
+                    "value": "{{inputs.parameters.sourceLabel}}"
+                  },
+                  {
+                    "name": "snapshotConfig",
+                    "value": "{{inputs.parameters.snapshotConfig}}"
+                  },
+                  {
+                    "name": "targetConfig",
+                    "value": "{{inputs.parameters.targetConfig}}"
+                  },
+                  {
+                    "name": "documentBackfillConfig",
+                    "value": "{{inputs.parameters.documentBackfillConfig}}"
+                  },
+                  {
+                    "name": "migrationLabel",
+                    "value": "{{inputs.parameters.migrationLabel}}"
+                  },
+                  {
+                    "name": "crdName",
+                    "value": "{{inputs.parameters.crdName}}"
+                  },
+                  {
+                    "name": "crdUid",
+                    "value": "{{inputs.parameters.crdUid}}"
+                  },
+                  {
+                    "name": "imageReindexFromSnapshotLocation",
+                    "value": "{{inputs.parameters.imageReindexFromSnapshotLocation}}"
+                  },
+                  {
+                    "name": "imageReindexFromSnapshotPullPolicy",
+                    "value": "{{inputs.parameters.imageReindexFromSnapshotPullPolicy}}"
+                  },
+                  {
+                    "name": "rfsCoordinatorConfig",
+                    "value": "{{=((!(fromJSON(inputs.parameters.documentBackfillConfig)['useTargetClusterForWorkCoordination'])) ? (toJSON(sprig.dict(\"endpoint\", 'https://'+inputs.parameters.sessionName+'-rfs-coordinator'+':9200', \"label\", inputs.parameters.sessionName+'-rfs-coordinator', \"allowInsecure\", true, \"authConfig\", sprig.dict(\"basic\", sprig.dict(\"secretName\", inputs.parameters.sessionName+'-rfs-coordinator'+'-creds'))))) : (inputs.parameters.targetConfig))}}"
+                  }
+                ]
+              },
+              "name": "startTierZeroBackfillFromConfig"
+            }
+          ],
+          [
+            {
+              "template": "rendertierpolicy",
+              "when": "{{='memoryScalingTierTable' in fromJSON(inputs.parameters.documentBackfillConfig)}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "sessionName",
+                    "value": "{{inputs.parameters.sessionName}}"
+                  },
+                  {
+                    "name": "crdName",
+                    "value": "{{inputs.parameters.crdName}}"
+                  },
+                  {
+                    "name": "crdUid",
+                    "value": "{{inputs.parameters.crdUid}}"
+                  },
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
+                  {
+                    "name": "tierTableJson",
+                    "value": "{{=toJSON(fromJSON(inputs.parameters.documentBackfillConfig)['memoryScalingTierTable'])}}"
+                  },
+                  {
+                    "name": "maxTotalPods",
+                    "value": "{{=sprig.dig('maxTotalPods', fromJSON(inputs.parameters.documentBackfillConfig)['podReplicas'], fromJSON(inputs.parameters.documentBackfillConfig))}}"
+                  }
+                ]
+              },
+              "name": "renderTierPolicy"
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "waitindefinitelyforsnapshotmigration",
+                "name": "resource-management"
+              },
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "configChecksum",
+                    "value": "{{inputs.parameters.configChecksum}}"
+                  },
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.crdName}}"
+                  },
+                  {
+                    "name": "checksumField",
+                    "value": "configChecksum"
+                  }
+                ]
+              },
+              "name": "waitIndefinitelyForSnapshotMigration"
+            }
+          ]
+        ],
+        "outputs": {
+          "parameters": []
+        }
+      }
+    ]
+  }
+}

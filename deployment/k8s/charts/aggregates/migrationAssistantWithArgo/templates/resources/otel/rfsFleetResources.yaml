@@ -1,0 +1,51 @@
+{{- if and .Values.aws.configureAwsEksResources .Values.metrics.enabled .Values.metrics.cloudWatch.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rfs-fleet-resource-sampler
+  namespace: {{ .Release.Namespace }}
+data:
+  rfs_fleet_resources.py: |
+{{ .Files.Get "files/metrics/rfs_fleet_resources.py" | indent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rfs-fleet-resource-sampler
+  namespace: {{ .Release.Namespace }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: rfs-fleet-resource-sampler
+  template:
+    metadata:
+      labels:
+        app: rfs-fleet-resource-sampler
+      annotations:
+        checksum/script: {{ .Files.Get "files/metrics/rfs_fleet_resources.py" | sha256sum }}
+    spec:
+      serviceAccountName: {{ .Values.otelConfiguration.serviceAccountName }}
+      containers:
+        - name: sampler
+          image: {{ include "migration.image" (dict "root" . "image" .Values.images.migrationConsole) }}
+          imagePullPolicy: {{ .Values.images.migrationConsole.pullPolicy }}
+          command: ["python", "/metrics/rfs_fleet_resources.py"]
+          env:
+            - name: OTLP_ENDPOINT
+              value: http://otel-collector:4318/v1/metrics
+          resources:
+            requests:
+              cpu: 25m
+              memory: 64Mi
+          volumeMounts:
+            - name: script
+              mountPath: /metrics
+              readOnly: true
+      volumes:
+        - name: script
+          configMap:
+            name: rfs-fleet-resource-sampler
+{{- end }}

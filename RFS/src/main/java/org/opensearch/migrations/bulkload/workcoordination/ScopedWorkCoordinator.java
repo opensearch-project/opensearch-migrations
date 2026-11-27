@@ -58,6 +58,18 @@ public class ScopedWorkCoordinator {
             }
 
             @Override
+            public T onNoWorkLeftToAcquire() throws IOException {
+                log.info("No incomplete work remains anywhere.");
+                return visitor.onNoWorkLeftToAcquire();
+            }
+
+            @Override
+            public T onLeaseCapReached() throws IOException {
+                log.info("This tier's lease cap has been reached; idling.");
+                return visitor.onLeaseCapReached();
+            }
+
+            @Override
             public T onAcquiredWork(IWorkCoordinator.WorkItemAndDuration workItem) throws IOException,
                 InterruptedException {
                 var workItemId = workItem.getWorkItem().toString();
