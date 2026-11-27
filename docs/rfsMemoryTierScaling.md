@@ -226,14 +226,14 @@ witness is the component that already watches the fleet:
 
 1. The monitor's pod LIST (which it already performs each sweep) carries
    `lastState.terminated.reason == OOMKilled` with the dead container's `startedAt`/`finishedAt`.
-2. Instance ids begin with the container-start epoch, so the dead holder is simply the dirty
-   lease on that pod whose instance timestamp falls inside the dead container's lifetime
-   (± small skew; same node clock). No tick-over-tick holder tracking.
-3. The monitor patches one pod annotation,
-   `migrations.opensearch.org/rfs-predecessor-crashes: <instanceId>=OOMKilled` (merged,
-   length-capped, idempotent — one small PATCH per actual kernel OOM).
-4. A downward-API volume projects that annotation into the container as the
-   `RFS_CRASH_EVIDENCE_FILE`; the kubelet rewrites the file in place when the annotation changes.
+2. The monitor matches the pod name in the shard lease's holder ID (`<podName>_<instanceId>`)
+   to the pod reporting the OOM. It checks that the instance timestamp falls within the
+   terminated container's lifetime, allowing for a small skew at startup.
+3. On that same worker pod, the monitor appends `<instanceId>=OOMKilled` to the
+   `migrations.opensearch.org/rfs-predecessor-crashes` annotation. It keeps the eight most
+   recent entries and skips the PATCH when the evidence is already present.
+4. The kubelet projects the updated annotation into `RFS_CRASH_EVIDENCE_FILE` in the
+   restarted container on that pod.
 5. The restarted supervisor finds the open ledger entry with no outcome and **waits bounded**
    (`RFS_EVIDENCE_WAIT_SECONDS`, default 120 s — one monitor tick plus downward-API propagation)
    for the file to name that instance before launching, so the first post-OOM sweep escalates
