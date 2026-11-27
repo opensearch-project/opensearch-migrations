@@ -137,7 +137,8 @@ ensure_eks_buildx_builder() {
   require_eks_context
 
   context="$(get_k8s_build_context)"
-  builder_name="builder-${context//[^a-zA-Z0-9_-]/-}"
+  # -pinned: builders from before pinning follow the ambient context; never reuse or rm one.
+  builder_name="builder-${context//[^a-zA-Z0-9_-]/-}${KUBE_CONTEXT:+-pinned}"
   namespace="${BUILDKIT_NAMESPACE:-buildkit}"
   local build_timeout="${BUILDKIT_BOOTSTRAP_TIMEOUT:-900s}"
   local timeout_seconds
@@ -146,6 +147,15 @@ ensure_eks_buildx_builder() {
   if [[ ! "${max_attempts}" =~ ^[0-9]+$ ]]; then
     echo "ERROR: BUILDKIT_BOOTSTRAP_ATTEMPTS must be a non-negative integer." >&2
     return 1
+  fi
+
+  # The kubernetes driver has no context option. It records $KUBECONFIG at create time and always
+  # uses that file's current-context, so give the builder a kubeconfig holding only KUBE_CONTEXT.
+  local builder_kubeconfig="${KUBECONFIG:-}"
+  if [[ -n "${KUBE_CONTEXT:-}" ]]; then
+    builder_kubeconfig="${BUILDKIT_KUBECONFIG_DIR:-${HOME}/.kube/buildx}/${builder_name}.kubeconfig"
+    (umask 077 && mkdir -p "$(dirname "${builder_kubeconfig}")" &&
+      kubectl config view --minify --flatten --context="${KUBE_CONTEXT}" > "${builder_kubeconfig}") || return 1
   fi
 
   docker buildx rm "${builder_name}" 2>/dev/null || true
@@ -158,7 +168,7 @@ ensure_eks_buildx_builder() {
     --driver-opt="limits.memory=${BUILDKIT_LIMITS_MEMORY:-16Gi}"
   )
 
-  docker buildx create \
+  KUBECONFIG="${builder_kubeconfig}" docker buildx create \
     --name="${builder_name}" \
     --driver=kubernetes \
     --platform=linux/amd64 \
@@ -169,7 +179,7 @@ ensure_eks_buildx_builder() {
     "${BUILDKIT_RESOURCE_OPTS[@]}" \
     ${BUILDKIT_IMAGE:+--driver-opt="image=${BUILDKIT_IMAGE}"}
 
-  docker buildx create \
+  KUBECONFIG="${builder_kubeconfig}" docker buildx create \
     --append \
     --name="${builder_name}" \
     --driver=kubernetes \
@@ -181,7 +191,7 @@ ensure_eks_buildx_builder() {
     "${BUILDKIT_RESOURCE_OPTS[@]}" \
     ${BUILDKIT_IMAGE:+--driver-opt="image=${BUILDKIT_IMAGE}"}
 
-  docker buildx use "${builder_name}"
+  export BUILDX_BUILDER="${builder_name}"  # scoped to this shell; `docker buildx use` is global
   echo "BUILDX_BUILDER=${builder_name}"
   echo "Bootstrapping builder..."
 

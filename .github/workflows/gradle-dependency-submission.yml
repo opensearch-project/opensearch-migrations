@@ -1,0 +1,28 @@
+name: Gradle Dependency Submission
+
+# Submits the resolved Gradle dependency graph, including transitive JARs, to GitHub so that
+# Dependabot alerts cover Maven dependencies. It runs only on main because submitting needs
+# contents: write, and PR code must not run with that permission.
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-submission:
+    if: github.repository == 'opensearch-project/opensearch-migrations'
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write # required by the Dependency Submission API
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
+        with:
+          java-version: 21
+          distribution: "corretto"
+      - uses: gradle/actions/dependency-submission@ed408507eac070d1f99cc633dbcf757c94c7933a # v4

@@ -76,5 +76,5 @@ The viewer tree itself always reflects the fully resolved schema, so all informa
 `.github/workflows/deploy-schema-viewer.yml` triggers on:
 
 - **Push to `main`** touching `schema-viewer/**` — for viewer code changes
-- **Release published** — picks up the new schema and redeploys
+- **Release published or promoted from pre-release** — picks up the new schema and redeploys
 - **Manual** via `workflow_dispatch`

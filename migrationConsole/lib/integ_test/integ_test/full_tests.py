@@ -50,6 +50,8 @@ def initialize(request):
     assert target_con_result.connection_established is True
 
     # Clear the clusters directly, so the cleanup isn't captured by the proxy and replayed onto the target.
+    # replayer_tests.py's setup_replayer fixture does the same; its configured source is the capture proxy
+    # itself, so it clears the proxy's backend cluster through its direct endpoint.
     clear_cluster(source_cluster, snapshot)
     clear_cluster(target_cluster)
 

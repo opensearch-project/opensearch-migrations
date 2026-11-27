@@ -57,7 +57,7 @@ exports[`resolved migration resources extracts resolved resource parameters from
           "type": "persistent-claim",
         },
       },
-      "version": "4.0.0",
+      "version": "4.2.2",
     },
   },
   {
@@ -129,6 +129,7 @@ exports[`resolved migration resources extracts resolved resource parameters from
       "sourceEndpoint": "https://source.example.com",
       "sourceLabel": "source",
       "sourceVersion": "ES 7.10.2",
+      "sslProtocols": "TLSv1.3,TLSv1.2",
       "suppressCaptureForHeaderMatch": [],
       "suppressCaptureForMethod": "",
       "suppressCaptureForUriPath": "",

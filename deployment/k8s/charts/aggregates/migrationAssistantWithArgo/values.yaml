@@ -515,7 +515,7 @@ awsPrivateCA:
 charts:
 
   cert-manager:
-    version: 1.17.2
+    version: 1.17.4
     repository: https://charts.jetstack.io
     values:
       crds:
@@ -578,7 +578,7 @@ charts:
           limits:   { cpu: 100m, memory: 128Mi }
 
   aws-privateca-issuer:
-    version: "1.4.0"
+    version: "1.4.1"
     repository: "https://cert-manager.github.io/aws-privateca-issuer"
     dependsOn: cert-manager
     values:
@@ -589,7 +589,7 @@ charts:
         limits:   { cpu: 100m, memory: 128Mi }
 
   ack-acmpca-controller:
-    version: "1.2.2"
+    version: "1.8.0"
     repository: "oci://public.ecr.aws/aws-controllers-k8s/acmpca-chart"
     dependsOn: cert-manager
     values:
@@ -597,7 +597,7 @@ charts:
         name: ack-acmpca-controller
 
   ack-cloudwatch-controller:
-    version: "1.4.2"
+    version: "1.12.0"
     repository: "oci://public.ecr.aws/aws-controllers-k8s/cloudwatch-chart"
     deletionPolicy: delete
     values:
@@ -624,7 +624,7 @@ charts:
 
 
   strimzi-kafka-operator:
-    version: 0.50.1
+    version: 1.3.1
     repository: "https://strimzi.io/charts/"
     values:
       storageType: ephemeral # strimzi is stateless
@@ -748,9 +748,12 @@ charts:
           name: argo-workflow-executor
 
   fluent-bit:
-    version: "0.51.0"
+    version: "0.58.3"
     repository: "https://fluent.github.io/helm-charts"
     values:
+      # Chart 0.58.3 defaults to 5.1.3; 5.2.0 has newer Debian security fixes. Keep in sync with the ECR manifest.
+      image:
+        tag: "5.2.0"
       resources:
         requests: { cpu: 50m, memory: 32Mi }
         limits:   { cpu: 200m, memory: 64Mi }
@@ -901,9 +904,16 @@ charts:
   # Will likely be required for auto-scaling.
   # Notice that we don't install otel-collector yet, so we can't take advantage of this anyway.
   kube-prometheus-stack:
-    version: "72.0.0"
+    version: "93.10.0"
     repository: "https://prometheus-community.github.io/helm-charts"
     values:
+      crds:
+        # Helm never upgrades CRDs, and they outlive an MA uninstall; this hook applies the chart's CRDs.
+        upgradeJob:
+          enabled: true
+          image:
+            kubectl:
+              tag: "v1.35.3"  # mirrored tag; the chart default follows the cluster version
       prometheus:
         prometheusSpec:
           serviceMonitorSelector: { }  # Select all ServiceMonitors
@@ -962,15 +972,18 @@ charts:
           limits:   { cpu: 100m, memory: 32Mi }
       grafana:
         image:
-          tag: "11.6.13"
+          tag: "13.3.2-distroless"
+        # Grafana 13 uses ~290Mi; a 256Mi limit OOM-kills it at startup.
         resources:
-          requests: { cpu: 100m, memory: 128Mi }
-          limits:   { cpu: 500m, memory: 256Mi }
+          requests: { cpu: 100m, memory: 384Mi }
+          limits:   { cpu: 500m, memory: 1Gi }
+        testFramework:
+          enabled: false  # never run by the installer; its bats image is not mirrored
         sidecar:
           image:
             # 1.30.11 never loads a dashboard: after loading the in-cluster config, its watches call
             # localhost:80. 2.14.1 loads them (checked on kind and EKS).
-            tag: 2.14.1
+            tag: 2.14.3
           dashboards:
             resources:
               requests: { cpu: 50m, memory: 100Mi }
@@ -1025,9 +1038,13 @@ charts:
         tag: "4.3.0"
 
   grafana:
-    version: "8.15.0"
-    repository: "https://grafana.github.io/helm-charts"
+    version: "14.5.0"
+    repository: "https://grafana-community.github.io/helm-charts"
     values:
+      image:
+        tag: "13.3.2-distroless"
+      testFramework:
+        enabled: false  # never run by the installer; its bats image is not mirrored
       ## Grafana data sources configuration
       datasources:
         datasources.yaml:

@@ -2,6 +2,7 @@ package org.opensearch.migrations.bulkload.common;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Duration;
@@ -21,6 +22,7 @@ import com.azure.storage.blob.models.ListBlobsOptions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
@@ -32,6 +34,7 @@ import static org.hamcrest.CoreMatchers.instanceOf;
 import static org.hamcrest.CoreMatchers.sameInstance;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
@@ -272,6 +275,27 @@ public class AzureRepoTest {
         assertThat(thrown.getCause(), sameInstance(azureFailure));
         assertThat(thrown.getMessage(), containsString("container-name"));
         assertThat(thrown.getMessage(), containsString("directory/snap-snap1.dat"));
+    }
+
+    @Test
+    void EnsureFileExistsLocally_DeletesFileLeftByFailedDownload(@TempDir Path tempDir) {
+        // The SDK creates the target file before the request and deletes it in a doFinally hook
+        // that can run after this thread already has the error. Model the file still being there.
+        var repo = new TestableAzureRepo(tempDir, testRepoUri, mockContainerClient, mockFileFinder);
+        String snapshotId = "snap1";
+        Path expectedPath = tempDir.resolve("snap-" + snapshotId + ".dat");
+        when(mockFileFinder.getSnapshotMetadataFilePath(tempDir, snapshotId)).thenReturn(expectedPath);
+        HttpResponse response = mock(HttpResponse.class);
+        lenient().when(response.getStatusCode()).thenReturn(404);
+        BlobStorageException azureFailure = new BlobStorageException("BlobNotFound", response, null);
+        when(mockBlobClient.downloadToFile(anyString(), Mockito.anyBoolean())).thenAnswer(invocation -> {
+            Files.createFile(Path.of(invocation.<String>getArgument(0)));
+            throw azureFailure;
+        });
+
+        assertThrows(CouldNotReadFromAzure.class, () -> repo.getSnapshotMetadataFilePath(snapshotId));
+
+        assertFalse(Files.exists(expectedPath));
     }
 
     @Test

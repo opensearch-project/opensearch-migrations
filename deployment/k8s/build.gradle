@@ -228,6 +228,19 @@ tasks.register('verifyAzureMonitorLogs', Exec) {
     dependsOn 'installHelmClient'
 }
 
+tasks.register('verifyStrimziCrdUpgrade', Exec) {
+    description = 'Validates the Strimzi CRD storage-version upgrade the dependency installer runs'
+    group = 'verification'
+    commandLine(
+            'python3',
+            layout.projectDirectory.file('scripts/verify-strimzi-crd-upgrade.py').asFile,
+            chartSourceDir.asFile,
+            '--helm',
+            helmExecutable.get().asFile
+    )
+    dependsOn 'installHelmClient'
+}
+
 tasks.register('verifyFluentBitPipeline', Exec) {
     description = 'Validates that fluent-bit can look up Kubernetes metadata for every pod on each provider'
     group = 'verification'
@@ -245,5 +258,5 @@ tasks.named('check') {
     dependsOn 'test', 'testCaptureReplayGamedayScript', 'verifyCaptureReplayObservability',
             'verifyKafkaObservability',
             'verifyHelmUninstallTeardown', 'verifyWorkloadZoneSpread', 'verifyAzureMonitorLogs',
-            'verifyFluentBitPipeline'
+            'verifyStrimziCrdUpgrade', 'verifyFluentBitPipeline'
 }

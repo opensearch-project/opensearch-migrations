@@ -34,6 +34,20 @@ a schema baked into the container image.
 helm install migration-assistant ./deployment/k8s/charts/aggregates/migrationAssistantWithArgo
 ```
 
+## Upgrading from Strimzi 0.5x releases
+
+- `helm upgrade` doesn't update CRDs, so the dependency installer migrates the
+  existing Strimzi CRDs from `v1beta2` to `v1` storage and applies the new
+  chart's CRDs before it upgrades the operator
+  ([`_strimziCrdUpgrade.tpl`](./templates/helpers/_strimziCrdUpgrade.tpl)).
+  CRDs older than Strimzi 0.49 stop the installer. Rolling back to a 0.5x
+  release afterwards isn't supported.
+- Running Kafka 4.0.0 clusters keep serving traffic, but Strimzi 1.3 no longer
+  reconciles them. Reset (`workflow reset`) capture-and-replay migrations
+  before you upgrade. Alternatively, re-submit the workflow and approve the
+  gated `KafkaCluster` version change, which rolls the brokers to 4.2.2 and
+  keeps their data.
+
 ## Configuration
 
 See `values.yaml` for the full list of configurable parameters.
