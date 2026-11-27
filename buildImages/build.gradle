@@ -37,7 +37,8 @@ def getRepoNameIfPublishing = { Map cfg ->
     return publishedRepoByImageName[imageName]
 }
 
-def correttoBase = ptc.baseImageConfig("docker.io", "library", "amazoncorretto", "21-al2023-headless")
+// Pinned by Corretto version tag and digest; keep in sync with the reindex_from_snapshot base below.
+def correttoBase = ptc.baseImageConfig("docker.io", "library", "amazoncorretto", "21.0.13-al2023-headless@sha256:f8a793166c52b283f647980492ca88312d2de60f30849c1db98b4da3015d1c9a")
 
 def defaultJvmFlags = ['-XX:MaxRAMPercentage=80.0', '-XX:+ExitOnOutOfMemoryError']
 
@@ -79,9 +80,13 @@ def buildKitProjects = [
                 contextDir: "TrafficCapture/dockerSolution/src/main/docker/elasticsearchTestConsole",
                 imageName:  "elasticsearch_test_console",
                 imageTag:   "latest",
+                // Duplicates the Dockerfile ARG default only so the Jenkins ECR pull-through-cache rewrite
+                // (ptc.rewrite) can redirect the pull. Jenkins isn't used for these builds today and this path
+                // may be removed; keep in sync with the Dockerfile default (a dependency bot is expected to
+                // update both).
                 buildArgs: [
-                        BUILDER_IMAGE: ptc.rewrite("docker.io/library/amazonlinux:2023"),
-                        RUNTIME_IMAGE: ptc.rewrite("docker.io/library/amazonlinux:2023"),
+                        BUILDER_IMAGE: ptc.rewrite("docker.io/library/amazonlinux:2023.12.20261120.0@sha256:edd3297df7d444ab9a7896b763d5305d4bab57d2fb3943e831c1713b97d32d9d"),
+                        RUNTIME_IMAGE: ptc.rewrite("docker.io/library/amazonlinux:2023.12.20261120.0@sha256:edd3297df7d444ab9a7896b763d5305d4bab57d2fb3943e831c1713b97d32d9d"),
                 ]
         ],
         [
@@ -89,8 +94,12 @@ def buildKitProjects = [
                 contextDir: "DocumentsFromSnapshotMigration/docker",
                 imageName:  "reindex_from_snapshot",
                 imageTag:   "latest",
+                // Duplicates the Dockerfile ARG default only so the Jenkins ECR pull-through-cache rewrite
+                // (ptc.rewrite) can redirect the pull. Jenkins isn't used for these builds today and this path
+                // may be removed; keep in sync with the Dockerfile default (a dependency bot is expected to
+                // update both).
                 buildArgs: [
-                        BASE_IMAGE: ptc.rewrite("docker.io/library/amazoncorretto:21-al2023-headless"),
+                        BASE_IMAGE: ptc.rewrite("docker.io/library/amazoncorretto:21.0.13-al2023-headless@sha256:f8a793166c52b283f647980492ca88312d2de60f30849c1db98b4da3015d1c9a"),
                 ],
                 requiredDependencies: [
                         ":DocumentsFromSnapshotMigration:copyDockerRuntimeJars",

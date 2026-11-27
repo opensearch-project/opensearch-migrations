@@ -155,7 +155,7 @@ def _resolve_targets(namespace, path):
 # Groups are processed in order. Within each group all matches are deleted and awaited.
 
 _STRIMZI_API = 'kafka.strimzi.io/v1'
-_STRIMZI_CORE_API = 'core.strimzi.io/v1beta2'
+_STRIMZI_CORE_API = 'core.strimzi.io/v1'
 _STRIMZI_CLUSTER_LABEL = 'strimzi.io/cluster'
 _APPS_API = 'apps/v1'
 _BATCH_API = 'batch/v1'

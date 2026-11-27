@@ -18,7 +18,7 @@ opensearch|2.32.0|https://opensearch-project.github.io/helm-charts/
 TEST_IMAGES="
 docker.elastic.co/elasticsearch/elasticsearch:8.5.1
 docker.elastic.co/elasticsearch/elasticsearch-oss:7.10.2
-public.ecr.aws/nginx/nginx:1.30-alpine
+public.ecr.aws/nginx/nginx:1.30.8-alpine3.24
 mirror.gcr.io/opensearchproject/opensearch:2.19.1
 mirror.gcr.io/library/busybox:latest
 "
