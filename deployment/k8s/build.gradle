@@ -241,9 +241,22 @@ tasks.register('verifyStrimziCrdUpgrade', Exec) {
     dependsOn 'installHelmClient'
 }
 
+tasks.register('verifyFluentBitPipeline', Exec) {
+    description = 'Validates that fluent-bit can look up Kubernetes metadata for every pod on each provider'
+    group = 'verification'
+    commandLine(
+            'python3',
+            layout.projectDirectory.file('scripts/verify-fluent-bit-pipeline.py').asFile,
+            chartSourceDir.asFile,
+            '--helm',
+            helmExecutable.get().asFile
+    )
+    dependsOn 'installHelmClient'
+}
+
 tasks.named('check') {
     dependsOn 'test', 'testCaptureReplayGamedayScript', 'verifyCaptureReplayObservability',
             'verifyKafkaObservability',
             'verifyHelmUninstallTeardown', 'verifyWorkloadZoneSpread', 'verifyAzureMonitorLogs',
-            'verifyStrimziCrdUpgrade'
+            'verifyStrimziCrdUpgrade', 'verifyFluentBitPipeline'
 }

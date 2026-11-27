@@ -828,6 +828,9 @@ charts:
               Merge_Log          On
               Merge_Log_Key      log_processed
               Annotations        Off
+              # Without a limit: pod specs over the 32k default (the chart's installer job) fail the
+              # metadata lookup, and their records are dropped because rewrite_tag cannot re-tag them.
+              Buffer_Size        0
           
           [FILTER]
               Name               rewrite_tag
