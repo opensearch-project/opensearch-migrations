@@ -26,6 +26,7 @@ export const STRIMZI_DOCUMENTED_FORBIDDEN_PREFIXES = [
     "authorizer.",
     "broker.",
     "controller",
+    "cordoned.log.dirs",
     "cruise.control.metrics.reporter.bootstrap.",
     "cruise.control.metrics.topic",
     "listener.",

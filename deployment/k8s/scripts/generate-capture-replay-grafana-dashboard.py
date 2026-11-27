@@ -494,13 +494,13 @@ def kafka_request_health():
 
 
 def kafka_request_saturation():
-    # Kafka 4.0 combined-role brokers add the broker and controller request handler idle fractions
-    # into this legacy metric; halve the sum to recover a 0..1 fraction (as the CloudWatch panel does).
+    # Since Kafka 4.2 (KIP-1207) this legacy metric divides idle time by the thread count of both the broker and
+    # controller request-handler pools, so combined-role brokers already report a 0..1 fraction (as in CloudWatch).
     busy = ('100 * (1 - avg by (pod) '
-            '(kafka_server_request_handler_idle_ratio{namespace="$namespace"}) / 2)')
+            '(kafka_server_request_handler_idle_ratio{namespace="$namespace"}))')
     return (P("Kafka broker/controller request-handler utilization (average)",
-              "Percent busy for each broker. Combined-role brokers report the sum of the broker and controller "
-              "request-handler idle fractions, so the sum is halved before it is converted to busy percent.",
+              "Percent busy for each broker, across the broker and controller request-handler pools of "
+              "combined-role brokers.",
               unit="percent", mx=100)
             .q(busy, "{{pod}}"))
 
