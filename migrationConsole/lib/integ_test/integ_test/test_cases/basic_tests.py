@@ -188,10 +188,7 @@ class Test0002SingleDocumentBackfillWithRfsCoordinatorCluster(MATestBase):
             migration["documentBackfillConfig"]["emitDocType"] = "OFF"
 
     def while_migrating(self, timeout_seconds: int):
-        self._wait_for_backfill_phase("Running", timeout_seconds)
-        backfill = self._assert_step_view_reports_backfill()
-        if backfill.get("phase") != "Running":
-            raise AssertionError(f"The backfill finished before the step view was checked: {backfill}")
+        self._check_step_view_while_running(timeout_seconds)
         self._assert_resource_view_reports_backfill()
 
     def _deployment_default_s3_bucket(self) -> str:
@@ -345,24 +342,32 @@ class Test0002SingleDocumentBackfillWithRfsCoordinatorCluster(MATestBase):
             raise AssertionError(f"Expected at most one SnapshotMigration, found {len(items)}")
         return ((items[0].get("status") or {}).get("documentBackfill") or {}) if items else {}
 
-    def _wait_for_backfill_phase(self, phase: str, timeout_seconds: int) -> dict:
-        """Wait for the backfill to report `phase`, failing as soon as it can't: the workflow ended (e.g. its
-        submit was rejected) or the backfill reached a terminal phase without passing through `phase`."""
-        deadline = time.time() + timeout_seconds
+    def _check_step_view_while_running(self, timeout_seconds: int):
+        """The monitor can report Running before Argo reaches the step that displays backfill progress."""
+        deadline = time.monotonic() + timeout_seconds
         backfill = {}
-        while time.time() < deadline:
+        step_view = ""
+        while time.monotonic() < deadline:
             backfill = self._backfill_status()
-            if backfill.get("phase") == phase:
-                return backfill
+            if backfill.get("phase") == "Running":
+                backfill, step_view = self._read_while_unchanged(workflow_status_output)
+                shown = [m.groupdict() for m in STEP_VIEW_BACKFILL.finditer(step_view)]
+                if backfill.get("phase") == "Running" and shown:
+                    if len(shown) != 1 or shown[0]["step_phase"] not in ("Pending", "Running"):
+                        raise AssertionError(f"Expected one unfinished step showing backfill progress, got {shown}")
+                    self._assert_view_matches("step view", shown[0], backfill, pct_tolerance=0.01)
+                    return
             if backfill.get("phase") in ("Completed", "CompletedWithErrors", "Failed"):
-                raise AssertionError(f"Backfill reached {backfill['phase']} without reporting {phase}: {backfill}")
+                raise AssertionError(f"Backfill finished before its wait step could be checked: {backfill}. "
+                                     f"Last step view: {step_view}")
             workflow = self.argo_service.get_workflow_status(self.workflow_name)
             workflow_phase = workflow.value.get("phase", "") if workflow.success else ""
             if workflow_phase in ENDING_ARGO_PHASES:
-                raise AssertionError(f"Workflow {self.workflow_name} ended {workflow_phase} before the backfill "
-                                     f"reported {phase}. Last status: {backfill}")
+                raise AssertionError(f"Workflow {self.workflow_name} ended {workflow_phase} before its backfill "
+                                     f"wait step could be checked. Last status: {backfill}")
             time.sleep(5)
-        raise AssertionError(f"Backfill never reported {phase} within {timeout_seconds}s. Last status: {backfill}")
+        raise AssertionError(f"No running backfill with a wait step within {timeout_seconds}s. "
+                             f"Last status: {backfill}. Last step view: {step_view}")
 
     def _read_while_unchanged(self, read):
         """Run `read` between two reads of the backfill status that agree, so the monitor's once-a-minute
@@ -373,19 +378,6 @@ class Test0002SingleDocumentBackfillWithRfsCoordinatorCluster(MATestBase):
             if self._backfill_status() == before:
                 return before, result
         raise AssertionError("SnapshotMigration.status.documentBackfill kept changing during `workflow status`")
-
-    def _assert_step_view_reports_backfill(self) -> dict:
-        """The step view shows the backfill status on the step still waiting for it. Returns the status."""
-        def read():
-            return [m.groupdict() for m in STEP_VIEW_BACKFILL.finditer(workflow_status_output())]
-        backfill, shown = self._read_while_unchanged(read)
-        if len(shown) != 1:
-            raise AssertionError(f"Expected one backfill status in the step view, found {shown}. Status: {backfill}")
-        self._assert_view_matches("step view", shown[0], backfill, pct_tolerance=0.01)
-        # The wait retries in a fresh pod each attempt, so between attempts the step is Pending.
-        if shown[0]["step_phase"] not in ("Pending", "Running"):
-            raise AssertionError(f"The step waiting for the backfill has already finished: {shown[0]}")
-        return backfill
 
     def _assert_resource_view_reports_backfill(self) -> dict:
         """The resource view shows the backfill status under the SnapshotMigration. Returns the status."""
